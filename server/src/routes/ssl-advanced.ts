@@ -92,6 +92,33 @@ router.get('/test/:domain', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── ACME HTTP-01 challenge reachability check ──────────── */
+
+router.get('/acme-check/:domain', async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+
+  const testToken = `hostpanel_test_${Date.now()}`;
+  const challengeDir = `/var/www/${domain}/public_html/.well-known/acme-challenge`;
+  const testFile = `${challengeDir}/${testToken}`;
+
+  try {
+    await execAsync(`mkdir -p "${challengeDir}" && echo "ok" > "${testFile}"`);
+
+    // Wait briefly then probe via HTTP
+    await new Promise(r => setTimeout(r, 500));
+    const { stdout, stderr } = await execAsync(`curl -sL --max-time 10 "http://${domain}/.well-known/acme-challenge/${testToken}" 2>&1`);
+    const reachable = stdout.trim() === 'ok';
+
+    await execAsync(`rm -f "${testFile}"`).catch(() => {});
+
+    res.json({ domain, reachable, response: stdout.trim(), note: reachable ? 'HTTP-01 challenge path is accessible — certificate issuance should work.' : 'Challenge path not reachable. Check DNS, firewall, and webroot.' });
+  } catch (err: any) {
+    await execAsync(`rm -f "${testFile}"`).catch(() => {});
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ── Certificate auto-renew status ───────────────────────── */
 
 router.get('/renew-status', async (_req: Request, res: Response) => {

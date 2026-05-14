@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Power, Trash2, Download, Zap } from 'lucide-react';
+import { RefreshCw, Power, Trash2, Download, Zap, Upload } from 'lucide-react';
+import { useRef } from 'react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/wordpress${p}`, {
@@ -13,12 +14,16 @@ export default function WordPressManager() {
   const [info, setInfo] = useState<any>(null);
   const [plugins, setPlugins] = useState<any[]>([]);
   const [themes, setThemes] = useState<any[]>([]);
-  const [tab, setTab] = useState<'overview' | 'plugins' | 'themes' | 'tools' | 'auto-update'>('overview');
+  const [tab, setTab] = useState<'overview' | 'plugins' | 'themes' | 'tools' | 'auto-update' | 'upload'>('overview');
   const [autoUpdates, setAutoUpdates] = useState<any[]>([]);
   const [autoUpdateForm, setAutoUpdateForm] = useState({ update_core: true, update_plugins: true, update_themes: true, schedule: 'weekly' });
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
   const [srForm, setSrForm] = useState({ search: '', replace: '' });
+  const [uploading, setUploading] = useState(false);
+  const [uploadOutput, setUploadOutput] = useState('');
+  const pluginZipRef = useRef<HTMLInputElement>(null);
+  const themeZipRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []));
@@ -58,6 +63,22 @@ export default function WordPressManager() {
     toast.success(`Theme ${slug} activated`);
   }
 
+  async function uploadZip(type: 'plugins' | 'themes', file: File) {
+    setUploading(true); setUploadOutput('Uploading…');
+    const fd = new FormData();
+    fd.append('zip', file);
+    const r = await fetch(`/api/wordpress/${selected}/${type}/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` },
+      body: fd,
+    });
+    const d = await r.json();
+    setUploadOutput(d.output || d.error || 'Done');
+    if (d.error) toast.error(d.error);
+    else { toast.success(`${type === 'plugins' ? 'Plugin' : 'Theme'} uploaded and installed`); selectSite(selected); }
+    setUploading(false);
+  }
+
   async function searchReplace() {
     if (!srForm.search || !srForm.replace) return;
     setLoading(true); setOutput('Running search-replace…');
@@ -84,9 +105,9 @@ export default function WordPressManager() {
       {selected && info && (
         <>
           <div className="tab-bar">
-            {(['overview', 'plugins', 'themes', 'tools', 'auto-update'] as const).map(t => (
+            {(['overview', 'plugins', 'themes', 'tools', 'auto-update', 'upload'] as const).map(t => (
               <button key={t} className={`tab-item ${tab === t ? 'tab-item-active' : ''}`} onClick={() => setTab(t)}>
-                {t === 'auto-update' ? 'Auto-Update' : t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'auto-update' ? 'Auto-Update' : t === 'upload' ? 'Upload Zip' : t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
             ))}
           </div>
@@ -192,6 +213,36 @@ export default function WordPressManager() {
               </div>
               <button className="btn-primary" onClick={searchReplace} disabled={loading}>Run Search-Replace</button>
               {output && <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{output}</pre>}
+            </div>
+          )}
+
+          {tab === 'upload' && (
+            <div className="space-y-4">
+              <div className="card p-5 space-y-5 max-w-lg">
+                <p className="text-sm text-slate-600 dark:text-slate-400">Upload a plugin or theme as a ZIP file and install it directly into {selected}.</p>
+
+                <div>
+                  <p className="text-sm font-medium mb-2">Install Plugin</p>
+                  <input ref={pluginZipRef} type="file" accept=".zip" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadZip('plugins', f); e.target.value = ''; }} />
+                  <button className="btn-primary" onClick={() => pluginZipRef.current?.click()} disabled={uploading}>
+                    <Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Plugin ZIP'}
+                  </button>
+                </div>
+
+                <div>
+                  <p className="text-sm font-medium mb-2">Install Theme</p>
+                  <input ref={themeZipRef} type="file" accept=".zip" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadZip('themes', f); e.target.value = ''; }} />
+                  <button className="btn-primary" onClick={() => themeZipRef.current?.click()} disabled={uploading}>
+                    <Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Theme ZIP'}
+                  </button>
+                </div>
+
+                {uploadOutput && (
+                  <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{uploadOutput}</pre>
+                )}
+              </div>
             </div>
           )}
 

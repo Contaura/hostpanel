@@ -77,12 +77,13 @@ const sections: Section[] = [
   {
     label: 'Security',
     items: [
-      { to: '/ssh-keys',        icon: Key,          label: 'SSH Keys' },
-      { to: '/firewall',        icon: ShieldCheck,  label: 'Firewall & IPs' },
-      { to: '/htpasswd',        icon: Lock,         label: 'Protected Dirs' },
-      { to: '/security',        icon: Shield,       label: 'Security Center' },
-      { to: '/waf',             icon: ShieldAlert,  label: 'WAF & Fail2Ban' },
-      { to: '/audit-log',       icon: ClipboardList, label: 'Audit Log' },
+      { to: '/ssh-keys',          icon: Key,          label: 'SSH Keys' },
+      { to: '/firewall',          icon: ShieldCheck,  label: 'Firewall & IPs' },
+      { to: '/htpasswd',          icon: Lock,         label: 'Protected Dirs' },
+      { to: '/security',          icon: Shield,       label: 'Security Center' },
+      { to: '/waf',               icon: ShieldAlert,  label: 'WAF & Fail2Ban' },
+      { to: '/security-scanner',  icon: ShieldAlert,  label: 'Security Scanner' },
+      { to: '/audit-log',         icon: ClipboardList, label: 'Audit Log' },
     ],
   },
   {
@@ -102,6 +103,7 @@ const sections: Section[] = [
       { to: '/wordpress',       icon: BrainCircuit,   label: 'WordPress Manager' },
       { to: '/node-apps',       icon: ServerCog,      label: 'Node.js / Python' },
       { to: '/server-info',     icon: Info,           label: 'Server Info' },
+      { to: '/mail-tools',      icon: MailSearch,     label: 'Mail Tools' },
     ],
   },
   {

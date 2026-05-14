@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import multer from 'multer';
+import { existsSync, unlinkSync } from 'fs';
 import db from '../db';
 
 const router = Router();
@@ -142,6 +144,36 @@ router.post('/:domain/search-replace', async (req: Request, res: Response) => {
     const { stdout } = await wp(domain, `search-replace "${search}" "${replace}" --all-tables`);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Plugin / Theme zip upload ───────────────────────────────── */
+
+const zipUpload = multer({ dest: '/tmp/', limits: { fileSize: 100 * 1024 * 1024 }, fileFilter: (_req, file, cb) => { cb(null, file.originalname.endsWith('.zip')); } });
+
+router.post('/:domain/plugins/upload', zipUpload.single('zip'), async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
+  try {
+    const { stdout } = await wp(domain, `plugin install "${req.file.path}" --activate`);
+    unlinkSync(req.file.path);
+    res.json({ output: stdout });
+  } catch (err: any) {
+    if (req.file && existsSync(req.file.path)) unlinkSync(req.file.path);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:domain/themes/upload', zipUpload.single('zip'), async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
+  try {
+    const { stdout } = await wp(domain, `theme install "${req.file.path}"`);
+    unlinkSync(req.file.path);
+    res.json({ output: stdout });
+  } catch (err: any) {
+    if (req.file && existsSync(req.file.path)) unlinkSync(req.file.path);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 /* ── Auto-update scheduler ───────────────────────────────────── */

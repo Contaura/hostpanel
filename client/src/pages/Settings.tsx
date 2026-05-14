@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server } from 'lucide-react';
+import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock } from 'lucide-react';
 
-type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay';
+type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay' | 'password-policy';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const auth = () => ({ Authorization: 'Bearer ' + token() });
@@ -24,6 +24,8 @@ export default function Settings() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [relay, setRelay] = useState({ relayhost: '', sasl_user: '', sasl_pass: '' });
   const [relayLoaded, setRelayLoaded] = useState(false);
+  const [pwPolicy, setPwPolicy] = useState({ min_length: 8, require_upper: false, require_number: false, require_special: false });
+  const [pwPolicyLoaded, setPwPolicyLoaded] = useState(false);
 
   useEffect(() => {
     api('/api/settings/').then(r => { setSettings(r.data); setLoading(false); }).catch(() => setLoading(false));
@@ -75,6 +77,23 @@ export default function Settings() {
     } catch {}
   }
 
+  async function loadPwPolicy() {
+    if (pwPolicyLoaded) return;
+    try {
+      const r = await fetch('/api/admin-users/password-policy', { headers: auth() });
+      const d = await r.json();
+      setPwPolicy({ min_length: d.min_length || 8, require_upper: !!d.require_upper, require_number: !!d.require_number, require_special: !!d.require_special });
+      setPwPolicyLoaded(true);
+    } catch {}
+  }
+
+  async function savePwPolicy() {
+    try {
+      await aput('/api/admin-users/password-policy', pwPolicy);
+      success('Password policy saved');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
   async function saveRelay() {
     try {
       await apost('/api/settings/relay', relay);
@@ -89,6 +108,7 @@ export default function Settings() {
     { id: 'billing'  as Tab, label: 'Billing',       icon: CreditCard},
     { id: 'paypal'   as Tab, label: 'PayPal',        icon: CreditCard},
     { id: 'security' as Tab, label: 'Security',      icon: Shield    },
+    { id: 'password-policy' as Tab, label: 'Password Policy', icon: Lock },
   ];
 
   if (loading) return <div className="p-6 text-slate-400">Loading…</div>;
@@ -102,7 +122,7 @@ export default function Settings() {
 
       <div className="tab-bar">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === 'relay') loadRelay(); }} className={tab === t.id ? 'tab-item-active' : 'tab-item'}>
+          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === 'relay') loadRelay(); if (t.id === 'password-policy') loadPwPolicy(); }} className={tab === t.id ? 'tab-item-active' : 'tab-item'}>
             <t.icon size={14} /> {t.label}
           </button>
         ))}
@@ -219,6 +239,36 @@ export default function Settings() {
               <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
             </label>
           </div>
+        </div>
+      )}
+
+      {/* Password Policy */}
+      {tab === 'password-policy' && (
+        <div className="card p-5 space-y-5 max-w-xl">
+          <h3 className="font-semibold text-sm flex items-center gap-2"><Lock size={15} /> Admin Password Policy</h3>
+          <p className="text-xs text-slate-500">These rules are enforced when creating or changing admin user passwords.</p>
+          <div>
+            <label className="label">Minimum Length</label>
+            <input type="number" className="input w-32" min={6} max={64} value={pwPolicy.min_length}
+              onChange={e => setPwPolicy(p => ({ ...p, min_length: parseInt(e.target.value) || 8 }))} />
+          </div>
+          <div className="space-y-3">
+            {([
+              ['require_upper', 'Require uppercase letter (A-Z)'],
+              ['require_number', 'Require digit (0-9)'],
+              ['require_special', 'Require special character (!@#$…)'],
+            ] as const).map(([k, label]) => (
+              <label key={k} className="flex items-center gap-3 cursor-pointer">
+                <div className="relative inline-flex">
+                  <input type="checkbox" className="sr-only peer" checked={pwPolicy[k]}
+                    onChange={e => setPwPolicy(p => ({ ...p, [k]: e.target.checked }))} />
+                  <div className="w-10 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </div>
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+          </div>
+          <button className="btn-primary" onClick={savePwPolicy}><Save size={14} /> Save Password Policy</button>
         </div>
       )}
 

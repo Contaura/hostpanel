@@ -120,6 +120,63 @@ router.delete('/:name', (req: AuthRequest, res: Response) => {
 });
 
 
+/* ── Backup schedule management ─────────────────────────── */
+
+db.exec(`CREATE TABLE IF NOT EXISTS backup_schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  target TEXT,
+  schedule TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  last_run TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+
+router.get('/schedules', (_req: AuthRequest, res: Response) => {
+  res.json(db.prepare('SELECT * FROM backup_schedules ORDER BY created_at DESC').all());
+});
+
+router.post('/schedules', async (req: AuthRequest, res: Response) => {
+  const { type, target, schedule } = req.body;
+  if (!type || !schedule) return res.status(400).json({ error: 'type and schedule required' });
+  if (!['files', 'database'].includes(type)) return res.status(400).json({ error: 'type must be files or database' });
+
+  const r = db.prepare('INSERT INTO backup_schedules (type, target, schedule) VALUES (?, ?, ?)').run(type, target || null, schedule);
+
+  // Write a cron entry for root
+  const id = r.lastInsertRowid;
+  const cronCmd = `curl -s -X POST http://localhost:${process.env.PORT || 3001}/api/backup/create -H 'Content-Type: application/json' -d '{"type":"${type}","target":"${target || ''}"}' > /dev/null 2>&1`;
+  const cronLine = `${schedule} ${cronCmd} # hostpanel-backup-${id}`;
+  try {
+    const { stdout: existing } = await execAsync('crontab -l 2>/dev/null || echo ""');
+    const lines = existing.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
+    lines.push(cronLine);
+    const tmp = `/tmp/hp_backup_cron_${Date.now()}`;
+    const { writeFileSync: wf, unlinkSync: ul } = await import('fs');
+    wf(tmp, lines.join('\n') + '\n');
+    await execAsync(`crontab ${tmp}`);
+    ul(tmp);
+  } catch {}
+
+  res.json(db.prepare('SELECT * FROM backup_schedules WHERE id = ?').get(id));
+});
+
+router.delete('/schedules/:id', async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  db.prepare('DELETE FROM backup_schedules WHERE id = ?').run(parseInt(id));
+  // Remove from crontab
+  try {
+    const { stdout } = await execAsync('crontab -l 2>/dev/null || echo ""');
+    const lines = stdout.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
+    const { writeFileSync: wf, unlinkSync: ul } = await import('fs');
+    const tmp = `/tmp/hp_backup_cron_rm_${Date.now()}`;
+    wf(tmp, lines.join('\n') + '\n');
+    await execAsync(`crontab ${tmp}`);
+    ul(tmp);
+  } catch {}
+  res.json({ success: true });
+});
+
 /* ── Remote / S3 backup config ───────────────────────────── */
 
 router.get('/remote-config', (_req: AuthRequest, res: Response) => {

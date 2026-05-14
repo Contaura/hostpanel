@@ -6,7 +6,7 @@ const api = (p: string, o?: RequestInit) => fetch(`/api/ssl-advanced${p}`, { hea
 
 export default function SslAdvanced() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew'>('ciphers');
+  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew' | 'acme'>('ciphers');
   const [ciphers, setCiphers] = useState<any>(null);
   const [ciphersLoaded, setCiphersLoaded] = useState(false);
   const [preset, setPreset] = useState('intermediate');
@@ -18,6 +18,9 @@ export default function SslAdvanced() {
   const [certsLoaded, setCertsLoaded] = useState(false);
   const [renewOutput, setRenewOutput] = useState('');
   const [renewing, setRenewing] = useState<string | null>(null);
+  const [acmeDomain, setAcmeDomain] = useState('');
+  const [acmeResult, setAcmeResult] = useState<any>(null);
+  const [acmeChecking, setAcmeChecking] = useState(false);
 
   async function loadCiphers() {
     if (ciphersLoaded) return;
@@ -78,6 +81,15 @@ export default function SslAdvanced() {
     setCertsLoaded(false);
   }
 
+  async function checkAcme() {
+    if (!acmeDomain.trim()) return;
+    setAcmeChecking(true); setAcmeResult(null);
+    const r = await api(`/acme-check/${encodeURIComponent(acmeDomain.trim())}`);
+    const d = await r.json();
+    if (d.error) toast.error(d.error); else setAcmeResult(d);
+    setAcmeChecking(false);
+  }
+
   if (tab === 'ciphers' && !ciphersLoaded) loadCiphers();
   if (tab === 'renew' && !certsLoaded) loadCerts();
 
@@ -90,6 +102,7 @@ export default function SslAdvanced() {
         <button className={`tab-item ${tab === 'wildcard' ? 'tab-item-active' : ''}`} onClick={() => setTab('wildcard')}>Wildcard SSL</button>
         <button className={`tab-item ${tab === 'test' ? 'tab-item-active' : ''}`} onClick={() => setTab('test')}>Test Certificate</button>
         <button className={`tab-item ${tab === 'renew' ? 'tab-item-active' : ''}`} onClick={() => setTab('renew')}>Auto-Renew Status</button>
+        <button className={`tab-item ${tab === 'acme' ? 'tab-item-active' : ''}`} onClick={() => setTab('acme')}>ACME Check</button>
       </div>
 
       {tab === 'ciphers' && (
@@ -211,6 +224,43 @@ export default function SslAdvanced() {
           </div>
           {renewOutput && (
             <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-48 overflow-y-auto whitespace-pre-wrap">{renewOutput}</pre>
+          )}
+        </div>
+      )}
+      {tab === 'acme' && (
+        <div className="space-y-4">
+          <div className="card p-5 max-w-xl space-y-3">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Verify that the ACME HTTP-01 challenge path is reachable for a domain before requesting a certificate. Writes a temporary file to <code className="text-xs font-mono bg-slate-100 dark:bg-slate-800 px-1 rounded">.well-known/acme-challenge/</code> and probes it via HTTP.
+            </p>
+            <div className="flex gap-2">
+              <input className="input flex-1 font-mono" placeholder="example.com" value={acmeDomain}
+                onChange={e => setAcmeDomain(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && checkAcme()} />
+              <button className="btn-primary" onClick={checkAcme} disabled={acmeChecking}>
+                <Lock size={14} /> {acmeChecking ? 'Checking…' : 'Check'}
+              </button>
+            </div>
+          </div>
+
+          {acmeResult && (
+            <div className="card p-5 max-w-xl space-y-3">
+              <div className="flex items-center gap-2">
+                {acmeResult.reachable
+                  ? <CheckCircle size={18} className="text-emerald-500" />
+                  : <XCircle size={18} className="text-rose-500" />}
+                <span className={`font-semibold ${acmeResult.reachable ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>
+                  {acmeResult.reachable ? 'Challenge path reachable' : 'Challenge path NOT reachable'}
+                </span>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{acmeResult.note}</p>
+              {acmeResult.response && (
+                <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
+                  <p className="text-xs text-slate-500 mb-1">HTTP Response</p>
+                  <code className="text-xs font-mono text-slate-700 dark:text-slate-300">{acmeResult.response}</code>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

@@ -6,7 +6,8 @@ import { AuthRequest } from '../middleware/auth';
 const router = Router();
 const execAsync = promisify(exec);
 
-const IP_RE = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+const IP_RE   = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+const IPV6_RE = /^[0-9a-fA-F:]+(:\/\d{1,3})?$/;
 const PORT_RE = /^\d{1,5}$/;
 
 router.get('/status', async (_req: AuthRequest, res: Response) => {
@@ -84,6 +85,39 @@ router.delete('/block-ip/:ip', async (req: AuthRequest, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+/* ── IPv6 blocking ───────────────────────────────────────── */
+
+router.get('/ipv6-blocks', async (_req: AuthRequest, res: Response) => {
+  try {
+    const { stdout } = await execAsync('firewall-cmd --list-rich-rules 2>/dev/null || echo ""');
+    const blocks = stdout.split('\n')
+      .filter(l => l.includes('family="ipv6"') && l.includes('reject'))
+      .map(l => { const m = l.match(/source address="([^"]+)"/); return m?.[1] || null; })
+      .filter(Boolean) as string[];
+    res.json(blocks);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/ipv6-blocks', async (req: AuthRequest, res: Response) => {
+  const { ip } = req.body;
+  if (!ip || !IPV6_RE.test(ip)) return res.status(400).json({ error: 'Invalid IPv6 address' });
+  try {
+    await execAsync(`firewall-cmd --add-rich-rule='rule family="ipv6" source address="${ip}" reject' --permanent`);
+    await execAsync('firewall-cmd --reload');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/ipv6-blocks/:ip', async (req: AuthRequest, res: Response) => {
+  const ip = decodeURIComponent(req.params.ip);
+  if (!IPV6_RE.test(ip)) return res.status(400).json({ error: 'Invalid IPv6 address' });
+  try {
+    await execAsync(`firewall-cmd --remove-rich-rule='rule family="ipv6" source address="${ip}" reject' --permanent`);
+    await execAsync('firewall-cmd --reload');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 /* ── Geo / country-level blocking ─────────────────────────── */

@@ -90,6 +90,65 @@ router.post('/settings', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/* ── PHP-FPM pool editor per-domain ─────────────────────── */
+
+const FPM_POOL_DIR = process.env.FPM_POOL_DIR || '/etc/php-fpm.d';
+const FPM_POOL_KEYS = ['pm', 'pm.max_children', 'pm.start_servers', 'pm.min_spare_servers', 'pm.max_spare_servers', 'pm.max_requests', 'request_terminate_timeout', 'rlimit_files'];
+
+function poolPath(domain: string) {
+  return `${FPM_POOL_DIR}/${domain.replace(/[^a-zA-Z0-9._-]/g, '')}.conf`;
+}
+
+router.get('/fpm-pool/:domain', (_req: AuthRequest, res: Response) => {
+  const p = poolPath(_req.params.domain);
+  try {
+    const { existsSync: ex, readFileSync: rf } = require('fs');
+    if (!ex(p)) return res.json({ exists: false, settings: {} });
+    const raw = rf(p, 'utf8') as string;
+    const settings: Record<string, string> = {};
+    for (const line of raw.split('\n')) {
+      const m = line.match(/^\s*([a-zA-Z_.]+)\s*=\s*(.+)/);
+      if (m) settings[m[1].trim()] = m[2].trim();
+    }
+    res.json({ exists: true, settings });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/fpm-pool/:domain', async (req: AuthRequest, res: Response) => {
+  const domain = req.params.domain.replace(/[^a-zA-Z0-9._-]/g, '');
+  const p = poolPath(domain);
+  const settings: Record<string, string> = req.body || {};
+  try {
+    const { writeFileSync: wf, mkdirSync: mk, existsSync: ex } = require('fs');
+    if (!ex(FPM_POOL_DIR)) mk(FPM_POOL_DIR, { recursive: true });
+    const user = settings.user || domain;
+    const lines = [
+      `[${domain}]`,
+      `user = ${user}`,
+      `group = ${user}`,
+      `listen = /var/run/php-fpm/${domain}.sock`,
+      `listen.owner = apache`,
+      `listen.group = apache`,
+    ];
+    for (const k of FPM_POOL_KEYS) {
+      if (settings[k]) lines.push(`${k} = ${String(settings[k]).replace(/[^a-zA-Z0-9 _.]/g, '')}`);
+    }
+    wf(p, lines.join('\n') + '\n');
+    await execAsync('systemctl reload php-fpm 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/fpm-pool/:domain', async (req: AuthRequest, res: Response) => {
+  const p = poolPath(req.params.domain);
+  try {
+    const { unlinkSync, existsSync } = require('fs');
+    if (existsSync(p)) unlinkSync(p);
+    await execAsync('systemctl reload php-fpm 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── Per-domain .user.ini editor ─────────────────────────── */
 
 const WEBROOT = process.env.WEBROOT || '/var/www';

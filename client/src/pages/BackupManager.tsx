@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react';
+import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Backup {
@@ -21,12 +21,17 @@ function fmt(bytes: number) {
 
 export default function BackupManager() {
   const toast = useToast();
+  const [tab, setTab] = useState<'backups' | 'schedules' | 'remote'>('backups');
   const [backups, setBackups] = useState<Backup[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ type: 'files', target: '' });
   const [loading, setLoading] = useState(false);
   const [domains, setDomains] = useState<string[]>([]);
   const [databases, setDatabases] = useState<string[]>([]);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [scheduleForm, setScheduleForm] = useState({ type: 'files', target: '', schedule: '0 2 * * *' });
+  const [remoteConfig, setRemoteConfig] = useState<Record<string, string>>({});
+  const [remoteLoaded, setRemoteLoaded] = useState(false);
 
   async function load() {
     try {
@@ -40,6 +45,39 @@ export default function BackupManager() {
       setDatabases(dbRes.data.map((d: any) => d.name));
     } catch { setBackups([]); }
   }
+
+  async function loadSchedules() {
+    const { data } = await axios.get('/api/backup/schedules');
+    setSchedules(Array.isArray(data) ? data : []);
+  }
+
+  async function createSchedule() {
+    try {
+      await axios.post('/api/backup/schedules', scheduleForm);
+      toast.success('Schedule created');
+      loadSchedules();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteSchedule(id: number) {
+    await axios.delete(`/api/backup/schedules/${id}`);
+    toast.success('Schedule removed'); loadSchedules();
+  }
+
+  async function loadRemoteConfig() {
+    if (remoteLoaded) return;
+    const { data } = await axios.get('/api/backup/remote-config');
+    setRemoteConfig(data || {});
+    setRemoteLoaded(true);
+  }
+
+  async function saveRemoteConfig() {
+    try {
+      await axios.put('/api/backup/remote-config', remoteConfig);
+      toast.success('Remote backup config saved');
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+  }
+
   useEffect(() => { load(); }, []);
 
   async function createBackup() {
@@ -85,13 +123,25 @@ export default function BackupManager() {
           <button onClick={load} className="btn-secondary">
             <RefreshCw size={14} /> Refresh
           </button>
-          <button onClick={() => setShowForm(v => !v)} className="btn-primary">
+          <button onClick={() => { setTab('backups'); setShowForm(v => !v); }} className="btn-primary">
             <Plus size={14} /> New Backup
           </button>
         </div>
       </div>
 
-      {showForm && (
+      <div className="tab-bar">
+        <button className={tab === 'backups' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('backups')}>
+          <Archive size={13} /> Backups
+        </button>
+        <button className={tab === 'schedules' ? 'tab-item-active' : 'tab-item'} onClick={() => { setTab('schedules'); loadSchedules(); }}>
+          <Clock size={13} /> Schedules
+        </button>
+        <button className={tab === 'remote' ? 'tab-item-active' : 'tab-item'} onClick={() => { setTab('remote'); loadRemoteConfig(); }}>
+          <Upload size={13} /> Remote Storage
+        </button>
+      </div>
+
+      {tab === 'backups' && showForm && (
         <div className="card p-5 max-w-md space-y-4">
           <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Create Backup</h2>
           <div>
@@ -135,7 +185,102 @@ export default function BackupManager() {
         </div>
       )}
 
-      <div className="card overflow-hidden">
+      {tab === 'schedules' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-4 max-w-xl">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Add Backup Schedule</h2>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Type</label>
+                <select className="input" value={scheduleForm.type} onChange={e => setScheduleForm(f => ({ ...f, type: e.target.value }))}>
+                  <option value="files">Files</option>
+                  <option value="database">Database</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Target (optional)</label>
+                <input className="input" placeholder="domain or db name" value={scheduleForm.target} onChange={e => setScheduleForm(f => ({ ...f, target: e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Cron Schedule</label>
+                <input className="input font-mono" placeholder="0 2 * * *" value={scheduleForm.schedule} onChange={e => setScheduleForm(f => ({ ...f, schedule: e.target.value }))} />
+                <p className="text-xs text-slate-400 mt-1">e.g. <code>0 2 * * *</code> = daily at 2 AM</p>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={createSchedule}>
+              <Plus size={14} /> Add Schedule
+            </button>
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                {['Type', 'Target', 'Schedule', 'Last Run', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {schedules.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-400">No schedules configured</td></tr>
+                ) : schedules.map((s: any) => (
+                  <tr key={s.id} className={rowCls}>
+                    <td className="table-cell">
+                      <span className={`badge-${s.type === 'database' ? 'purple' : 'blue'} text-xs`}>{s.type}</span>
+                    </td>
+                    <td className="table-cell font-mono text-xs">{s.target || 'All'}</td>
+                    <td className="table-cell font-mono text-xs">{s.schedule}</td>
+                    <td className="table-cell text-xs text-slate-400">{s.last_run ? new Date(s.last_run).toLocaleString() : 'Never'}</td>
+                    <td className="px-3 py-3">
+                      <button onClick={() => deleteSchedule(s.id)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400">
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'remote' && (
+        <div className="card p-5 space-y-4 max-w-xl">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Remote Storage Configuration</h2>
+          <p className="text-xs text-slate-500">Store backups in S3, Backblaze B2, or any rclone-compatible provider.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Provider</label>
+              <select className="input" value={remoteConfig.provider || 's3'} onChange={e => setRemoteConfig(c => ({ ...c, provider: e.target.value }))}>
+                <option value="s3">Amazon S3</option>
+                <option value="b2">Backblaze B2</option>
+                <option value="rclone">rclone (custom)</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Bucket</label>
+              <input className="input font-mono" placeholder="my-backups" value={remoteConfig.bucket || ''} onChange={e => setRemoteConfig(c => ({ ...c, bucket: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Region</label>
+              <input className="input font-mono" placeholder="us-east-1" value={remoteConfig.region || ''} onChange={e => setRemoteConfig(c => ({ ...c, region: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Path Prefix</label>
+              <input className="input font-mono" placeholder="hostpanel-backups" value={remoteConfig.path_prefix || ''} onChange={e => setRemoteConfig(c => ({ ...c, path_prefix: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Access Key</label>
+              <input className="input font-mono" placeholder="AKIA…" value={remoteConfig.access_key || ''} onChange={e => setRemoteConfig(c => ({ ...c, access_key: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Secret Key</label>
+              <input type="password" className="input" placeholder="(stored securely)" value={remoteConfig.secret_key || ''} onChange={e => setRemoteConfig(c => ({ ...c, secret_key: e.target.value }))} />
+            </div>
+          </div>
+          <button className="btn-primary" onClick={saveRemoteConfig}>Save Remote Config</button>
+        </div>
+      )}
+
+      {tab === 'backups' && (
+        <div className="card overflow-hidden">
         <table className="w-full text-sm">
           <thead className={theadCls}>
             <tr>
@@ -189,7 +334,8 @@ export default function BackupManager() {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Save } from 'lucide-react';
+import { Plus, Trash2, Save, BarChart2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/resource-limits${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 export default function ResourceLimits() {
   const toast = useToast();
-  const [tab, setTab] = useState<'cgroups' | 'nginx' | 'quotas'>('cgroups');
+  const [tab, setTab] = useState<'cgroups' | 'nginx' | 'quotas' | 'io-stats'>('cgroups');
   const [diskQuotas, setDiskQuotas] = useState<any[]>([]);
   const [quotaForm, setQuotaForm] = useState<Record<string, { soft: string; hard: string }>>({});
   const [accounts, setAccounts] = useState<any[]>([]);
@@ -48,6 +48,20 @@ export default function ResourceLimits() {
     loadVhosts();
   }
 
+  const [ioUser, setIoUser] = useState('');
+  const [ioStats, setIoStats] = useState<any>(null);
+  const [ioLoading, setIoLoading] = useState(false);
+
+  async function loadIoStats() {
+    if (!ioUser.trim()) return;
+    setIoLoading(true);
+    const r = await api(`/${ioUser.trim()}/io-stats`);
+    const d = await r.json();
+    setIoStats(d.error ? null : d);
+    if (d.error) toast.error(d.error);
+    setIoLoading(false);
+  }
+
   async function loadDiskQuotas() {
     const r = await api('/disk-quotas');
     const d = await r.json();
@@ -70,6 +84,7 @@ export default function ResourceLimits() {
         <button className={`tab-item ${tab === 'cgroups' ? 'tab-item-active' : ''}`} onClick={() => setTab('cgroups')}>cgroup Limits</button>
         <button className={`tab-item ${tab === 'nginx' ? 'tab-item-active' : ''}`} onClick={() => { setTab('nginx'); loadVhosts(); }}>Nginx Vhosts</button>
         <button className={`tab-item ${tab === 'quotas' ? 'tab-item-active' : ''}`} onClick={() => { setTab('quotas'); loadDiskQuotas(); }}>Disk Quotas</button>
+        <button className={`tab-item ${tab === 'io-stats' ? 'tab-item-active' : ''}`} onClick={() => setTab('io-stats')}><BarChart2 size={13} /> Disk I/O</button>
       </div>
 
       {tab === 'cgroups' && (
@@ -191,6 +206,61 @@ export default function ResourceLimits() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      {tab === 'io-stats' && (
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">View real-time cgroup v2 I/O statistics and disk usage for a hosting account.</p>
+          <div className="card p-5 max-w-md space-y-3">
+            <div className="flex gap-2">
+              <input className="input flex-1 font-mono" placeholder="username" value={ioUser}
+                onChange={e => setIoUser(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && loadIoStats()} />
+              <button className="btn-primary" onClick={loadIoStats} disabled={ioLoading}>
+                <BarChart2 size={14} /> {ioLoading ? 'Loading…' : 'Load Stats'}
+              </button>
+            </div>
+          </div>
+
+          {ioStats && (
+            <div className="space-y-3 max-w-xl">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="card p-4">
+                  <p className="text-xs text-slate-500 mb-1">Disk Used</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                    {(ioStats.disk_used_bytes / 1024 / 1024).toFixed(1)} MB
+                  </p>
+                </div>
+                <div className="card p-4">
+                  <p className="text-xs text-slate-500 mb-1">cgroup Path</p>
+                  <p className="text-xs font-mono text-slate-600 dark:text-slate-400 break-all mt-1">{ioStats.cgroup_path}</p>
+                </div>
+              </div>
+
+              {ioStats.io_stat?.length > 0 && (
+                <div className="card overflow-hidden">
+                  <p className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide border-b border-slate-100 dark:border-slate-700">I/O Statistics</p>
+                  <table className="w-full text-sm">
+                    <thead><tr>
+                      {['rbytes', 'wbytes', 'rios', 'wios'].map(h => (
+                        <th key={h} className="table-header-cell">{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {ioStats.io_stat.map((row: any, i: number) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="table-cell font-mono text-xs">{((row.rbytes || 0) / 1024 / 1024).toFixed(2)} MB</td>
+                          <td className="table-cell font-mono text-xs">{((row.wbytes || 0) / 1024 / 1024).toFixed(2)} MB</td>
+                          <td className="table-cell font-mono text-xs">{row.rios ?? 0}</td>
+                          <td className="table-cell font-mono text-xs">{row.wios ?? 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -135,6 +135,36 @@ router.delete('/nginx/vhosts/:domain', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Disk I/O stats per-account (cgroup blkio) ──────────── */
+
+router.get('/:username/io-stats', async (req: Request, res: Response) => {
+  const { username } = req.params;
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  try {
+    const cgroupPath = path.join(CGROUP_BASE, 'hostpanel', username);
+    const readFile = (f: string) => { try { return readFileSync(path.join(cgroupPath, f), 'utf8').trim(); } catch { return null; } };
+
+    const ioStat = readFile('io.stat');
+    const parsed: any[] = [];
+    if (ioStat) {
+      for (const line of ioStat.split('\n').filter(Boolean)) {
+        const m: Record<string, number> = {};
+        for (const part of line.split(' ')) {
+          const [k, v] = part.split('=');
+          if (k && v) m[k] = parseInt(v) || 0;
+        }
+        parsed.push(m);
+      }
+    }
+
+    // Also get real-time disk usage via du
+    const { stdout: du } = await execAsync(`du -sb /var/www/${username} 2>/dev/null || echo 0`).catch(() => ({ stdout: '0' }));
+    const diskBytes = parseInt(du.trim().split(/\s+/)[0]) || 0;
+
+    res.json({ username, io_stat: parsed, disk_used_bytes: diskBytes, cgroup_path: cgroupPath });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── Disk quota enforcement (setquota) ───────────────────── */
 
 router.get('/disk-quotas', async (_req: Request, res: Response) => {

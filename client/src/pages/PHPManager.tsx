@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Code2, Settings, Package, Save } from 'lucide-react';
+import { Code2, Settings, Package, Save, Sliders, Trash2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface PHPInfo {
@@ -25,7 +25,7 @@ const SETTING_LABELS: Record<string, { label: string; hint: string; type: 'text'
 
 export default function PHPManager() {
   const toast = useToast();
-  const [tab, setTab] = useState<'info' | 'settings' | 'extensions' | 'domain-ini'>('info');
+  const [tab, setTab] = useState<'info' | 'settings' | 'extensions' | 'domain-ini' | 'fpm-pool'>('info');
   const [info, setInfo] = useState<PHPInfo | null>(null);
   const [settings, setSettings] = useState<Settings>({});
   const [editSettings, setEditSettings] = useState<Settings>({});
@@ -57,6 +57,38 @@ export default function PHPManager() {
   }
 
   const filteredExts = info?.extensions.filter(e => e.toLowerCase().includes(extSearch.toLowerCase())) ?? [];
+
+  const [fpmDomain, setFpmDomain] = useState('');
+  const [fpmPool, setFpmPool] = useState<Record<string, string>>({});
+  const [fpmLoaded, setFpmLoaded] = useState(false);
+  const [fpmSaving, setFpmSaving] = useState(false);
+
+  async function loadFpmPool() {
+    if (!fpmDomain.trim()) return toast.error('Enter a domain');
+    try {
+      const { data } = await axios.get(`/api/php/fpm-pool/${fpmDomain.trim()}`);
+      setFpmPool(data || {});
+      setFpmLoaded(true);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load FPM pool'); }
+  }
+
+  async function saveFpmPool() {
+    setFpmSaving(true);
+    try {
+      await axios.put(`/api/php/fpm-pool/${fpmDomain.trim()}`, fpmPool);
+      toast.success('PHP-FPM pool saved and reloaded');
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to save'); }
+    setFpmSaving(false);
+  }
+
+  async function deleteFpmPool() {
+    if (!confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
+    try {
+      await axios.delete(`/api/php/fpm-pool/${fpmDomain.trim()}`);
+      toast.success('FPM pool deleted');
+      setFpmLoaded(false); setFpmPool({});
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+  }
 
   const [domainIniDomain, setDomainIniDomain] = useState('');
   const [domainIniSettings, setDomainIniSettings] = useState<Record<string, string>>({});
@@ -101,7 +133,7 @@ export default function PHPManager() {
       )}
 
       <div className="tab-bar">
-        {([['info', 'Overview', Code2], ['settings', 'Settings', Settings], ['extensions', 'Extensions', Package], ['domain-ini', 'Per-Domain PHP', Code2]] as const).map(([t, label, Icon]) => (
+        {([['info', 'Overview', Code2], ['settings', 'Settings', Settings], ['extensions', 'Extensions', Package], ['domain-ini', 'Per-Domain PHP', Code2], ['fpm-pool', 'FPM Pool', Sliders]] as const).map(([t, label, Icon]) => (
           <button key={t} onClick={() => setTab(t as any)} className={tab === t ? 'tab-item-active' : 'tab-item'}>
             <Icon size={13} /> {label}
           </button>
@@ -175,6 +207,47 @@ export default function PHPManager() {
               <div className="col-span-3 text-sm text-slate-400 text-center py-4">No extensions found</div>
             )}
           </div>
+        </div>
+      )}
+      {tab === 'fpm-pool' && (
+        <div className="card p-6 space-y-4 max-w-xl">
+          <p className="text-sm text-slate-600 dark:text-slate-400">Edit the PHP-FPM pool configuration for a specific domain. Changes are written to <code className="text-xs font-mono bg-slate-100 dark:bg-slate-800 px-1 rounded">/etc/php-fpm.d/&lt;domain&gt;.conf</code> and FPM is reloaded.</p>
+          <div className="flex gap-2">
+            <input className="input flex-1" placeholder="example.com" value={fpmDomain}
+              onChange={e => { setFpmDomain(e.target.value); setFpmLoaded(false); }} />
+            <button className="btn-secondary" onClick={loadFpmPool}>Load</button>
+          </div>
+          {fpmLoaded && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  ['pm', 'Process Manager', 'dynamic, static, ondemand'],
+                  ['pm.max_children', 'Max Children', 'e.g. 10'],
+                  ['pm.start_servers', 'Start Servers', 'e.g. 2'],
+                  ['pm.min_spare_servers', 'Min Spare Servers', 'e.g. 1'],
+                  ['pm.max_spare_servers', 'Max Spare Servers', 'e.g. 3'],
+                  ['pm.max_requests', 'Max Requests', 'e.g. 500'],
+                  ['request_terminate_timeout', 'Terminate Timeout', 'e.g. 60s'],
+                  ['rlimit_files', 'Open Files Limit', 'e.g. 1024'],
+                ].map(([key, label, placeholder]) => (
+                  <div key={key}>
+                    <label className="label">{label}</label>
+                    <input className="input font-mono" placeholder={placeholder}
+                      value={fpmPool[key] || ''}
+                      onChange={e => setFpmPool(p => ({ ...p, [key]: e.target.value }))} />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveFpmPool} disabled={fpmSaving} className="btn-primary">
+                  <Save size={14} /> {fpmSaving ? 'Saving…' : 'Save FPM Pool'}
+                </button>
+                <button onClick={deleteFpmPool} className="btn-secondary text-rose-600 dark:text-rose-400">
+                  <Trash2 size={14} /> Delete Pool
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
       {tab === 'domain-ini' && (

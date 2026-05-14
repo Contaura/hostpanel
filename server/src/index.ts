@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 
 import authRoutes        from './routes/auth';
 import fileRoutes        from './routes/files';
@@ -54,6 +55,8 @@ import wordpressRoutes       from './routes/wordpress';
 import parkedDomainsRoutes   from './routes/parked-domains';
 import nodeAppsRoutes        from './routes/node-apps';
 import serverInfoRoutes      from './routes/server-info';
+import mailToolsRoutes       from './routes/mail-tools';
+import securityScannerRoutes from './routes/security-scanner';
 import { authenticateToken } from './middleware/auth';
 import { setupTerminal } from './terminal';
 
@@ -63,6 +66,11 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+
+// Global API rate limit — 300 req/min per IP
+app.use('/api/', rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, slow down.' } }));
+// Strict limit on auth endpoints — 20 req/min
+app.use('/api/auth/', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts.' } }));
 
 // Stripe webhook needs the raw body BEFORE json parsing
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
@@ -159,7 +167,9 @@ app.use('/api/addon-domains',  authenticateToken, addonDomainsRoutes);
 app.use('/api/wordpress',      authenticateToken, wordpressRoutes);
 app.use('/api/parked-domains', authenticateToken, parkedDomainsRoutes);
 app.use('/api/node-apps',      authenticateToken, nodeAppsRoutes);
-app.use('/api/server-info',    authenticateToken, serverInfoRoutes);
+app.use('/api/server-info',       authenticateToken, serverInfoRoutes);
+app.use('/api/mail-tools',        authenticateToken, mailToolsRoutes);
+app.use('/api/security-scanner',  authenticateToken, securityScannerRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface FirewallStatus {
@@ -28,13 +28,15 @@ const KNOWN_PORTS = [
 
 export default function Firewall() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ports' | 'ips' | 'geo'>('ports');
+  const [tab, setTab] = useState<'ports' | 'ips' | 'geo' | 'ipv6'>('ports');
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [portForm, setPortForm] = useState({ port: '', protocol: 'tcp' });
   const [ipForm, setIpForm] = useState({ ip: '' });
   const [loading, setLoading] = useState(false);
   const [geoBlocks, setGeoBlocks] = useState<string[]>([]);
   const [geoCode, setGeoCode] = useState('');
+  const [ipv6Blocks, setIpv6Blocks] = useState<string[]>([]);
+  const [ipv6Form, setIpv6Form] = useState('');
 
   async function load() {
     try {
@@ -50,7 +52,14 @@ export default function Firewall() {
     } catch {}
   }
 
-  useEffect(() => { load(); loadGeo(); }, []);
+  async function loadIpv6() {
+    try {
+      const { data } = await axios.get<string[]>('/api/firewall/ipv6-blocks');
+      setIpv6Blocks(Array.isArray(data) ? data : []);
+    } catch {}
+  }
+
+  useEffect(() => { load(); loadGeo(); loadIpv6(); }, []);
 
   async function addPort(e: FormEvent) {
     e.preventDefault(); setLoading(true);
@@ -117,7 +126,7 @@ export default function Firewall() {
       )}
 
       <div className="tab-bar">
-        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban], ['geo', 'Geo Blocking', MapPin]] as const).map(([t, label, Icon]) => (
+        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban], ['geo', 'Geo Blocking', MapPin], ['ipv6', 'IPv6 Blocks', Wifi]] as const).map(([t, label, Icon]) => (
           <button key={t} onClick={() => setTab(t as any)}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>
             <Icon size={13} /> {label}
@@ -248,6 +257,63 @@ export default function Firewall() {
                         title="Unblock">
                         <Trash2 size={13} />
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tab === 'ipv6' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-3 max-w-sm">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Block IPv6 Address</h2>
+            <p className="text-xs text-slate-500">Block individual IPv6 addresses or CIDR ranges via firewalld rich rules.</p>
+            <div>
+              <label className="label">IPv6 Address or CIDR</label>
+              <input className="input font-mono" placeholder="2001:db8::1 or 2001:db8::/32"
+                value={ipv6Form} onChange={e => setIpv6Form(e.target.value)} />
+            </div>
+            <button
+              disabled={loading || !ipv6Form.trim()}
+              className="btn-danger"
+              onClick={async () => {
+                setLoading(true);
+                try {
+                  await axios.post('/api/firewall/ipv6-blocks', { address: ipv6Form.trim() });
+                  toast.success(`IPv6 ${ipv6Form.trim()} blocked`);
+                  setIpv6Form(''); loadIpv6();
+                } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+                setLoading(false);
+              }}
+            ><Wifi size={14} /> Block IPv6</button>
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Blocked IPv6</th>
+                <th className="px-4 py-3 w-12" />
+              </tr></thead>
+              <tbody>
+                {ipv6Blocks.length === 0 ? (
+                  <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No IPv6 addresses blocked</td></tr>
+                ) : ipv6Blocks.map(addr => (
+                  <tr key={addr} className={rowCls}>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
+                          <Wifi size={13} className="text-rose-600 dark:text-rose-400" />
+                        </div>
+                        <span className="font-mono text-slate-900 dark:text-slate-100">{addr}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <button onClick={async () => {
+                        await axios.delete(`/api/firewall/ipv6-blocks/${encodeURIComponent(addr)}`);
+                        toast.success(`${addr} unblocked`); loadIpv6();
+                      }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ))}
