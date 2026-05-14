@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield } from 'lucide-react';
+import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil } from 'lucide-react';
 
 type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all';
 
@@ -28,6 +28,8 @@ export default function EmailExtras() {
   const [autoresponders, setAutoresponders] = useState<Autoresponder[]>([]);
   const [arForm, setArForm] = useState({ email: '', subject: 'Auto Reply', body: '', start_date: '', end_date: '' });
   const [showArForm, setShowArForm] = useState(false);
+  const [editingArId, setEditingArId] = useState<number | null>(null);
+  const [editArForm, setEditArForm] = useState({ email: '', subject: '', body: '', start_date: '', end_date: '' });
 
   // Spam
   const [spam, setSpam] = useState<SpamConfig>({ required_score: '5.0', rewrite_header: 'Subject ***SPAM***', report_safe: '0', use_bayes: '1', bayes_auto_learn: '1' });
@@ -89,6 +91,15 @@ export default function EmailExtras() {
   async function deleteAutoresponder(id: number) {
     try { await del(`/api/email-extras/autoresponders/${id}`); success('Deleted'); loadTab('autoresponders'); }
     catch (e: any) { error('Failed'); }
+  }
+
+  async function updateAutoresponder(id: number) {
+    try {
+      await put(`/api/email-extras/autoresponders/${id}`, { ...editArForm, enabled: autoresponders.find(a => a.id === id)?.enabled ?? 1 });
+      success('Autoresponder updated');
+      setEditingArId(null);
+      loadTab('autoresponders');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function saveSpam() {
@@ -183,14 +194,42 @@ export default function EmailExtras() {
               <tbody>
                 {autoresponders.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>}
                 {autoresponders.map(ar => (
-                  <tr key={ar.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-medium">{ar.email}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
-                    <td className="table-cell">
-                      <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
-                    </td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button></td>
-                  </tr>
+                  <Fragment key={ar.id}>
+                    <tr className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="table-cell font-medium">{ar.email}</td>
+                      <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
+                      <td className="table-cell">
+                        <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                            if (editingArId === ar.id) { setEditingArId(null); return; }
+                            setEditingArId(ar.id);
+                            setEditArForm({ email: ar.email, subject: ar.subject, body: ar.body, start_date: ar.start_date || '', end_date: ar.end_date || '' });
+                          }}><Pencil size={13} /></button>
+                          <button className="btn-icon text-red-500" onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                    {editingArId === ar.id && (
+                      <tr className="bg-slate-50 dark:bg-slate-800/30">
+                        <td colSpan={4} className="px-4 py-3 space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div><label className="label">Email Address</label><input className="input" value={editArForm.email} onChange={e => setEditArForm(f => ({ ...f, email: e.target.value }))} /></div>
+                            <div><label className="label">Subject</label><input className="input" value={editArForm.subject} onChange={e => setEditArForm(f => ({ ...f, subject: e.target.value }))} /></div>
+                            <div><label className="label">Start Date</label><input type="date" className="input" value={editArForm.start_date} onChange={e => setEditArForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+                            <div><label className="label">End Date</label><input type="date" className="input" value={editArForm.end_date} onChange={e => setEditArForm(f => ({ ...f, end_date: e.target.value }))} /></div>
+                            <div className="col-span-2"><label className="label">Message Body</label><textarea className="input min-h-[80px]" value={editArForm.body} onChange={e => setEditArForm(f => ({ ...f, body: e.target.value }))} /></div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button className="btn-primary text-sm" onClick={() => updateAutoresponder(ar.id)}>Save</button>
+                            <button className="btn-ghost text-sm" onClick={() => setEditingArId(null)}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

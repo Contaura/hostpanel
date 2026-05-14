@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History, Pencil } from 'lucide-react';
 
 interface Token { id: number; name: string; token_prefix: string; permissions: string; last_used: string; expires_at: string; created_at: string }
 interface Webhook { id: number; name: string; url: string; events: string; active: number; created_at: string }
@@ -12,6 +12,7 @@ const auth = () => ({ Authorization: 'Bearer ' + token() });
 const api   = (p: string) => axios.get(p, { headers: auth() });
 const apost = (p: string, d: any) => axios.post(p, d, { headers: auth() });
 const adel  = (p: string) => axios.delete(p, { headers: auth() });
+const aput  = (p: string, d: any) => axios.put(p, d, { headers: auth() });
 
 const PERM_BADGE: Record<string, string> = { read: 'badge-info', write: 'badge-warning', admin: 'badge-danger' };
 
@@ -31,6 +32,8 @@ export default function ApiTokens() {
   const [whForm, setWhForm] = useState({ name: '', url: '', events: [] as string[], secret: '' });
   const [whDeliveries, setWhDeliveries] = useState<Record<number, WebhookDelivery[]>>({});
   const [showDeliveries, setShowDeliveries] = useState<number | null>(null);
+  const [editingWhId, setEditingWhId] = useState<number | null>(null);
+  const [editWhForm, setEditWhForm] = useState({ name: '', url: '', secret: '', events: [] as string[], enabled: true });
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
@@ -62,6 +65,16 @@ export default function ApiTokens() {
     if (showDeliveries === id) { setShowDeliveries(null); return; }
     try { const r = await api(`/api/api-tokens/webhooks/${id}/deliveries`); setWhDeliveries(p => ({ ...p, [id]: r.data })); setShowDeliveries(id); }
     catch { error('Failed to load deliveries'); }
+  }
+
+  async function updateWebhook(id: number) {
+    if (!editWhForm.name || !editWhForm.url) { error('Name and URL required'); return; }
+    try {
+      await aput(`/api/api-tokens/webhooks/${id}`, { ...editWhForm, events: editWhForm.events.join(','), enabled: editWhForm.enabled ? 1 : 0 });
+      success('Webhook updated');
+      setEditingWhId(null);
+      loadWebhooks();
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function create() {
@@ -209,21 +222,56 @@ export default function ApiTokens() {
               <tbody>
                 {webhooks.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No webhooks configured</td></tr>}
                 {webhooks.map(wh => (
-                  <>
-                    <tr key={wh.id} className="border-b border-slate-100 dark:border-slate-800">
+                  <Fragment key={wh.id}>
+                    <tr className="border-b border-slate-100 dark:border-slate-800">
                       <td className="table-cell font-medium">{wh.name}</td>
                       <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 truncate max-w-[200px]">{wh.url}</td>
                       <td className="table-cell text-xs text-slate-500">{wh.events}</td>
                       <td className="table-cell">
                         <div className="flex gap-1">
+                          <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                            if (editingWhId === wh.id) { setEditingWhId(null); return; }
+                            setEditingWhId(wh.id);
+                            setEditWhForm({ name: wh.name, url: wh.url, secret: '', events: wh.events ? wh.events.split(',') : [], enabled: !!wh.active });
+                          }}><Pencil size={13} /></button>
                           <button className="btn-icon text-indigo-500" title="Test" onClick={() => testWebhook(wh.id)}><Send size={13} /></button>
                           <button className="btn-icon text-slate-500" title="Delivery history" onClick={() => loadDeliveries(wh.id)}><History size={13} /></button>
                           <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteWebhook(wh.id)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
+                    {editingWhId === wh.id && (
+                      <tr className="bg-slate-50 dark:bg-slate-800/30">
+                        <td colSpan={4} className="px-4 py-3 space-y-3">
+                          <div className="grid grid-cols-2 gap-3">
+                            <div><label className="label">Name</label><input className="input" value={editWhForm.name} onChange={e => setEditWhForm(f => ({ ...f, name: e.target.value }))} /></div>
+                            <div><label className="label">Payload URL</label><input className="input font-mono" value={editWhForm.url} onChange={e => setEditWhForm(f => ({ ...f, url: e.target.value }))} /></div>
+                            <div><label className="label">Secret (leave blank to keep existing)</label><input className="input font-mono" placeholder="••••••••" value={editWhForm.secret} onChange={e => setEditWhForm(f => ({ ...f, secret: e.target.value }))} /></div>
+                            <div className="flex items-center gap-2 pt-5">
+                              <input type="checkbox" id={`wh-enabled-${wh.id}`} checked={editWhForm.enabled} onChange={e => setEditWhForm(f => ({ ...f, enabled: e.target.checked }))} />
+                              <label htmlFor={`wh-enabled-${wh.id}`} className="text-sm">Enabled</label>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="label">Events</label>
+                            <div className="grid grid-cols-2 gap-1.5 mt-1">
+                              {WEBHOOK_EVENTS.map(ev => (
+                                <label key={ev} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                  <input type="checkbox" checked={editWhForm.events.includes(ev)} onChange={e => setEditWhForm(f => ({ ...f, events: e.target.checked ? [...f.events, ev] : f.events.filter(x => x !== ev) }))} />
+                                  <span className="font-mono">{ev}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button className="btn-primary text-sm" onClick={() => updateWebhook(wh.id)}>Save</button>
+                            <button className="btn-ghost text-sm" onClick={() => setEditingWhId(null)}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {showDeliveries === wh.id && (
-                      <tr key={`${wh.id}-deliveries`} className="bg-slate-50 dark:bg-slate-800/30">
+                      <tr className="bg-slate-50 dark:bg-slate-800/30">
                         <td colSpan={4} className="px-4 py-3">
                           <p className="text-xs font-semibold text-slate-500 mb-2">Recent Deliveries</p>
                           {(whDeliveries[wh.id] || []).length === 0 && <p className="text-xs text-slate-400">No deliveries yet</p>}
@@ -239,7 +287,7 @@ export default function ApiTokens() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>
