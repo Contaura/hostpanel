@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi, Play, Square, RotateCcw, Server } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface FirewallStatus {
@@ -28,7 +28,7 @@ const KNOWN_PORTS = [
 
 export default function Firewall() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ports' | 'ips' | 'geo' | 'ipv6'>('ports');
+  const [tab, setTab] = useState<'ports' | 'ips' | 'geo' | 'ipv6' | 'services'>('ports');
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [portForm, setPortForm] = useState({ port: '', protocol: 'tcp' });
   const [ipForm, setIpForm] = useState({ ip: '' });
@@ -37,6 +37,8 @@ export default function Firewall() {
   const [geoCode, setGeoCode] = useState('');
   const [ipv6Blocks, setIpv6Blocks] = useState<string[]>([]);
   const [ipv6Form, setIpv6Form] = useState('');
+  const [svcStatuses, setSvcStatuses] = useState<{ name: string; status: string }[]>([]);
+  const [svcLoading, setSvcLoading] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -90,6 +92,23 @@ export default function Firewall() {
     finally { setLoading(false); }
   }
 
+  async function loadServices() {
+    try {
+      const { data } = await axios.get<{ name: string; status: string }[]>('/api/stats/services');
+      setSvcStatuses(Array.isArray(data) ? data : []);
+    } catch {}
+  }
+
+  async function controlService(service: string, action: 'start' | 'stop' | 'restart') {
+    setSvcLoading(`${service}-${action}`);
+    try {
+      await axios.post('/api/firewall/service', { service, action });
+      toast.success(`${service} ${action}ed`);
+      await loadServices();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+    setSvcLoading(null);
+  }
+
   async function unblockIP(ip: string) {
     try {
       await axios.delete(`/api/firewall/block-ip/${encodeURIComponent(ip)}`);
@@ -126,8 +145,8 @@ export default function Firewall() {
       )}
 
       <div className="tab-bar">
-        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban], ['geo', 'Geo Blocking', MapPin], ['ipv6', 'IPv6 Blocks', Wifi]] as const).map(([t, label, Icon]) => (
-          <button key={t} onClick={() => setTab(t as any)}
+        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban], ['geo', 'Geo Blocking', MapPin], ['ipv6', 'IPv6 Blocks', Wifi], ['services', 'Services', Server]] as const).map(([t, label, Icon]) => (
+          <button key={t} onClick={() => { setTab(t as any); if (t === 'services') loadServices(); }}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>
             <Icon size={13} /> {label}
           </button>
@@ -322,6 +341,64 @@ export default function Firewall() {
           </div>
         </div>
       )}
+      {tab === 'services' && (
+        <div className="card overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">System Service Control</h2>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Start, stop, or restart core server services</p>
+            </div>
+            <button onClick={loadServices} className="btn-icon" title="Refresh status"><RefreshCw size={13} /></button>
+          </div>
+          <table className="w-full text-sm">
+            <thead className={theadCls}><tr>
+              <th className="table-header-cell">Service</th>
+              <th className="table-header-cell">Status</th>
+              <th className="px-4 py-3 text-right w-40" />
+            </tr></thead>
+            <tbody>
+              {['httpd', 'mariadb', 'postfix', 'dovecot', 'named', 'vsftpd', 'sshd', 'firewalld'].map(svc => {
+                const info = svcStatuses.find(s => s.name === svc || s.name === svc + '.service' || s.name.startsWith(svc));
+                const isRunning = info?.status === 'running';
+                const busy = svcLoading !== null;
+                return (
+                  <tr key={svc} className={rowCls}>
+                    <td className="table-cell font-mono font-semibold text-slate-900 dark:text-slate-100">{svc}</td>
+                    <td className="table-cell">
+                      {info
+                        ? <span className={`badge ${isRunning ? 'badge-green' : 'badge-red'}`}>{info.status}</span>
+                        : <span className="badge-gray text-xs">unknown</span>}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1 justify-end">
+                        <button onClick={() => controlService(svc, 'start')} disabled={busy || isRunning}
+                          className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30 disabled:opacity-30" title="Start">
+                          {svcLoading === `${svc}-start`
+                            ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            : <Play size={13} />}
+                        </button>
+                        <button onClick={() => controlService(svc, 'stop')} disabled={busy || !isRunning}
+                          className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30 disabled:opacity-30" title="Stop">
+                          {svcLoading === `${svc}-stop`
+                            ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            : <Square size={13} />}
+                        </button>
+                        <button onClick={() => controlService(svc, 'restart')} disabled={busy}
+                          className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30 disabled:opacity-30" title="Restart">
+                          {svcLoading === `${svc}-restart`
+                            ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                            : <RotateCcw size={13} />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {tab === 'geo' && (
         <div className="space-y-4">
           <div className="card p-5 space-y-3 max-w-sm">

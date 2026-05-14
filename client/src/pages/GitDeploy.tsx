@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Play, Copy, GitBranch } from 'lucide-react';
+import { Plus, Trash2, Play, Copy, GitBranch, Pencil } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/git-deploy${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -12,6 +12,8 @@ export default function GitDeploy() {
   const [form, setForm] = useState(blank);
   const [adding, setAdding] = useState(false);
   const [logs, setLogs] = useState<Record<number, string>>({});
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ repo_url: '', branch: '', deploy_path: '', command: '', auto_deploy: true });
 
   useEffect(() => { load(); }, []);
 
@@ -41,6 +43,15 @@ export default function GitDeploy() {
   async function del(id: number) {
     if (!confirm('Delete deployment?')) return;
     await api(`/${id}`, { method: 'DELETE' });
+    load();
+  }
+
+  async function update(id: number) {
+    const r = await api(`/${id}`, { method: 'PUT', body: JSON.stringify(editForm) });
+    const d = await r.json();
+    if (d.error) { toast.error(d.error); return; }
+    toast.success('Deployment updated');
+    setEditingId(null);
     load();
   }
 
@@ -84,26 +95,55 @@ export default function GitDeploy() {
               <div className="flex items-center gap-2">
                 <GitBranch size={15} className="text-indigo-500" />
                 <span className="font-medium text-sm">{d.name}</span>
-                <span className="badge-info text-xs">{d.branch}</span>
+                <span className="badge-info text-xs">{editingId === d.id ? editForm.branch : d.branch}</span>
               </div>
               <div className="flex gap-2">
-                <button className="btn-secondary text-xs" onClick={() => deploy(d.id)}><Play size={12} className="mr-1" />Deploy Now</button>
-                <button className="btn-icon text-red-500" onClick={() => del(d.id)}><Trash2 size={13} /></button>
+                {editingId !== d.id && (
+                  <button className="btn-secondary text-xs" onClick={() => deploy(d.id)}><Play size={12} className="mr-1" />Deploy Now</button>
+                )}
+                <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                  if (editingId === d.id) { setEditingId(null); return; }
+                  setEditingId(d.id);
+                  setEditForm({ repo_url: d.repo_url, branch: d.branch, deploy_path: d.deploy_path, command: d.command, auto_deploy: !!d.auto_deploy });
+                }}><Pencil size={13} /></button>
+                <button className="btn-icon hover:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/30" onClick={() => del(d.id)}><Trash2 size={13} /></button>
               </div>
             </div>
-            <div className="text-xs text-slate-500 space-y-1">
-              <p>Repo: <span className="font-mono">{d.repo_url}</span></p>
-              <p>Path: <span className="font-mono">{d.deploy_path}</span></p>
-              <p>Last deploy: {d.last_deploy ? new Date(d.last_deploy).toLocaleString() : 'Never'}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-slate-400 font-mono truncate flex-1">{webhookUrl(d)}</p>
-              <button className="btn-icon" onClick={() => { navigator.clipboard.writeText(webhookUrl(d)); toast.success('Copied'); }}>
-                <Copy size={12} />
-              </button>
-            </div>
-            {logs[d.id] && (
-              <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{logs[d.id]}</pre>
+
+            {editingId === d.id ? (
+              <div className="space-y-3 pt-1">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="label">Repository URL</label><input className="input" value={editForm.repo_url} onChange={e => setEditForm(f => ({ ...f, repo_url: e.target.value }))} /></div>
+                  <div><label className="label">Branch</label><input className="input" value={editForm.branch} onChange={e => setEditForm(f => ({ ...f, branch: e.target.value }))} /></div>
+                  <div><label className="label">Deploy Path</label><input className="input" value={editForm.deploy_path} onChange={e => setEditForm(f => ({ ...f, deploy_path: e.target.value }))} /></div>
+                  <div className="flex items-center gap-2 pt-5">
+                    <input type="checkbox" id={`auto-${d.id}`} checked={editForm.auto_deploy} onChange={e => setEditForm(f => ({ ...f, auto_deploy: e.target.checked }))} />
+                    <label htmlFor={`auto-${d.id}`} className="text-sm">Auto-deploy on webhook</label>
+                  </div>
+                  <div className="col-span-2"><label className="label">Deploy Command</label><input className="input font-mono" value={editForm.command} onChange={e => setEditForm(f => ({ ...f, command: e.target.value }))} /></div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-primary text-sm" onClick={() => update(d.id)}>Save</button>
+                  <button className="btn-ghost text-sm" onClick={() => setEditingId(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="text-xs text-slate-500 space-y-1">
+                  <p>Repo: <span className="font-mono">{d.repo_url}</span></p>
+                  <p>Path: <span className="font-mono">{d.deploy_path}</span></p>
+                  <p>Last deploy: {d.last_deploy ? new Date(d.last_deploy).toLocaleString() : 'Never'}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-slate-400 font-mono truncate flex-1">{webhookUrl(d)}</p>
+                  <button className="btn-icon" onClick={() => { navigator.clipboard.writeText(webhookUrl(d)); toast.success('Copied'); }}>
+                    <Copy size={12} />
+                  </button>
+                </div>
+                {logs[d.id] && (
+                  <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{logs[d.id]}</pre>
+                )}
+              </>
             )}
           </div>
         ))}

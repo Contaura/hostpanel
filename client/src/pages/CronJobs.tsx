@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell } from 'lucide-react';
+import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell, User } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface CronJob {
@@ -25,7 +25,7 @@ const PRESETS = [
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
-type Tab = 'jobs' | 'logs' | 'alerts';
+type Tab = 'jobs' | 'logs' | 'alerts' | 'account';
 
 export default function CronJobs() {
   const toast = useToast();
@@ -39,6 +39,12 @@ export default function CronJobs() {
   const [runOutput, setRunOutput] = useState<{ id: number; output: string; exit_code: number } | null>(null);
   const [failureEmail, setFailureEmail] = useState('');
   const [failureEmailSaved, setFailureEmailSaved] = useState(false);
+  const [acctUser, setAcctUser] = useState('');
+  const [acctJobs, setAcctJobs] = useState<any[]>([]);
+  const [acctLoaded, setAcctLoaded] = useState(false);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctAdding, setAcctAdding] = useState(false);
+  const [acctForm, setAcctForm] = useState({ schedule: '0 * * * *', command: '' });
 
   async function load() {
     try {
@@ -66,6 +72,37 @@ export default function CronJobs() {
   async function loadFailureEmail() {
     try { const { data } = await axios.get('/api/cron/failure-email'); setFailureEmail(data.email || ''); }
     catch {}
+  }
+
+  async function loadAcctJobs() {
+    if (!acctUser.trim()) return;
+    setAcctLoading(true);
+    try {
+      const { data } = await axios.get(`/api/cron/account/${encodeURIComponent(acctUser.trim())}`);
+      setAcctJobs(Array.isArray(data) ? data : []);
+      setAcctLoaded(true);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load crontab'); setAcctJobs([]); }
+    setAcctLoading(false);
+  }
+
+  async function addAcctJob() {
+    if (!acctUser.trim() || !acctForm.command.trim()) return;
+    try {
+      await axios.post(`/api/cron/account/${encodeURIComponent(acctUser.trim())}`, acctForm);
+      toast.success('Job added');
+      setAcctForm({ schedule: '0 * * * *', command: '' });
+      setAcctAdding(false);
+      loadAcctJobs();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteAcctJob(index: number) {
+    if (!confirm('Remove this cron job?')) return;
+    try {
+      await axios.delete(`/api/cron/account/${encodeURIComponent(acctUser.trim())}/${index}`);
+      toast.success('Job removed');
+      loadAcctJobs();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
   }
 
   async function saveFailureEmail() {
@@ -123,6 +160,7 @@ export default function CronJobs() {
 
       <div className="tab-bar">
         <button className={tab === 'jobs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('jobs')}><Clock size={14} /> Scheduled Jobs</button>
+        <button className={tab === 'account' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('account')}><User size={14} /> Account Crontabs</button>
         <button className={tab === 'logs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('logs')}><FileText size={14} /> Run Log</button>
         <button className={tab === 'alerts' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('alerts')}><Bell size={14} /> Failure Alerts</button>
       </div>
@@ -225,6 +263,83 @@ export default function CronJobs() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'account' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-3 max-w-sm">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Account User Crontab</h2>
+            <p className="text-xs text-slate-500">View and manage the system crontab of an individual hosting account user.</p>
+            <div className="flex gap-2">
+              <input className="input flex-1 font-mono" placeholder="username"
+                value={acctUser}
+                onChange={e => { setAcctUser(e.target.value); setAcctLoaded(false); setAcctJobs([]); }}
+                onKeyDown={e => e.key === 'Enter' && loadAcctJobs()} />
+              <button className="btn-primary text-sm" onClick={loadAcctJobs} disabled={!acctUser.trim() || acctLoading}>
+                {acctLoading ? '…' : 'Load'}
+              </button>
+            </div>
+          </div>
+
+          {acctLoaded && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-mono">{acctUser}</p>
+                <button className="btn-primary text-sm" onClick={() => setAcctAdding(v => !v)}><Plus size={13} /> Add Job</button>
+              </div>
+
+              {acctAdding && (
+                <div className="card p-4 space-y-3 max-w-lg">
+                  <div>
+                    <label className="label">Schedule (cron expression or @hourly, @daily…)</label>
+                    <input className="input font-mono" value={acctForm.schedule} onChange={e => setAcctForm(f => ({ ...f, schedule: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="label">Command</label>
+                    <input className="input font-mono" placeholder="/usr/bin/php /home/user/cron.php"
+                      value={acctForm.command} onChange={e => setAcctForm(f => ({ ...f, command: e.target.value }))} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn-primary text-sm" onClick={addAcctJob} disabled={!acctForm.command.trim()}>Add</button>
+                    <button className="btn-ghost text-sm" onClick={() => setAcctAdding(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="card overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className={theadCls}><tr>
+                    <th className="table-header-cell w-48">Schedule</th>
+                    <th className="table-header-cell">Command</th>
+                    <th className="px-4 py-3 w-12" />
+                  </tr></thead>
+                  <tbody>
+                    {acctJobs.length === 0 ? (
+                      <tr><td colSpan={3} className="px-4 py-12 text-center text-slate-400 text-sm">
+                        No cron jobs for <code className="font-mono">{acctUser}</code>
+                      </td></tr>
+                    ) : acctJobs.map((j: any) => (
+                      <tr key={j.id} className={rowCls}>
+                        <td className="table-cell">
+                          <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 rounded px-2 py-1 text-slate-700 dark:text-slate-300">
+                            {j.schedule}
+                          </span>
+                        </td>
+                        <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{j.command}</td>
+                        <td className="px-3 py-3">
+                          <button onClick={() => deleteAcctJob(j.id)}
+                            className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === 'alerts' && (
