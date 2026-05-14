@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { FileText, Search, RefreshCw, Globe } from 'lucide-react';
 import { useToast } from '../components/Toast';
@@ -27,6 +27,16 @@ export default function LogViewer() {
   const [domainLogType, setDomainLogType] = useState<'access' | 'error'>('access');
   const [domainContent, setDomainContent] = useState('');
   const [domainLoading, setDomainLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (autoRefresh > 0) {
+      timerRef.current = setInterval(() => { if (mode === 'system') fetchLog(); else fetchDomainLog(); }, autoRefresh * 1000);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [autoRefresh, mode, selected, selectedDomain, domainLogType, lines]);
 
   async function loadLogs() {
     try {
@@ -158,6 +168,16 @@ export default function LogViewer() {
             <button onClick={() => fetchLog()} className="btn-secondary self-end">
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
+            <div>
+              <label className="label">Auto-refresh</label>
+              <select className="input w-24" value={autoRefresh} onChange={e => setAutoRefresh(+e.target.value)}>
+                <option value={0}>Off</option>
+                <option value={5}>5s</option>
+                <option value={10}>10s</option>
+                <option value={30}>30s</option>
+                <option value={60}>60s</option>
+              </select>
+            </div>
           </div>
           {currentLog && <p className="text-xs font-mono text-slate-400 dark:text-slate-500">{path}</p>}
           <div className="card overflow-hidden">

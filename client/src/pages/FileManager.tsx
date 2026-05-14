@@ -136,6 +136,17 @@ export default function FileManager() {
     } catch (e: any) { toast.error(e.response?.data?.error || 'Rename failed'); }
   }
 
+  async function bulkDelete() {
+    if (!selected.size || !confirm(`Delete ${selected.size} item(s)? This cannot be undone.`)) return;
+    const paths = Array.from(selected).map(n => `${currentPath}/${n}`);
+    try {
+      await axios.post('/api/files/bulk-delete', { paths });
+      toast.success(`Deleted ${selected.size} item(s)`);
+      setSelected(new Set());
+      loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Delete failed'); }
+  }
+
   function cutSelected() {
     if (!selected.size) { toast.error('Select files first'); return; }
     setClipboard({ items: Array.from(selected), srcPath: currentPath });
@@ -211,6 +222,9 @@ export default function FileManager() {
               </button>
               <button onClick={cutSelected} className="btn-secondary">
                 <Scissors size={14} /> Cut ({selected.size})
+              </button>
+              <button onClick={bulkDelete} className="btn-secondary text-red-500 border-red-200 hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-900/20">
+                <Trash2 size={14} /> Delete ({selected.size})
               </button>
             </>
           )}

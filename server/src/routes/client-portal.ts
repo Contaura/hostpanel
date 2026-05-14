@@ -2,6 +2,15 @@ import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from '../db';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const speakeasy = require('speakeasy');
+import QRCode from 'qrcode';
+
+db.prepare(`CREATE TABLE IF NOT EXISTS client_totp (
+  client_id INTEGER PRIMARY KEY,
+  secret TEXT NOT NULL,
+  enabled INTEGER DEFAULT 0
+)`).run();
 
 const router = Router();
 
@@ -35,6 +44,29 @@ router.post('/login', async (req: Request, res: Response) => {
   const valid = await bcrypt.compare(password, client.password_hash);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
+  const totp = db.prepare('SELECT * FROM client_totp WHERE client_id = ?').get(client.id) as any;
+  if (totp?.enabled) {
+    const tempToken = jwt.sign({ clientId: client.id, role: 'client_pending_2fa' }, jwtSecret(), { expiresIn: '5m' });
+    return res.json({ requires_2fa: true, temp_token: tempToken });
+  }
+
+  const token = jwt.sign({ clientId: client.id, email: client.email, role: 'client' }, jwtSecret(), { expiresIn: '8h' });
+  res.json({ token, name: client.name, email: client.email });
+});
+
+/* ── Client 2FA verify (after password login) ────────────── */
+
+router.post('/login/totp', async (req: Request, res: Response) => {
+  const { temp_token, code } = req.body;
+  if (!temp_token || !code) return res.status(400).json({ error: 'temp_token and code required' });
+  let payload: any;
+  try { payload = jwt.verify(temp_token, jwtSecret()); } catch { return res.status(401).json({ error: 'Invalid or expired token' }); }
+  if (payload.role !== 'client_pending_2fa') return res.status(401).json({ error: 'Invalid token' });
+  const totp = db.prepare('SELECT * FROM client_totp WHERE client_id = ?').get(payload.clientId) as any;
+  if (!totp?.enabled) return res.status(400).json({ error: '2FA not enabled' });
+  const valid = speakeasy.totp.verify({ secret: totp.secret, encoding: 'base32', token: code, window: 1 });
+  if (!valid) return res.status(401).json({ error: 'Invalid code' });
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(payload.clientId) as any;
   const token = jwt.sign({ clientId: client.id, email: client.email, role: 'client' }, jwtSecret(), { expiresIn: '8h' });
   res.json({ token, name: client.name, email: client.email });
 });
@@ -72,5 +104,40 @@ router.get('/invoices/:id', clientAuth, (req: Request, res: Response) => {
 });
 
 // Admin set-password is in billing.ts (POST /billing/clients/:id/portal-password) — protected by authenticateToken there
+
+/* ── Client 2FA management (authenticated) ───────────────── */
+
+router.get('/totp', clientAuth, (req: Request, res: Response) => {
+  const row = db.prepare('SELECT enabled FROM client_totp WHERE client_id = ?').get((req as any).clientId) as any;
+  res.json({ enabled: !!row?.enabled });
+});
+
+router.post('/totp/setup', clientAuth, async (req: Request, res: Response) => {
+  const clientId = (req as any).clientId;
+  const client = db.prepare('SELECT email FROM clients WHERE id = ?').get(clientId) as any;
+  const secretObj = speakeasy.generateSecret({ length: 20, name: client?.email || 'client' });
+  const secret = secretObj.base32;
+  const otpauth = speakeasy.otpauthURL({ secret, label: client?.email || 'client', issuer: 'HostPanel Client Portal', encoding: 'base32' });
+  const qrDataUrl = await QRCode.toDataURL(otpauth);
+  db.prepare('INSERT INTO client_totp (client_id, secret, enabled) VALUES (?, ?, 0) ON CONFLICT(client_id) DO UPDATE SET secret=excluded.secret, enabled=0').run(clientId, secret);
+  res.json({ secret, qrDataUrl });
+});
+
+router.post('/totp/verify', clientAuth, (req: Request, res: Response) => {
+  const clientId = (req as any).clientId;
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'code required' });
+  const row = db.prepare('SELECT secret FROM client_totp WHERE client_id = ?').get(clientId) as any;
+  if (!row) return res.status(400).json({ error: '2FA setup not initiated' });
+  const valid = speakeasy.totp.verify({ secret: row.secret, encoding: 'base32', token: code, window: 1 });
+  if (!valid) return res.status(401).json({ error: 'Invalid code' });
+  db.prepare('UPDATE client_totp SET enabled=1 WHERE client_id=?').run(clientId);
+  res.json({ success: true });
+});
+
+router.delete('/totp', clientAuth, (req: Request, res: Response) => {
+  db.prepare('DELETE FROM client_totp WHERE client_id=?').run((req as any).clientId);
+  res.json({ success: true });
+});
 
 export default router;

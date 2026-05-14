@@ -293,5 +293,50 @@ router.put('/slow-query-log', async (req: AuthRequest, res: Response) => {
   finally { await conn?.end(); }
 });
 
-export default router;
+/* ── Remote access (per-user host grants) ───────────────── */
 
+router.get('/remote-access', async (_req: AuthRequest, res: Response) => {
+  let conn;
+  try {
+    conn = await getConn();
+    const [rows] = await conn.query<mysql.RowDataPacket[]>(
+      `SELECT user, host FROM mysql.user WHERE user NOT IN ('root','mysql','mariadb.sys') AND host != 'localhost' ORDER BY user, host`
+    );
+    res.json(rows);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
+});
+
+router.post('/remote-access', async (req: AuthRequest, res: Response) => {
+  const { user, host, database = '*', privileges = ['ALL PRIVILEGES'] } = req.body;
+  if (!user || !host) return res.status(400).json({ error: 'user and host required' });
+  if (!/^[a-zA-Z0-9_]+$/.test(user)) return res.status(400).json({ error: 'Invalid username' });
+  if (!/^[a-zA-Z0-9._%*-]+$/.test(host)) return res.status(400).json({ error: 'Invalid host (use % for wildcard)' });
+  const privList = (Array.isArray(privileges) ? privileges : ['ALL PRIVILEGES']).join(', ');
+  const on = database && database !== '*' ? `\`${database}\`.*` : '*.*';
+  let conn;
+  try {
+    conn = await getConn();
+    // Create user@host if not exists
+    await conn.query(`CREATE USER IF NOT EXISTS ?@? IDENTIFIED WITH mysql_native_password`, [user, host]);
+    await conn.query(`GRANT ${privList} ON ${on} TO ?@?`, [user, host]);
+    await conn.query('FLUSH PRIVILEGES');
+    res.json({ success: true, user, host });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
+});
+
+router.delete('/remote-access/:user/:host', async (req: AuthRequest, res: Response) => {
+  const { user, host } = req.params;
+  if (!/^[a-zA-Z0-9_]+$/.test(user)) return res.status(400).json({ error: 'Invalid username' });
+  let conn;
+  try {
+    conn = await getConn();
+    await conn.query(`DROP USER IF EXISTS ?@?`, [user, decodeURIComponent(host)]);
+    await conn.query('FLUSH PRIVILEGES');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
+});
+
+export default router;

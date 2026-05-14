@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock } from 'lucide-react';
@@ -69,6 +69,8 @@ export default function Billing() {
   const [clientForm, setClientForm] = useState({ name: '', email: '', phone: '', company: '', address: '', city: '', country: '', notes: '' });
   const [invoiceForm, setInvoiceForm] = useState({ client_id: '', subtotal: '', tax_rate: '', discount: '', due_date: '', notes: '', currency: 'USD' });
   const [loading, setLoading] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
 
   async function load() {
     try {
@@ -132,6 +134,22 @@ export default function Billing() {
       toast.success('Invoice emailed to client');
     } catch (err: any) { toast.error(err.response?.data?.error || 'Email failed — check SMTP settings'); }
     setEmailingId(null);
+  }
+
+  async function uploadLogo(file: File) {
+    setLogoUploading(true);
+    const fd = new FormData();
+    fd.append('logo', file);
+    try {
+      await axios.post('/api/billing/settings/logo', fd, { headers: { ...authHeaders(), 'Content-Type': 'multipart/form-data' } });
+      toast.success('Company logo uploaded');
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Upload failed'); }
+    finally { setLogoUploading(false); }
+  }
+
+  async function removeLogo() {
+    try { await axios.delete('/api/billing/settings/logo', { headers: authHeaders() }); toast.success('Logo removed'); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
   async function setPortalPassword(clientId: number) {
@@ -414,6 +432,21 @@ export default function Billing() {
       {/* ── Settings ── */}
       {tab === 'settings' && (
         <div className="max-w-xl space-y-5">
+          {/* Company logo */}
+          <div className="card p-5 space-y-3">
+            <h2 className="font-bold text-sm text-slate-900 dark:text-slate-100">Company Logo</h2>
+            <p className="text-sm text-slate-500">The logo will appear in the top-left of generated invoice PDFs.</p>
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={() => logoInputRef.current?.click()} disabled={logoUploading}>
+                {logoUploading ? 'Uploading…' : 'Upload Logo'}
+              </button>
+              <button className="btn-secondary text-red-500" onClick={removeLogo}>Remove</button>
+              <input ref={logoInputRef} type="file" accept=".png,.jpg,.jpeg,.gif,.svg" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ''; }} />
+            </div>
+            <p className="text-xs text-slate-400">PNG/JPG/SVG, max 2 MB. Stored on the server at <code className="font-mono">/var/lib/hostpanel/</code>.</p>
+          </div>
+
           {/* Stripe config card */}
           <div className="card p-6 space-y-5">
             <div className="flex items-start gap-4">

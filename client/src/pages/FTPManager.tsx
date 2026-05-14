@@ -1,9 +1,10 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { FolderUp, Plus, Trash2, Key } from 'lucide-react';
+import { FolderUp, Plus, Trash2, Key, Gauge } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface FTPUser { username: string; directory: string }
+interface FTPLimits { max_rate: string }
 
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
@@ -13,9 +14,11 @@ export default function FTPManager() {
   const [users, setUsers] = useState<FTPUser[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [passTarget, setPassTarget] = useState<string | null>(null);
-  const [form, setForm] = useState({ username: '', password: '', directory: '' });
+  const [form, setForm] = useState({ username: '', password: '', directory: '', max_rate: '' });
   const [newPass, setNewPass] = useState('');
   const [loading, setLoading] = useState(false);
+  const [limitsTarget, setLimitsTarget] = useState<string | null>(null);
+  const [limitsForm, setLimitsForm] = useState<FTPLimits>({ max_rate: '' });
 
   async function load() {
     const { data } = await axios.get<FTPUser[]>('/api/ftp/users');
@@ -23,12 +26,19 @@ export default function FTPManager() {
   }
   useEffect(() => { load(); }, []);
 
+  async function saveLimits(username: string) {
+    try {
+      await axios.put(`/api/ftp/users/${username}/limits`, { max_rate: Number(limitsForm.max_rate) || 0 });
+      toast.success('Limits updated'); setLimitsTarget(null);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
   async function createUser(e: FormEvent) {
     e.preventDefault(); setLoading(true);
     try {
-      await axios.post('/api/ftp/users', form);
+      await axios.post('/api/ftp/users', { ...form, max_rate: Number(form.max_rate) || 0 });
       toast.success(`FTP user "${form.username}" created`);
-      setForm({ username: '', password: '', directory: '' }); setShowForm(false); load();
+      setForm({ username: '', password: '', directory: '', max_rate: '' }); setShowForm(false); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setLoading(false); }
   }
@@ -79,6 +89,11 @@ export default function FTPManager() {
               <input className="input" placeholder="/var/www/example.com/public_html" value={form.directory}
                 onChange={e => setForm({ ...form, directory: e.target.value })} />
             </div>
+            <div>
+              <label className="label">Bandwidth Limit (bytes/sec, 0 = unlimited)</label>
+              <input className="input" type="number" placeholder="0" value={form.max_rate}
+                onChange={e => setForm({ ...form, max_rate: e.target.value })} />
+            </div>
           </div>
           <div className="flex gap-2">
             <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Creating…' : 'Create user'}</button>
@@ -121,6 +136,13 @@ export default function FTPManager() {
                       >
                         <Key size={13} />
                       </button>
+                      <button
+                        onClick={() => { setLimitsTarget(limitsTarget === u.username ? null : u.username); setLimitsForm({ max_rate: '' }); }}
+                        className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
+                        title="Bandwidth limits"
+                      >
+                        <Gauge size={13} />
+                      </button>
                       <button onClick={() => deleteUser(u.username)}
                         className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                         <Trash2 size={13} />
@@ -137,6 +159,19 @@ export default function FTPManager() {
                           value={newPass} onChange={e => setNewPass(e.target.value)} autoFocus />
                         <button onClick={() => changePassword(u.username)} className="btn-primary flex-shrink-0">Update</button>
                         <button onClick={() => setPassTarget(null)} className="btn-ghost flex-shrink-0">Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {limitsTarget === u.username && (
+                  <tr key={`${u.username}-limits`} className="bg-amber-50/50 dark:bg-amber-900/20 border-b border-slate-50 dark:border-slate-700/40">
+                    <td colSpan={3} className="px-4 py-3">
+                      <div className="flex items-center gap-2 max-w-sm">
+                        <Gauge size={14} className="text-amber-500 flex-shrink-0" />
+                        <input type="number" className="input flex-1" placeholder="Max bandwidth (bytes/sec, 0=unlimited)"
+                          value={limitsForm.max_rate} onChange={e => setLimitsForm({ max_rate: e.target.value })} autoFocus />
+                        <button onClick={() => saveLimits(u.username)} className="btn-primary flex-shrink-0">Save</button>
+                        <button onClick={() => setLimitsTarget(null)} className="btn-ghost flex-shrink-0">Cancel</button>
                       </div>
                     </td>
                   </tr>

@@ -5,8 +5,27 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
+import nodemailer from 'nodemailer';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
+
+function sendCronFailureEmail(command: string, exitCode: number, output: string) {
+  const email = (db.prepare("SELECT value FROM settings WHERE key='cron_failure_email'").get() as any)?.value;
+  if (!email || !email.includes('@')) return;
+  const host = (db.prepare("SELECT value FROM settings WHERE key='smtp_host'").get() as any)?.value;
+  if (!host) return;
+  const port = Number((db.prepare("SELECT value FROM settings WHERE key='smtp_port'").get() as any)?.value) || 587;
+  const user = (db.prepare("SELECT value FROM settings WHERE key='smtp_user'").get() as any)?.value || '';
+  const pass = (db.prepare("SELECT value FROM settings WHERE key='smtp_pass'").get() as any)?.value || '';
+  const from = (db.prepare("SELECT value FROM settings WHERE key='smtp_from'").get() as any)?.value || user;
+  const transporter = nodemailer.createTransport({ host, port, auth: user ? { user, pass } : undefined });
+  transporter.sendMail({
+    from: `"HostPanel" <${from}>`,
+    to: email,
+    subject: `Cron job failed (exit ${exitCode})`,
+    text: `Command: ${command}\nExit code: ${exitCode}\n\nOutput:\n${output}`,
+  }).catch(() => {});
+}
 
 db.prepare(`CREATE TABLE IF NOT EXISTS cron_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,8 +130,10 @@ router.post('/run', async (req: AuthRequest, res: Response) => {
     res.json({ output, exit_code: 0 });
   } catch (err: any) {
     const output = (err.stdout + err.stderr || err.message).trim();
-    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, err.code || 1, output);
-    res.json({ output, exit_code: err.code || 1 });
+    const exitCode = err.code || 1;
+    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, exitCode, output);
+    sendCronFailureEmail(command, exitCode, output);
+    res.json({ output, exit_code: exitCode });
   }
 });
 
@@ -122,6 +143,19 @@ router.get('/logs', (_req: AuthRequest, res: Response) => {
 
 router.delete('/logs', (_req: AuthRequest, res: Response) => {
   db.prepare('DELETE FROM cron_logs').run();
+  res.json({ success: true });
+});
+
+/* ── Cron failure email setting ──────────────────────────── */
+
+router.get('/failure-email', (_req: AuthRequest, res: Response) => {
+  const val = (db.prepare("SELECT value FROM settings WHERE key='cron_failure_email'").get() as any)?.value || '';
+  res.json({ email: val });
+});
+
+router.post('/failure-email', (req: AuthRequest, res: Response) => {
+  const { email } = req.body;
+  db.prepare("INSERT INTO settings (key, value) VALUES ('cron_failure_email', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(email || '');
   res.json({ success: true });
 });
 

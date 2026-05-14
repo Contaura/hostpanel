@@ -78,6 +78,42 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Mailing list members ────────────────────────────────── */
+
+db.exec(`CREATE TABLE IF NOT EXISTS mailing_list_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  list_id INTEGER NOT NULL,
+  address TEXT NOT NULL,
+  name TEXT,
+  subscribed_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(list_id, address)
+)`);
+
+router.get('/lists/:id/members', (req: Request, res: Response) => {
+  const list = db.prepare('SELECT * FROM mailing_lists WHERE id = ?').get(req.params.id);
+  if (!list) return res.status(404).json({ error: 'List not found' });
+  res.json(db.prepare('SELECT * FROM mailing_list_members WHERE list_id = ? ORDER BY subscribed_at DESC').all(req.params.id));
+});
+
+router.post('/lists/:id/members', (req: Request, res: Response) => {
+  const { address, name } = req.body;
+  if (!address || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    return res.status(400).json({ error: 'Valid email address required' });
+  }
+  try {
+    const r = db.prepare('INSERT INTO mailing_list_members (list_id, address, name) VALUES (?, ?, ?)').run(req.params.id, address, name || '');
+    res.json(db.prepare('SELECT * FROM mailing_list_members WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) {
+    if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Address already subscribed' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/lists/:id/members/:memberId', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM mailing_list_members WHERE id = ? AND list_id = ?').run(req.params.memberId, req.params.id);
+  res.json({ success: true });
+});
+
 /* ── Webmail SSO link ────────────────────────────────────── */
 
 router.get('/webmail', async (_req: Request, res: Response) => {

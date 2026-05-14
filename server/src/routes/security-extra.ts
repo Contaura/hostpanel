@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
@@ -50,6 +51,25 @@ router.delete('/2fa', (req: AuthRequest, res: Response) => {
   const username = (req as any).user?.username || process.env.ADMIN_USER || 'admin';
   db.prepare('UPDATE admin_users SET totp_secret = NULL, totp_enabled = 0 WHERE username = ?').run(username);
   res.json({ success: true });
+});
+
+/* ── 2FA Backup Codes ────────────────────────────────────── */
+
+router.post('/2fa/backup-codes', (req: AuthRequest, res: Response) => {
+  const username = (req as any).user?.username || process.env.ADMIN_USER || 'admin';
+  const user = db.prepare('SELECT totp_enabled FROM admin_users WHERE username = ?').get(username) as any;
+  if (!user?.totp_enabled) return res.status(400).json({ error: '2FA must be enabled first' });
+  const codes = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
+  const codesJson = JSON.stringify(codes);
+  db.prepare('UPDATE admin_users SET totp_backup_codes = ? WHERE username = ?').run(codesJson, username);
+  res.json({ codes });
+});
+
+router.get('/2fa/backup-codes', (req: AuthRequest, res: Response) => {
+  const username = (req as any).user?.username || process.env.ADMIN_USER || 'admin';
+  const user = db.prepare('SELECT totp_backup_codes FROM admin_users WHERE username = ?').get(username) as any;
+  const codes: string[] = user?.totp_backup_codes ? JSON.parse(user.totp_backup_codes) : [];
+  res.json({ count: codes.length, has_codes: codes.length > 0 });
 });
 
 /* ── Change Password ─────────────────────────────────────── */

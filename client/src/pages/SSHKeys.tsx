@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Key, Plus, Trash2, Copy } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, User } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface SSHKey {
@@ -13,12 +13,22 @@ interface SSHKey {
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
+type Tab = 'admin' | 'account';
+
 export default function SSHKeys() {
   const toast = useToast();
+  const [tab, setTab] = useState<Tab>('admin');
   const [keys, setKeys] = useState<SSHKey[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Per-account state
+  const [acctUsername, setAcctUsername] = useState('');
+  const [acctKeys, setAcctKeys] = useState<SSHKey[]>([]);
+  const [showAcctForm, setShowAcctForm] = useState(false);
+  const [newAcctKey, setNewAcctKey] = useState('');
+  const [acctLoading, setAcctLoading] = useState(false);
 
   async function load() {
     try {
@@ -46,6 +56,29 @@ export default function SSHKeys() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  async function loadAcctKeys() {
+    if (!acctUsername.trim()) return;
+    try {
+      const { data } = await axios.get<SSHKey[]>(`/api/sshkeys/account/${acctUsername.trim()}`);
+      setAcctKeys(data);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); setAcctKeys([]); }
+  }
+
+  async function addAcctKey(e: FormEvent) {
+    e.preventDefault(); setAcctLoading(true);
+    try {
+      await axios.post(`/api/sshkeys/account/${acctUsername.trim()}/add`, { key: newAcctKey });
+      toast.success('Key added'); setNewAcctKey(''); setShowAcctForm(false); loadAcctKeys();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setAcctLoading(false); }
+  }
+
+  async function removeAcctKey(id: number) {
+    if (!confirm('Remove this SSH key?')) return;
+    try { await axios.delete(`/api/sshkeys/account/${acctUsername.trim()}/${id}`); toast.success('Removed'); loadAcctKeys(); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
   function copyKey(fullKey: string) {
     navigator.clipboard.writeText(fullKey).then(() => toast.success('Key copied to clipboard'));
   }
@@ -62,12 +95,82 @@ export default function SSHKeys() {
           <h1 className="page-title">SSH Key Manager</h1>
           <p className="page-subtitle">Manage authorized SSH public keys for this server</p>
         </div>
-        <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-          <Plus size={14} /> Add SSH Key
-        </button>
+        {tab === 'admin' && (
+          <button onClick={() => setShowForm(v => !v)} className="btn-primary">
+            <Plus size={14} /> Add SSH Key
+          </button>
+        )}
+        {tab === 'account' && acctUsername && (
+          <button onClick={() => setShowAcctForm(v => !v)} className="btn-primary">
+            <Plus size={14} /> Add Key
+          </button>
+        )}
       </div>
 
-      {showForm && (
+      <div className="tab-bar">
+        <button className={tab === 'admin' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('admin')}><Key size={14} /> Admin Keys</button>
+        <button className={tab === 'account' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('account')}><User size={14} /> Account Keys</button>
+      </div>
+
+      {tab === 'account' && (
+        <div className="space-y-4">
+          <div className="flex gap-3 items-end">
+            <div className="flex-1">
+              <label className="label">System Username</label>
+              <input className="input font-mono" placeholder="ftpuser or hosting account username" value={acctUsername} onChange={e => setAcctUsername(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadAcctKeys()} />
+            </div>
+            <button className="btn-secondary self-end" onClick={loadAcctKeys}>Load Keys</button>
+          </div>
+
+          {showAcctForm && (
+            <form onSubmit={addAcctKey} className="card p-5 max-w-2xl space-y-4">
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Add Key for {acctUsername}</h2>
+              <div>
+                <label className="label">Public Key</label>
+                <textarea className="input font-mono text-xs h-28 resize-none leading-relaxed" placeholder="ssh-ed25519 AAAA... user@machine"
+                  value={newAcctKey} onChange={e => setNewAcctKey(e.target.value)} required />
+              </div>
+              <div className="flex gap-2">
+                <button type="submit" disabled={acctLoading} className="btn-primary">{acctLoading ? 'Adding…' : 'Add key'}</button>
+                <button type="button" onClick={() => setShowAcctForm(false)} className="btn-secondary">Cancel</button>
+              </div>
+            </form>
+          )}
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Type</th>
+                <th className="table-header-cell">Key Fingerprint</th>
+                <th className="table-header-cell hidden md:table-cell">Comment</th>
+                <th className="px-4 py-3 w-20" />
+              </tr></thead>
+              <tbody>
+                {acctKeys.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-16 text-center">
+                    <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                    <p className="text-slate-400 text-sm">{acctUsername ? 'No SSH keys for this user' : 'Enter a username and click Load Keys'}</p>
+                  </td></tr>
+                ) : acctKeys.map(k => (
+                  <tr key={k.id} className={rowCls}>
+                    <td className="table-cell"><span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span></td>
+                    <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">{k.key.slice(0, 20)}…{k.key.slice(-8)}</td>
+                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())} className="btn-icon hover:!text-indigo-600" title="Copy"><Copy size={13} /></button>
+                        <button onClick={() => removeAcctKey(k.id)} className="btn-icon hover:!text-rose-600" title="Remove"><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'admin' && showForm && (
         <form onSubmit={addKey} className="card p-5 max-w-2xl space-y-4">
           <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Add Public Key</h2>
           <div>
@@ -92,49 +195,51 @@ export default function SSHKeys() {
         </form>
       )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className={theadCls}><tr>
-            <th className="table-header-cell">Type</th>
-            <th className="table-header-cell">Key Fingerprint</th>
-            <th className="table-header-cell hidden md:table-cell">Comment</th>
-            <th className="px-4 py-3 w-20" />
-          </tr></thead>
-          <tbody>
-            {keys.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-16 text-center">
-                <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No SSH keys configured</p>
-              </td></tr>
-            ) : keys.map(k => (
-              <tr key={k.id} className={rowCls}>
-                <td className="table-cell">
-                  <span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span>
-                </td>
-                <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">
-                  {k.key.slice(0, 20)}…{k.key.slice(-8)}
-                </td>
-                <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())}
-                      className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
-                      title="Copy">
-                      <Copy size={13} />
-                    </button>
-                    <button onClick={() => remove(k.id)}
-                      className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
-                      title="Remove">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {tab === 'admin' && (
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className={theadCls}><tr>
+              <th className="table-header-cell">Type</th>
+              <th className="table-header-cell">Key Fingerprint</th>
+              <th className="table-header-cell hidden md:table-cell">Comment</th>
+              <th className="px-4 py-3 w-20" />
+            </tr></thead>
+            <tbody>
+              {keys.length === 0 ? (
+                <tr><td colSpan={4} className="px-4 py-16 text-center">
+                  <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                  <p className="text-slate-400 text-sm">No SSH keys configured</p>
+                </td></tr>
+              ) : keys.map(k => (
+                <tr key={k.id} className={rowCls}>
+                  <td className="table-cell">
+                    <span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span>
+                  </td>
+                  <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">
+                    {k.key.slice(0, 20)}…{k.key.slice(-8)}
+                  </td>
+                  <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())}
+                        className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
+                        title="Copy">
+                        <Copy size={13} />
+                      </button>
+                      <button onClick={() => remove(k.id)}
+                        className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
+                        title="Remove">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

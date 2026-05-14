@@ -64,12 +64,47 @@ router.delete('/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-/* ── Reseller WHM summary ────────────────────────────────── */
+/* ── Reseller WHM summary with real usage ────────────────── */
 
-router.get('/:id/summary', (req: Request, res: Response) => {
+router.get('/:id/summary', async (req: Request, res: Response) => {
   const reseller = db.prepare('SELECT r.*, u.username FROM resellers r LEFT JOIN admin_users u ON r.admin_user_id = u.id WHERE r.id = ?').get(req.params.id) as any;
   if (!reseller) return res.status(404).json({ error: 'Not found' });
-  res.json({ reseller, usage: { accounts: 0, clients: 0, disk: 0, bandwidth: 0 } });
+
+  // Accounts owned by this reseller (matched by reseller_id column if exists, else by admin user)
+  const accounts = db.prepare(`SELECT * FROM accounts WHERE reseller_id = ? OR (reseller_id IS NULL AND 0=1)`)
+    .all(reseller.id) as any[];
+
+  const accountCount = accounts.length;
+  const clientIds = [...new Set(accounts.map((a: any) => a.client_id).filter(Boolean))];
+  const clientCount = clientIds.length;
+
+  // Disk usage
+  let diskBytes = 0;
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const ea = promisify(exec);
+  for (const acc of accounts) {
+    try {
+      const { stdout } = await ea(`du -sb "/var/www/${acc.domain}" 2>/dev/null || echo 0`);
+      diskBytes += parseInt(stdout.trim().split(/\s+/)[0]) || 0;
+    } catch {}
+  }
+
+  res.json({
+    reseller,
+    usage: {
+      accounts: accountCount,
+      clients: clientCount,
+      disk_bytes: diskBytes,
+      disk_mb: Math.round(diskBytes / 1024 / 1024),
+    },
+    alloc: {
+      disk_mb: reseller.alloc_disk,
+      accounts: reseller.alloc_accounts,
+      emails: reseller.alloc_emails,
+      databases: reseller.alloc_dbs,
+    },
+  });
 });
 
 export default router;

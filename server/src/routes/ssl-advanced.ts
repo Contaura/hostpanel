@@ -154,5 +154,57 @@ router.post('/renew-all', async (_req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── CSR generator ───────────────────────────────────────── */
+
+router.post('/csr', async (req: Request, res: Response) => {
+  const { domain, country = 'US', state = 'CA', city = 'San Francisco', org = 'My Company', email = '' } = req.body;
+  if (!domain || /[^a-zA-Z0-9._*-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const safe = domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const keyFile = `/tmp/hp_${safe}.key`;
+  const csrFile = `/tmp/hp_${safe}.csr`;
+  const subject = `/C=${country}/ST=${state}/L=${city}/O=${org}/CN=${domain}${email ? `/emailAddress=${email}` : ''}`;
+  try {
+    await execAsync(`openssl req -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${csrFile}" -subj "${subject}" 2>/dev/null`);
+    const { stdout: csr } = await execAsync(`cat "${csrFile}"`);
+    const { stdout: key } = await execAsync(`cat "${keyFile}"`);
+    await execAsync(`rm -f "${keyFile}" "${csrFile}"`).catch(() => {});
+    res.json({ csr, private_key: key, domain, subject });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Self-signed certificate generator ──────────────────── */
+
+router.post('/self-signed', async (req: Request, res: Response) => {
+  const { domain, days = 365, country = 'US', org = 'My Company' } = req.body;
+  if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const keyFile = `/tmp/hp_ss_${safe}.key`;
+  const crtFile = `/tmp/hp_ss_${safe}.crt`;
+  try {
+    await execAsync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${crtFile}" -days ${parseInt(String(days)) || 365} -subj "/C=${country}/O=${org}/CN=${domain}" 2>/dev/null`);
+    const { stdout: cert } = await execAsync(`cat "${crtFile}"`);
+    const { stdout: key } = await execAsync(`cat "${keyFile}"`);
+    await execAsync(`rm -f "${keyFile}" "${crtFile}"`).catch(() => {});
+    res.json({ certificate: cert, private_key: key, domain, days });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Certificate import ──────────────────────────────────── */
+
+router.post('/import', async (req: Request, res: Response) => {
+  const { domain, certificate, private_key, ca_bundle } = req.body;
+  if (!domain || !certificate || !private_key) return res.status(400).json({ error: 'domain, certificate, private_key required' });
+  if (/[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const LE_DIR = `/etc/letsencrypt/live/${domain}`;
+  try {
+    await execAsync(`mkdir -p "${LE_DIR}"`);
+    const { writeFileSync } = await import('fs');
+    writeFileSync(`${LE_DIR}/fullchain.pem`, (certificate + '\n' + (ca_bundle || '')).trim() + '\n');
+    writeFileSync(`${LE_DIR}/privkey.pem`, private_key.trim() + '\n');
+    await execAsync('apachectl graceful').catch(() => {});
+    res.json({ success: true, domain, path: LE_DIR });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
 

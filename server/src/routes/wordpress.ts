@@ -193,7 +193,38 @@ router.get('/auto-updates', (_req: Request, res: Response) => {
   res.json(db.prepare('SELECT * FROM wp_auto_updates').all());
 });
 
-router.put('/auto-updates/:domain', (req: Request, res: Response) => {
+const SCHEDULE_MAP: Record<string, string> = {
+  daily:   '0 3 * * *',
+  weekly:  '0 3 * * 0',
+  monthly: '0 3 1 * *',
+};
+
+async function syncWpCrontab() {
+  const jobs = db.prepare('SELECT * FROM wp_auto_updates').all() as any[];
+  try {
+    const { stdout } = await execAsync('crontab -l 2>/dev/null || true');
+    const existing = stdout.split('\n').filter(l => !l.includes('# wp-autoupdate:'));
+    const newEntries = jobs.map(j => {
+      const sched = SCHEDULE_MAP[j.schedule] || SCHEDULE_MAP.weekly;
+      const parts: string[] = [];
+      if (j.update_core)    parts.push('core update');
+      if (j.update_plugins) parts.push('plugin update --all');
+      if (j.update_themes)  parts.push('theme update --all');
+      if (!parts.length) return null;
+      const cmds = parts.map(p => `wp --path="${wpPath(j.domain)}" --allow-root ${p}`).join(' && ');
+      return `${sched} ${cmds} # wp-autoupdate:${j.domain}`;
+    }).filter(Boolean);
+    const { writeFileSync, unlinkSync } = await import('fs');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const tmp = join(tmpdir(), `cron_wp_${Date.now()}`);
+    writeFileSync(tmp, [...existing, ...newEntries].join('\n') + '\n');
+    await execAsync(`crontab ${tmp}`);
+    try { unlinkSync(tmp); } catch {}
+  } catch {}
+}
+
+router.put('/auto-updates/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const { update_core = 1, update_plugins = 1, update_themes = 1, schedule = 'weekly' } = req.body;
@@ -202,11 +233,13 @@ router.put('/auto-updates/:domain', (req: Request, res: Response) => {
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(domain) DO UPDATE SET update_core=excluded.update_core, update_plugins=excluded.update_plugins, update_themes=excluded.update_themes, schedule=excluded.schedule
   `).run(domain, update_core ? 1 : 0, update_plugins ? 1 : 0, update_themes ? 1 : 0, schedule);
+  await syncWpCrontab();
   res.json({ success: true });
 });
 
-router.delete('/auto-updates/:domain', (req: Request, res: Response) => {
+router.delete('/auto-updates/:domain', async (req: Request, res: Response) => {
   db.prepare('DELETE FROM wp_auto_updates WHERE domain = ?').run(req.params.domain);
+  await syncWpCrontab();
   res.json({ success: true });
 });
 

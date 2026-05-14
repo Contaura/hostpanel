@@ -239,5 +239,52 @@ router.post('/:id/export', async (req: AuthRequest, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-export default router;
+/* ── Account expiry / auto-suspension ───────────────────── */
 
+router.get('/check-expiry', async (_req: AuthRequest, res: Response) => {
+  const now = new Date().toISOString().split('T')[0];
+  const expired = db.prepare(`
+    SELECT id, username, domain, expires_at, status
+    FROM accounts
+    WHERE expires_at IS NOT NULL AND expires_at <= ? AND status != 'suspended'
+  `).all(now) as any[];
+
+  const suspended: string[] = [];
+  for (const acc of expired) {
+    db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(acc.id);
+    try {
+      await execAsync(`mv "${path.join(VHOST_DIR, `${acc.domain}.conf`)}" "${path.join(VHOST_DIR, `${acc.domain}.conf.disabled`)}" 2>/dev/null || true`);
+    } catch {}
+    suspended.push(acc.username);
+  }
+
+  if (suspended.length > 0) {
+    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+  }
+
+  res.json({ checked: expired.length, suspended });
+});
+
+router.post('/:id/suspend', async (req: AuthRequest, res: Response) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  try {
+    db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(account.id);
+    await execAsync(`mv "${path.join(VHOST_DIR, `${account.domain}.conf`)}" "${path.join(VHOST_DIR, `${account.domain}.conf.disabled`)}" 2>/dev/null || true`);
+    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/:id/unsuspend', async (req: AuthRequest, res: Response) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+  try {
+    db.prepare("UPDATE accounts SET status='active' WHERE id=?").run(account.id);
+    await execAsync(`mv "${path.join(VHOST_DIR, `${account.domain}.conf.disabled`)}" "${path.join(VHOST_DIR, `${account.domain}.conf`)}" 2>/dev/null || true`);
+    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+export default router;

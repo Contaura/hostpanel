@@ -37,6 +37,7 @@ export default function Accounts() {
   const [clients, setClients]   = useState<Client[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [usageData, setUsageData] = useState<Record<number, any>>({});
   const [loading, setLoading]   = useState(false);
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
@@ -91,6 +92,13 @@ export default function Accounts() {
     if (daysLeft < 0) return <span className="badge-red text-xs">Expired</span>;
     if (daysLeft <= 7) return <span className="badge-yellow text-xs">{daysLeft}d left</span>;
     return null;
+  }
+
+  async function loadUsage(id: number) {
+    try {
+      const { data } = await axios.get(`/api/accounts/${id}/usage`);
+      setUsageData(p => ({ ...p, [id]: data }));
+    } catch {}
   }
 
   async function deleteAccount(id: number, username: string) {
@@ -272,8 +280,11 @@ export default function Accounts() {
                           <a.icon size={13} />
                         </button>
                       ))}
-                      <button onClick={() => setExpanded(expanded === acc.id ? null : acc.id)}
-                        className="btn-icon" title="Details">
+                      <button onClick={() => {
+                        const next = expanded === acc.id ? null : acc.id;
+                        setExpanded(next);
+                        if (next) loadUsage(acc.id);
+                      }} className="btn-icon" title="Details">
                         {expanded === acc.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                       </button>
                       <button
@@ -316,6 +327,16 @@ export default function Accounts() {
                           <div className="text-xs text-slate-400 uppercase tracking-wide mb-0.5">Notes</div>
                           <div className="text-slate-600 dark:text-slate-400">{acc.notes || '—'}</div>
                         </div>
+                        {usageData[acc.id] && (
+                          <div>
+                            <div className="text-xs text-slate-400 uppercase tracking-wide mb-0.5">Disk Usage</div>
+                            <div className="text-slate-600 dark:text-slate-400 font-mono">
+                              {(usageData[acc.id].disk_bytes / 1024 / 1024).toFixed(1)} MB
+                              {acc.disk_quota ? ` / ${acc.disk_quota} MB` : ''}
+                            </div>
+                            <div className="text-xs text-slate-400">{usageData[acc.id].file_count} files</div>
+                          </div>
+                        )}
                       </div>
                     </td>
                   </tr>

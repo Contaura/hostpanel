@@ -152,4 +152,89 @@ router.post('/dns/:domain', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/* ── DNS record delete (by index) ────────────────────────── */
+
+router.delete('/dns/:domain/:index', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  const idx = parseInt(req.params.index);
+  if (!sanitizeDomain(domain) || isNaN(idx)) return res.status(400).json({ error: 'Invalid params' });
+  try {
+    const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
+    const content = await fs.readFile(zoneFile, 'utf-8').catch(() => '');
+    const lines = content.split('\n');
+    const recordLines: number[] = [];
+    lines.forEach((l, i) => { if (/^\S+\s+\d*\s*IN\s+\w+\s+.+/.test(l.trim())) recordLines.push(i); });
+    if (idx < 0 || idx >= recordLines.length) return res.status(404).json({ error: 'Record index out of range' });
+    lines.splice(recordLines[idx], 1);
+    await fs.writeFile(zoneFile, lines.join('\n'));
+    await execAsync('rndc reload 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── DNS record update (by index) ────────────────────────── */
+
+router.put('/dns/:domain/:index', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  const idx = parseInt(req.params.index);
+  const { name, type, value, ttl = '3600' } = req.body;
+  if (!sanitizeDomain(domain) || isNaN(idx)) return res.status(400).json({ error: 'Invalid params' });
+  const allowedTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV'];
+  if (!allowedTypes.includes(type)) return res.status(400).json({ error: 'Invalid record type' });
+  try {
+    const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
+    const content = await fs.readFile(zoneFile, 'utf-8').catch(() => '');
+    const lines = content.split('\n');
+    const recordLines: number[] = [];
+    lines.forEach((l, i) => { if (/^\S+\s+\d*\s*IN\s+\w+\s+.+/.test(l.trim())) recordLines.push(i); });
+    if (idx < 0 || idx >= recordLines.length) return res.status(404).json({ error: 'Record index out of range' });
+    lines[recordLines[idx]] = `${name}\t${ttl}\tIN\t${type}\t${value}`;
+    await fs.writeFile(zoneFile, lines.join('\n'));
+    await execAsync('rndc reload 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── DNSSEC ─────────────────────────────────────────────── */
+
+router.get('/dnssec/:domain/status', (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  if (!sanitizeDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const { existsSync } = require('fs');
+  const signed = existsSync(path.join(NAMED_DIR, `${domain}.zone.signed`));
+  const hasKeys = existsSync(path.join(NAMED_DIR, `K${domain}.+`)) ||
+    require('fs').readdirSync(NAMED_DIR).some((f: string) => f.startsWith(`K${domain}.`));
+  res.json({ signed, has_keys: hasKeys });
+});
+
+router.post('/dnssec/:domain/sign', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  if (!sanitizeDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  try {
+    // Generate ZSK and KSK if not present
+    const keys = require('fs').readdirSync(NAMED_DIR).filter((f: string) => f.startsWith(`K${domain}.`) && f.endsWith('.key'));
+    if (keys.length < 2) {
+      await execAsync(`dnssec-keygen -a NSEC3RSASHA1 -b 2048 -n ZONE ${domain}`, { cwd: NAMED_DIR, timeout: 60000 });
+      await execAsync(`dnssec-keygen -a NSEC3RSASHA1 -b 1024 -n ZONE -f KSK ${domain}`, { cwd: NAMED_DIR, timeout: 60000 });
+    }
+    const salt = require('crypto').randomBytes(8).toString('hex');
+    const { stdout } = await execAsync(
+      `dnssec-signzone -A -3 ${salt} -N increment -o ${domain} -t "${NAMED_DIR}/${domain}.zone"`,
+      { cwd: NAMED_DIR, timeout: 120000 }
+    );
+    await execAsync('rndc reload 2>/dev/null || true');
+    res.json({ success: true, output: stdout });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/dnssec/:domain/unsign', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  if (!sanitizeDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  try {
+    await execAsync(`rm -f "${NAMED_DIR}/${domain}.zone.signed" "${NAMED_DIR}"/K${domain}.*.key "${NAMED_DIR}"/K${domain}.*.private 2>/dev/null || true`);
+    await execAsync('rndc reload 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

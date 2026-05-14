@@ -190,5 +190,47 @@ router.delete('/spam-rules/:domain/:id', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+/* ── Catch-all address (Postfix virtual, @domain form) ───── */
+
+router.get('/catch-all', (_req: Request, res: Response) => {
+  try {
+    const all = readForwarders();
+    const catchAlls = all.filter(f => f.source.startsWith('@'));
+    res.json(catchAlls);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/catch-all', async (req: Request, res: Response) => {
+  const { domain, dest } = req.body;
+  if (!domain || !dest) return res.status(400).json({ error: 'domain and dest required' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) return res.status(400).json({ error: 'Invalid destination email' });
+  const source = `@${domain.replace(/^@/, '')}`;
+  try {
+    const list = readForwarders();
+    if (list.find(f => f.source === source)) {
+      // update existing
+      const updated = list.map(f => f.source === source ? { source, dest } : f);
+      writeForwarders(updated);
+    } else {
+      list.push({ source, dest });
+      writeForwarders(list);
+    }
+    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
+    await execAsync('postfix reload').catch(() => {});
+    res.json({ success: true, source, dest });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/catch-all/:domain', async (req: Request, res: Response) => {
+  const source = `@${req.params.domain}`;
+  try {
+    const list = readForwarders().filter(f => f.source !== source);
+    writeForwarders(list);
+    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
+    await execAsync('postfix reload').catch(() => {});
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
 

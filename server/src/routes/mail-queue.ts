@@ -70,6 +70,52 @@ router.delete('/', async (_req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Retry (requeue) single message ─────────────────────── */
+
+router.post('/retry/:id', async (req: Request, res: Response) => {
+  if (!/^[A-F0-9]+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid message ID' });
+  try {
+    await execAsync(`postsuper -r ${req.params.id}`);
+    await execAsync('postqueue -f').catch(() => {});
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Hold / unhold message ───────────────────────────────── */
+
+router.post('/hold/:id', async (req: Request, res: Response) => {
+  if (!/^[A-F0-9]+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid message ID' });
+  try {
+    await execAsync(`postsuper -h ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/unhold/:id', async (req: Request, res: Response) => {
+  if (!/^[A-F0-9]+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid message ID' });
+  try {
+    await execAsync(`postsuper -H ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Bounce/NDR log ──────────────────────────────────────── */
+
+router.get('/bounce-log', async (req: Request, res: Response) => {
+  const limit = parseInt((req.query.limit as string) || '200');
+  const LOG_PATHS = ['/var/log/maillog', '/var/log/mail.log'];
+  const logPath = LOG_PATHS.find(p => require('fs').existsSync(p));
+  if (!logPath) return res.json([]);
+  try {
+    const { stdout } = await execAsync(`grep -i "bounce\|status=bounced\|undeliverable\|5\\." "${logPath}" 2>/dev/null | tail -${Math.min(limit, 1000)}`);
+    const lines = stdout.trim().split('\n').filter(Boolean).reverse().map((line, i) => {
+      const m = line.match(/^(\w+ +\d+ \d+:\d+:\d+).*postfix\S*: (\S+): (.+)/);
+      return { id: i, raw: line, time: m?.[1] || '', queue_id: m?.[2] || '', message: m?.[3] || line };
+    });
+    res.json(lines);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── Email delivery log (Postfix mail.log) ───────────────────*/
 
 router.get('/delivery-log', async (req: Request, res: Response) => {

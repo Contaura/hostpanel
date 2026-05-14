@@ -1,8 +1,24 @@
 import { Router, Response } from 'express';
 import PDFDocument from 'pdfkit';
 import nodemailer from 'nodemailer';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
+
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      const dir = process.env.LOGO_DIR || '/var/lib/hostpanel';
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => cb(null, 'company_logo' + path.extname(file.originalname)),
+  }),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, /\.(png|jpg|jpeg|gif|svg)$/i.test(file.originalname)),
+});
 
 const router = Router();
 
@@ -188,13 +204,23 @@ router.get('/invoices/:id/pdf', (req, res: Response) => {
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="invoice-${row.invoice_number}.pdf"`);
 
+  const logoPath = getSetting('company_logo');
+  const hasLogo = logoPath && fs.existsSync(logoPath);
+
   const doc = new PDFDocument({ margin: 50 });
   doc.pipe(res);
 
   // Header
-  doc.fontSize(22).font('Helvetica-Bold').text(company, 50, 50);
-  if (companyEmail) doc.fontSize(10).font('Helvetica').text(companyEmail, 50, 75);
-  if (companyAddr)  doc.text(companyAddr, 50, 88);
+  if (hasLogo) {
+    try { doc.image(logoPath, 50, 45, { width: 70 }); } catch {}
+    doc.fontSize(18).font('Helvetica-Bold').text(company, 130, 50);
+    if (companyEmail) doc.fontSize(10).font('Helvetica').text(companyEmail, 130, 72);
+    if (companyAddr)  doc.text(companyAddr, 130, 85);
+  } else {
+    doc.fontSize(22).font('Helvetica-Bold').text(company, 50, 50);
+    if (companyEmail) doc.fontSize(10).font('Helvetica').text(companyEmail, 50, 75);
+    if (companyAddr)  doc.text(companyAddr, 50, 88);
+  }
 
   doc.fontSize(28).font('Helvetica-Bold').fillColor('#4f46e5').text('INVOICE', 400, 50, { align: 'right' });
   doc.fontSize(10).font('Helvetica').fillColor('#374151');
@@ -469,6 +495,21 @@ router.put('/promo-codes/:id', (req, res: Response) => {
 
 router.delete('/promo-codes/:id', (req, res: Response) => {
   db.prepare('DELETE FROM promo_codes WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+/* ─── Company logo upload ────────────────────────────────── */
+
+router.post('/settings/logo', logoUpload.single('logo'), (req, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No image file uploaded' });
+  db.prepare("INSERT INTO settings (key, value) VALUES ('company_logo', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(req.file.path);
+  res.json({ path: req.file.path, filename: req.file.filename });
+});
+
+router.delete('/settings/logo', (req, res: Response) => {
+  const logoPath = getSetting('company_logo');
+  if (logoPath) { try { fs.unlinkSync(logoPath); } catch {} }
+  db.prepare("DELETE FROM settings WHERE key='company_logo'").run();
   res.json({ success: true });
 });
 

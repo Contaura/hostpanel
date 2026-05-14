@@ -123,4 +123,67 @@ router.delete('/:name', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Staging environments ────────────────────────────────── */
+
+db.exec(`CREATE TABLE IF NOT EXISTS app_staging (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  app_name TEXT NOT NULL,
+  staging_name TEXT NOT NULL UNIQUE,
+  staging_port INTEGER NOT NULL,
+  staging_dir TEXT NOT NULL,
+  branch TEXT DEFAULT 'staging',
+  status TEXT DEFAULT 'stopped',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+
+router.get('/:name/staging', (req: Request, res: Response) => {
+  res.json(db.prepare('SELECT * FROM app_staging WHERE app_name = ?').all(req.params.name));
+});
+
+router.post('/:name/stage', async (req: Request, res: Response) => {
+  const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
+  if (!app) return res.status(404).json({ error: 'App not found' });
+  const { port, branch = 'staging' } = req.body;
+  if (!port) return res.status(400).json({ error: 'port required' });
+  const stagingName = `${app.name}-staging`;
+  const stagingDir = app.working_dir.replace(/\/?$/, '-staging');
+  try {
+    // Clone or sync working dir to staging dir
+    if (!existsSync(stagingDir)) {
+      await execAsync(`cp -r "${app.working_dir}" "${stagingDir}" 2>&1`);
+    }
+    // Start under PM2 with a different name
+    const envStr = Object.entries(JSON.parse(app.env_vars || '{}')).map(([k, v]) => `${k}=${v}`).join(',');
+    const envFlag = envStr ? `--env-var="${envStr}"` : '';
+    await execAsync(`pm2 start "${app.start_script}" --name "${stagingName}" ${envFlag} --cwd "${stagingDir}" 2>&1`).catch(() => {});
+    const r = db.prepare('INSERT OR REPLACE INTO app_staging (app_name, staging_name, staging_port, staging_dir, branch, status) VALUES (?, ?, ?, ?, ?, ?)').run(app.name, stagingName, parseInt(port), stagingDir, branch, 'running');
+    res.json(db.prepare('SELECT * FROM app_staging WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/:name/promote', async (req: Request, res: Response) => {
+  const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
+  if (!app) return res.status(404).json({ error: 'App not found' });
+  const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(app.name) as any;
+  if (!staging) return res.status(404).json({ error: 'No staging environment found' });
+  try {
+    // Stop production, sync staging dir → production dir, restart production
+    await execAsync(`pm2 stop "${app.name}" 2>&1`).catch(() => {});
+    await execAsync(`rsync -a --delete "${staging.staging_dir}/" "${app.working_dir}/" 2>&1`);
+    await execAsync(`pm2 restart "${app.name}" 2>&1`);
+    db.prepare("UPDATE managed_apps SET status='running' WHERE name=?").run(app.name);
+    res.json({ success: true, message: `Staging promoted to production for ${app.name}` });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/:name/staging', async (req: Request, res: Response) => {
+  const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(req.params.name) as any;
+  if (!staging) return res.status(404).json({ error: 'No staging environment' });
+  try {
+    await execAsync(`pm2 delete "${staging.staging_name}" 2>&1`).catch(() => {});
+    db.prepare('DELETE FROM app_staging WHERE app_name = ?').run(req.params.name);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

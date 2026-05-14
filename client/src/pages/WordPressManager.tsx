@@ -294,7 +294,10 @@ export default function WordPressManager() {
                         <td className="table-cell">{u.update_core ? '✓' : '—'}</td>
                         <td className="table-cell">{u.update_plugins ? '✓' : '—'}</td>
                         <td className="table-cell">{u.update_themes ? '✓' : '—'}</td>
-                        <td className="table-cell"><span className="badge-blue text-xs">{u.schedule}</span></td>
+                        <td className="table-cell">
+                          <span className="badge-blue text-xs">{u.schedule}</span>
+                          <span className="ml-2 badge-success text-xs">cron wired</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

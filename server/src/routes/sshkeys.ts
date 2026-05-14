@@ -75,4 +75,69 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/* ── Per-account SSH key management ──────────────────────── */
+
+const ACCT_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,30}$/;
+
+async function readAccountKeys(username: string): Promise<SSHKey[]> {
+  const authKeysPath = path.join('/home', username, '.ssh', 'authorized_keys');
+  const content = await fs.readFile(authKeysPath, 'utf8').catch(() => '');
+  return content
+    .split('\n')
+    .filter(l => l.trim() && !l.trim().startsWith('#'))
+    .map((raw, id) => {
+      const parts = raw.trim().split(/\s+/);
+      return { id, type: parts[0] || '', key: parts[1] || '', comment: parts[2] || '', raw: raw.trim() };
+    });
+}
+
+async function writeAccountKeys(username: string, keys: SSHKey[]): Promise<void> {
+  const sshDir = path.join('/home', username, '.ssh');
+  await fs.mkdir(sshDir, { recursive: true, mode: 0o700 });
+  const authKeysPath = path.join(sshDir, 'authorized_keys');
+  const content = keys.map(k => k.raw).join('\n') + (keys.length ? '\n' : '');
+  await fs.writeFile(authKeysPath, content, { mode: 0o600 });
+  await import('child_process').then(({ exec }) => {
+    const { promisify } = require('util');
+    return promisify(exec)(`chown -R ${username}:${username} ${sshDir} 2>/dev/null || true`);
+  }).catch(() => {});
+}
+
+router.get('/account/:username', async (req: AuthRequest, res: Response) => {
+  const { username } = req.params;
+  if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  res.json(await readAccountKeys(username));
+});
+
+router.post('/account/:username/add', async (req: AuthRequest, res: Response) => {
+  const { username } = req.params;
+  if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  const { key } = req.body;
+  if (!key?.trim()) return res.status(400).json({ error: 'Key is required' });
+  const trimmed = key.trim();
+  const validTypes = ['ssh-rsa', 'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521', 'ssh-dss'];
+  if (!validTypes.includes(trimmed.split(/\s+/)[0])) return res.status(400).json({ error: 'Invalid SSH key type' });
+  try {
+    const keys = await readAccountKeys(username);
+    if (keys.some(k => k.raw === trimmed)) return res.status(409).json({ error: 'Key already exists' });
+    const parts = trimmed.split(/\s+/);
+    keys.push({ id: keys.length, type: parts[0], key: parts[1] || '', comment: parts[2] || '', raw: trimmed });
+    await writeAccountKeys(username, keys);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/account/:username/:id', async (req: AuthRequest, res: Response) => {
+  const { username } = req.params;
+  const id = parseInt(req.params.id);
+  if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  try {
+    const keys = await readAccountKeys(username);
+    if (id < 0 || id >= keys.length) return res.status(404).json({ error: 'Key not found' });
+    keys.splice(id, 1);
+    await writeAccountKeys(username, keys);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

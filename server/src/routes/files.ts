@@ -192,6 +192,17 @@ router.post('/move', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.post('/bulk-delete', async (req: AuthRequest, res: Response) => {
+  const { paths } = req.body;
+  if (!Array.isArray(paths) || !paths.length) return res.status(400).json({ error: 'paths array required' });
+  const errors: string[] = [];
+  for (const p of paths) {
+    try { await fs.rm(safePath(p), { recursive: true, force: true }); }
+    catch (e: any) { errors.push(`${p}: ${e.message}`); }
+  }
+  res.json({ message: `Deleted ${paths.length - errors.length} item(s)`, errors });
+});
+
 router.post('/chmod', async (req: AuthRequest, res: Response) => {
   const { path: p, mode, recursive } = req.body;
   if (!p || !mode) return res.status(400).json({ error: 'path and mode required' });

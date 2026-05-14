@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw } from 'lucide-react';
+import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface CronJob {
@@ -25,7 +25,7 @@ const PRESETS = [
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
-type Tab = 'jobs' | 'logs';
+type Tab = 'jobs' | 'logs' | 'alerts';
 
 export default function CronJobs() {
   const toast = useToast();
@@ -37,6 +37,8 @@ export default function CronJobs() {
   const [logs, setLogs] = useState<any[]>([]);
   const [running, setRunning] = useState<number | null>(null);
   const [runOutput, setRunOutput] = useState<{ id: number; output: string; exit_code: number } | null>(null);
+  const [failureEmail, setFailureEmail] = useState('');
+  const [failureEmailSaved, setFailureEmailSaved] = useState(false);
 
   async function load() {
     try {
@@ -61,7 +63,19 @@ export default function CronJobs() {
     setRunning(null);
   }
 
-  useEffect(() => { load(); }, []);
+  async function loadFailureEmail() {
+    try { const { data } = await axios.get('/api/cron/failure-email'); setFailureEmail(data.email || ''); }
+    catch {}
+  }
+
+  async function saveFailureEmail() {
+    try {
+      await axios.post('/api/cron/failure-email', { email: failureEmail });
+      toast.success('Alert email saved'); setFailureEmailSaved(true); setTimeout(() => setFailureEmailSaved(false), 2000);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  useEffect(() => { load(); loadFailureEmail(); }, []);
   useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab]);
 
   function applyPreset(p: typeof PRESETS[0]) {
@@ -110,6 +124,7 @@ export default function CronJobs() {
       <div className="tab-bar">
         <button className={tab === 'jobs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('jobs')}><Clock size={14} /> Scheduled Jobs</button>
         <button className={tab === 'logs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('logs')}><FileText size={14} /> Run Log</button>
+        <button className={tab === 'alerts' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('alerts')}><Bell size={14} /> Failure Alerts</button>
       </div>
 
       {showForm && (
@@ -210,6 +225,22 @@ export default function CronJobs() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'alerts' && (
+        <div className="card p-5 max-w-md space-y-4">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2"><Bell size={14} /> Cron Failure Alerts</h2>
+          <p className="text-sm text-slate-500">When a cron job exits with a non-zero code, an email is sent to this address. Requires SMTP to be configured in Settings.</p>
+          <div>
+            <label className="label">Alert Email</label>
+            <input className="input" type="email" placeholder="admin@example.com" value={failureEmail} onChange={e => setFailureEmail(e.target.value)} />
+          </div>
+          <button className="btn-primary" onClick={saveFailureEmail}>
+            {failureEmailSaved ? '✓ Saved' : 'Save Alert Email'}
+          </button>
+          {failureEmail && <p className="text-xs text-slate-400">Alerts will be sent to <code className="font-mono">{failureEmail}</code> on job failure.</p>}
+          {!failureEmail && <p className="text-xs text-slate-400">Leave blank to disable failure alerts.</p>}
+        </div>
       )}
 
       {tab === 'logs' && (

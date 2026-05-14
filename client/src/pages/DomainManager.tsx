@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X } from 'lucide-react';
+import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X, RefreshCw } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface DNSRecord { name: string; type: string; value: string; ttl: string }
@@ -17,7 +17,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 export default function DomainManager() {
   const toast = useToast();
   const [domains, setDomains] = useState<string[]>([]);
-  const [tab, setTab] = useState<'domains' | 'dns' | 'ssl'>('domains');
+  const [tab, setTab] = useState<'domains' | 'dns' | 'ssl' | 'dnssec'>('domains');
   const [showForm, setShowForm] = useState(false);
   const [domainForm, setDomainForm] = useState({ domain: '' });
   const [sslForm, setSslForm] = useState({ domain: '', email: '' });
@@ -27,6 +27,9 @@ export default function DomainManager() {
   const [sslOutput, setSslOutput] = useState('');
   const [editingDns, setEditingDns] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<DNSRecord>({ name: '', type: 'A', value: '', ttl: '3600' });
+  const [dnssecDomain, setDnssecDomain] = useState('');
+  const [dnssecStatus, setDnssecStatus] = useState<Record<string, { signed: boolean; has_keys: boolean }>>({});
+  const [dnssecLoading, setDnssecLoading] = useState('');
 
   async function loadDomains() {
     const { data } = await axios.get<string[]>('/api/domains/domains');
@@ -81,6 +84,28 @@ export default function DomainManager() {
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  async function loadDnssecStatus(domain: string) {
+    try {
+      const { data } = await axios.get(`/api/domains/dnssec/${domain}/status`);
+      setDnssecStatus(p => ({ ...p, [domain]: data }));
+    } catch {}
+  }
+
+  async function signZone(domain: string) {
+    setDnssecLoading(domain);
+    try { await axios.post(`/api/domains/dnssec/${domain}/sign`); toast.success('Zone signed'); loadDnssecStatus(domain); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Signing failed'); }
+    setDnssecLoading('');
+  }
+
+  async function unsignZone(domain: string) {
+    if (!confirm(`Remove DNSSEC signing for "${domain}"?`)) return;
+    setDnssecLoading(domain);
+    try { await axios.post(`/api/domains/dnssec/${domain}/unsign`); toast.success('DNSSEC removed'); loadDnssecStatus(domain); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    setDnssecLoading('');
+  }
+
   async function saveEditDNSRecord(index: number) {
     if (!dnsForm.domain) return;
     try { await axios.put(`/api/domains/dns/${dnsForm.domain}/${index}`, editForm); toast.success('Record updated'); setEditingDns(null); loadDNS(dnsForm.domain); }
@@ -102,8 +127,8 @@ export default function DomainManager() {
       </div>
 
       <div className="tab-bar">
-        {([['domains', 'Domains'], ['dns', 'DNS Records'], ['ssl', 'SSL / TLS']] as const).map(([t, label]) => (
-          <button key={t} onClick={() => { setTab(t); setShowForm(false); }}
+        {([['domains', 'Domains'], ['dns', 'DNS Records'], ['ssl', 'SSL / TLS'], ['dnssec', 'DNSSEC']] as const).map(([t, label]) => (
+          <button key={t} onClick={() => { setTab(t as any); setShowForm(false); }}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>{label}</button>
         ))}
       </div>
@@ -208,6 +233,66 @@ export default function DomainManager() {
               <pre className="text-xs font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap bg-slate-50 dark:bg-slate-900/60 rounded-lg p-3 overflow-auto max-h-48">
                 {sslOutput}
               </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* DNSSEC */}
+      {tab === 'dnssec' && (
+        <div className="space-y-4 max-w-lg">
+          <div className="card p-4">
+            <p className="text-sm text-slate-500 mb-3">DNSSEC cryptographically signs DNS zones to protect against spoofing. Requires <code className="font-mono text-xs">bind-utils</code> and <code className="font-mono text-xs">dnssec-tools</code> on the server.</p>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="label">Domain</label>
+                <select className="input" value={dnssecDomain} onChange={e => { setDnssecDomain(e.target.value); if (e.target.value) loadDnssecStatus(e.target.value); }}>
+                  <option value="">Select domain…</option>
+                  {domains.map(d => <option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {dnssecDomain && (
+            <div className="card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold text-sm">{dnssecDomain}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {dnssecStatus[dnssecDomain]
+                      ? dnssecStatus[dnssecDomain].signed
+                        ? 'Zone is signed (DNSSEC active)'
+                        : 'Zone is not signed'
+                      : 'Status unknown'}
+                  </p>
+                </div>
+                <div className={`w-3 h-3 rounded-full ${dnssecStatus[dnssecDomain]?.signed ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              </div>
+              <div className="flex gap-2">
+                {!dnssecStatus[dnssecDomain]?.signed ? (
+                  <button
+                    className="btn-primary text-sm"
+                    disabled={dnssecLoading === dnssecDomain}
+                    onClick={() => signZone(dnssecDomain)}
+                  >
+                    {dnssecLoading === dnssecDomain
+                      ? <><svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Signing…</>
+                      : <><Shield size={14} /> Sign Zone</>}
+                  </button>
+                ) : (
+                  <button
+                    className="btn-secondary text-sm text-red-500"
+                    disabled={dnssecLoading === dnssecDomain}
+                    onClick={() => unsignZone(dnssecDomain)}
+                  >
+                    Remove DNSSEC
+                  </button>
+                )}
+                <button className="btn-ghost text-sm" onClick={() => loadDnssecStatus(dnssecDomain)}>
+                  <RefreshCw size={13} /> Refresh
+                </button>
+              </div>
             </div>
           )}
         </div>
