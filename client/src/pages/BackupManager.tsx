@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw } from 'lucide-react';
+import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Backup {
@@ -61,6 +61,14 @@ export default function BackupManager() {
       toast.success('Backup deleted');
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function restoreBackup(name: string) {
+    if (!confirm(`Restore "${name}"?\n\nThis will overwrite existing files or database contents. Proceed?`)) return;
+    try {
+      await axios.post(`/api/backup/restore/${encodeURIComponent(name)}`);
+      toast.success(`"${name}" restored successfully`);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Restore failed'); }
   }
 
   const isDB = form.type === 'database';
@@ -166,6 +174,11 @@ export default function BackupManager() {
                       title="Download">
                       <Download size={13} />
                     </a>
+                    <button onClick={() => restoreBackup(b.name)}
+                      className="btn-icon hover:!text-amber-600 dark:hover:!text-amber-400 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
+                      title="Restore">
+                      <RotateCcw size={13} />
+                    </button>
                     <button onClick={() => deleteBackup(b.name)}
                       className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                       <Trash2 size={13} />

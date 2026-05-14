@@ -49,6 +49,9 @@ import ResourceLimits from './pages/ResourceLimits';
 import RecurringBilling from './pages/RecurringBilling';
 import Reseller from './pages/Reseller';
 import Notifications from './pages/Notifications';
+import MailRouting from './pages/MailRouting';
+import AddonDomains from './pages/AddonDomains';
+import WordPressManager from './pages/WordPressManager';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -134,6 +137,11 @@ function AppRoutes() {
 
         {/* Notifications */}
         <Route path="notifications" element={<Notifications />} />
+
+        {/* Mail Routing / Addon Domains / WordPress */}
+        <Route path="mail-routing"  element={<MailRouting />} />
+        <Route path="addon-domains" element={<AddonDomains />} />
+        <Route path="wordpress"     element={<WordPressManager />} />
 
         {/* Admin Config */}
         <Route path="settings"    element={<Settings />} />

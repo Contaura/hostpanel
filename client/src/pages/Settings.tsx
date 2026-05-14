@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube } from 'lucide-react';
+import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload } from 'lucide-react';
 
 type Tab = 'general' | 'smtp' | 'billing' | 'paypal';
 
@@ -19,10 +19,26 @@ export default function Settings() {
   const [testEmail, setTestEmail] = useState('');
   const [testing, setTesting] = useState(false);
   const [smtpPass, setSmtpPass] = useState('');
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api('/api/settings/').then(r => { setSettings(r.data); setLoading(false); }).catch(() => setLoading(false));
+    fetch('/api/settings/logo', { headers: auth() }).then(r => r.ok ? r.json() : null).then(d => { if (d?.url) setLogoPreview(d.url); }).catch(() => {});
   }, []);
+
+  async function uploadLogo(file: File) {
+    setUploading(true);
+    const fd = new FormData();
+    fd.append('logo', file);
+    try {
+      const r = await axios.post('/api/settings/logo', fd, { headers: { ...auth(), 'Content-Type': 'multipart/form-data' } });
+      setLogoPreview(r.data.url);
+      success('Logo uploaded');
+    } catch (e: any) { error(e.response?.data?.error || 'Upload failed'); }
+    setUploading(false);
+  }
 
   function set(key: string, value: string) { setSettings(p => ({ ...p, [key]: value })); }
 
@@ -80,8 +96,16 @@ export default function Settings() {
             <div><label className="label">Company Email</label><input type="email" className="input" value={settings.company_email || ''} onChange={e => set('company_email', e.target.value)} /></div>
           </div>
           <div><label className="label">Address</label><input className="input" value={settings.company_address || ''} onChange={e => set('company_address', e.target.value)} /></div>
-          <div><label className="label">Logo URL (optional)</label><input className="input" placeholder="https://..." value={settings.company_logo || ''} onChange={e => set('company_logo', e.target.value)} /></div>
-          <button className="btn-primary" onClick={save}><Save size={14} /> Save</button>
+          <div className="col-span-2">
+            <label className="label">Panel Logo</label>
+            <div className="flex items-center gap-4">
+              {logoPreview && <img src={logoPreview} alt="Logo" className="h-10 object-contain rounded border border-slate-200 dark:border-slate-700 p-1" />}
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); }} />
+              <button className="btn-secondary" onClick={() => fileRef.current?.click()} disabled={uploading}><Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Logo'}</button>
+              {logoPreview && <span className="text-xs text-slate-400">Logo active — shows in sidebar</span>}
+            </div>
+          </div>
+          <button className="btn-primary col-span-2" onClick={save}><Save size={14} /> Save</button>
         </div>
       )}
 

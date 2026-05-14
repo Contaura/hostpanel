@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useToast } from '../components/Toast';
-import { Bell, Package, AlertTriangle, CheckCircle, Plus, Trash2, RefreshCw, Download } from 'lucide-react';
+import { Bell, Package, AlertTriangle, CheckCircle, Plus, Trash2, RefreshCw, Download, BarChart2 } from 'lucide-react';
 
-type Tab = 'alerts' | 'packages';
+type Tab = 'alerts' | 'packages' | 'graphs';
 
 interface AlertRule { id: number; metric: string; threshold: number; notify_email: string; enabled: number }
 interface Alert { id: number; severity: string; metric: string; value: number; threshold: number; message: string }
@@ -33,11 +34,22 @@ export default function SystemMonitor() {
   const [updating, setUpdating]     = useState(false);
   const [selected, setSelected]     = useState<Set<string>>(new Set());
 
+  // Graphs
+  const [history, setHistory] = useState<any[]>([]);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
     if (t === 'alerts') { loadRules(); loadLive(); }
     if (t === 'packages') loadPackages();
+    if (t === 'graphs') loadHistory();
+  }
+
+  async function loadHistory() {
+    try {
+      const r = await api('/api/stats/history');
+      setHistory(r.data || []);
+    } catch {}
   }
 
   async function loadRules() { try { const r = await api('/api/alerts/rules'); setRules(r.data); } catch {} }
@@ -92,6 +104,7 @@ export default function SystemMonitor() {
       <div className="tab-bar">
         <button onClick={() => setTab('alerts')}   className={tab === 'alerts'   ? 'tab-item-active' : 'tab-item'}><Bell size={14} /> Alerts & Thresholds</button>
         <button onClick={() => setTab('packages')} className={tab === 'packages' ? 'tab-item-active' : 'tab-item'}><Package size={14} /> Package Updates</button>
+        <button onClick={() => setTab('graphs')}   className={tab === 'graphs'   ? 'tab-item-active' : 'tab-item'}><BarChart2 size={14} /> Resource Graphs</button>
       </div>
 
       {/* Alerts */}
@@ -206,6 +219,74 @@ export default function SystemMonitor() {
             <div className="card bg-slate-950 p-4">
               <pre className="text-xs text-green-400 font-mono overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">{updateLog}</pre>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Graphs */}
+      {tab === 'graphs' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">Last 24 hours (1-minute resolution)</p>
+            <button className="btn-secondary" onClick={loadHistory}><RefreshCw size={14} /> Refresh</button>
+          </div>
+
+          {history.length === 0 && (
+            <div className="card p-8 text-center text-slate-400 text-sm">No historical data yet — metrics are collected every minute.</div>
+          )}
+
+          {history.length > 0 && (
+            <>
+              <div className="card p-4">
+                <p className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">CPU Usage (%)</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={history} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="created_at" tickFormatter={(v: string) => v.slice(11, 16)} tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                    <Tooltip labelFormatter={(v: string) => v.slice(11, 16)} formatter={(v: number) => [`${v.toFixed(1)}%`, 'CPU']} />
+                    <Line type="monotone" dataKey="cpu" stroke="#6366f1" dot={false} strokeWidth={1.5} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="card p-4">
+                <p className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">Memory Usage (%)</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={history} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="created_at" tickFormatter={(v: string) => v.slice(11, 16)} tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                    <Tooltip labelFormatter={(v: string) => v.slice(11, 16)} formatter={(v: number) => [`${v.toFixed(1)}%`, 'Memory']} />
+                    <Line type="monotone" dataKey="mem" stroke="#10b981" dot={false} strokeWidth={1.5} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="card p-4">
+                <p className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">Disk Usage (%)</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={history} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="created_at" tickFormatter={(v: string) => v.slice(11, 16)} tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                    <Tooltip labelFormatter={(v: string) => v.slice(11, 16)} formatter={(v: number) => [`${v.toFixed(1)}%`, 'Disk']} />
+                    <Line type="monotone" dataKey="disk" stroke="#f59e0b" dot={false} strokeWidth={1.5} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="card p-4">
+                <p className="text-xs font-medium text-slate-500 mb-3 uppercase tracking-wide">Network I/O (MB/s)</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <LineChart data={history} margin={{ top: 0, right: 8, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="created_at" tickFormatter={(v: string) => v.slice(11, 16)} tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip labelFormatter={(v: string) => v.slice(11, 16)} formatter={(v: number) => [`${v.toFixed(2)} MB/s`]} />
+                    <Legend />
+                    <Line type="monotone" dataKey="rx" name="RX" stroke="#06b6d4" dot={false} strokeWidth={1.5} />
+                    <Line type="monotone" dataKey="tx" name="TX" stroke="#8b5cf6" dot={false} strokeWidth={1.5} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </>
           )}
         </div>
       )}

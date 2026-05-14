@@ -243,6 +243,25 @@ db.exec(`
     UNIQUE(name, domain)
   );
 
+  CREATE TABLE IF NOT EXISTS metric_snapshots (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    cpu        REAL NOT NULL DEFAULT 0,
+    mem        REAL NOT NULL DEFAULT 0,
+    disk       REAL NOT NULL DEFAULT 0,
+    rx         REAL NOT NULL DEFAULT 0,
+    tx         REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS addon_domains (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id   INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    domain       TEXT NOT NULL UNIQUE,
+    subdomain    TEXT NOT NULL,
+    document_root TEXT NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS php_domain_versions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     domain     TEXT NOT NULL UNIQUE,

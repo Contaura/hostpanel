@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, FormEvent } from 'react';
 import axios from 'axios';
 import {
   Folder, File, Upload, FolderPlus, Trash2, Edit3,
-  Download, ChevronRight, Home, RefreshCw, X, Save, AlertCircle,
+  Download, ChevronRight, Home, RefreshCw, X, Save, AlertCircle, Lock,
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
@@ -28,6 +28,9 @@ export default function FileManager() {
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [chmodTarget, setChmodTarget] = useState<FileItem | null>(null);
+  const [chmodMode, setChmodMode] = useState('755');
+  const [chmodRecursive, setChmodRecursive] = useState(false);
 
   async function loadDir(path: string) {
     setLoading(true); setError('');
@@ -96,6 +99,15 @@ export default function FileManager() {
       toast.success(`${files.length} file(s) uploaded`); loadDir(currentPath);
     } catch (e: any) { toast.error(e.response?.data?.error || 'Upload failed'); }
     finally { setUploading(false); e.target.value = ''; }
+  }
+
+  async function applyChmod() {
+    if (!chmodTarget || !/^[0-7]{3,4}$/.test(chmodMode)) { toast.error('Invalid permission mode'); return; }
+    try {
+      await axios.post('/api/files/chmod', { path: `${currentPath}/${chmodTarget.name}`, mode: chmodMode, recursive: chmodRecursive });
+      toast.success(`Permissions set to ${chmodMode}`);
+      setChmodTarget(null); loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'chmod failed'); }
   }
 
   const breadcrumbs = currentPath.split('/').filter(Boolean);
@@ -241,6 +253,7 @@ export default function FileManager() {
                         </a>
                       </>
                     )}
+                    <button onClick={() => { setChmodTarget(item); setChmodMode('755'); setChmodRecursive(false); }} className="btn-icon" title="Permissions"><Lock size={13} /></button>
                     <button onClick={() => deleteItem(item)}
                       className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-all">
                       <Trash2 size={13} />
@@ -252,6 +265,31 @@ export default function FileManager() {
           </tbody>
         </table>
       </div>
+
+      {/* Chmod modal */}
+      {chmodTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setChmodTarget(null)}>
+          <div className="card p-5 w-80 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-sm">Change Permissions</h3>
+            <p className="text-xs text-slate-500 font-mono">{currentPath}/{chmodTarget.name}</p>
+            <div>
+              <label className="label">Octal Mode</label>
+              <input className="input font-mono" value={chmodMode} onChange={e => setChmodMode(e.target.value)} placeholder="755" maxLength={4} />
+              <p className="text-xs text-slate-400 mt-1">e.g. 644 (file), 755 (dir), 600 (private)</p>
+            </div>
+            {chmodTarget.type === 'directory' && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={chmodRecursive} onChange={e => setChmodRecursive(e.target.checked)} />
+                Apply recursively to all contents
+              </label>
+            )}
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={applyChmod}>Apply</button>
+              <button className="btn-ghost" onClick={() => setChmodTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

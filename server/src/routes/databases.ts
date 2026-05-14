@@ -2,10 +2,14 @@ import { Router, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import mysql from 'mysql2/promise';
+import multer from 'multer';
+import { existsSync, unlinkSync } from 'fs';
+import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
+const sqlUpload = multer({ dest: '/tmp/', limits: { fileSize: 512 * 1024 * 1024 } });
 
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
@@ -131,6 +135,42 @@ router.delete('/users/:username', async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: err.message });
   } finally {
     await conn?.end();
+  }
+});
+
+/* ── Export (mysqldump → download) ──────────────────────────── */
+
+router.get('/databases/:name/export', async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Invalid database name' });
+  const user = DB_ROOT_USER;
+  const passArg = DB_ROOT_PASS ? `-p${DB_ROOT_PASS}` : '';
+  res.setHeader('Content-Type', 'application/sql');
+  res.setHeader('Content-Disposition', `attachment; filename="${name}-${Date.now()}.sql"`);
+  const child = require('child_process').spawn('mysqldump', [
+    `-u${user}`, ...(DB_ROOT_PASS ? [`-p${DB_ROOT_PASS}`] : []), name,
+  ]);
+  child.stdout.pipe(res);
+  child.stderr.on('data', (d: Buffer) => console.error('mysqldump stderr:', d.toString()));
+  child.on('error', (err: Error) => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
+});
+
+/* ── Import (SQL file upload → mysql CLI) ────────────────────── */
+
+router.post('/databases/:name/import', sqlUpload.single('file'), async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Invalid database name' });
+  if (!req.file) return res.status(400).json({ error: 'No SQL file uploaded' });
+  const tmpPath = req.file.path;
+  const user = DB_ROOT_USER;
+  const passArg = DB_ROOT_PASS ? `-p${DB_ROOT_PASS}` : '';
+  try {
+    await execAsync(`mysql -u${user} ${passArg} ${name} < "${tmpPath}"`, { timeout: 300000 });
+    res.json({ success: true, message: `Imported into ${name}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (existsSync(tmpPath)) unlinkSync(tmpPath);
   }
 });
 

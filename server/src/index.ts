@@ -49,6 +49,8 @@ import phpDomainsRoutes      from './routes/php-domains';
 import resourceLimitsRoutes  from './routes/resource-limits';
 import notificationsRoutes   from './routes/notifications';
 import resellerRoutes        from './routes/reseller';
+import addonDomainsRoutes    from './routes/addon-domains';
+import wordpressRoutes       from './routes/wordpress';
 import { authenticateToken } from './middleware/auth';
 import { setupTerminal } from './terminal';
 
@@ -148,8 +150,10 @@ app.use('/api/php-domains',      authenticateToken, phpDomainsRoutes);
 app.use('/api/resource-limits',  authenticateToken, resourceLimitsRoutes);
 
 // Notifications / Resellers
-app.use('/api/notifications', authenticateToken, notificationsRoutes);
-app.use('/api/resellers',     authenticateToken, resellerRoutes);
+app.use('/api/notifications',  authenticateToken, notificationsRoutes);
+app.use('/api/resellers',      authenticateToken, resellerRoutes);
+app.use('/api/addon-domains',  authenticateToken, addonDomainsRoutes);
+app.use('/api/wordpress',      authenticateToken, wordpressRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

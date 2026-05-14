@@ -1,9 +1,10 @@
 import { NavLink } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, FolderOpen, Archive,
   Globe, Network, ArrowRightLeft, AlertTriangle, Globe2,
   Database,
-  Mail, MailPlus, MailSearch, ListOrdered,
+  Mail, MailPlus, MailSearch, ListOrdered, MailOpen, PlusSquare, BrainCircuit,
   Key, ShieldCheck, Lock, Shield, ShieldAlert, ClipboardList,
   Clock, Code2, Activity, FileText, Upload, PackageOpen, TerminalSquare,
   Server, Package, Receipt,
@@ -39,8 +40,9 @@ const sections: Section[] = [
   {
     label: 'Domains & Web',
     items: [
-      { to: '/domains',     icon: Globe,          label: 'Domains & DNS' },
+      { to: '/domains',      icon: Globe,          label: 'Domains & DNS' },
       { to: '/subdomains',  icon: Network,        label: 'Subdomains' },
+      { to: '/addon-domains', icon: PlusSquare,   label: 'Addon Domains' },
       { to: '/redirects',   icon: ArrowRightLeft, label: 'Redirects' },
       { to: '/error-pages', icon: AlertTriangle,  label: 'Error Pages' },
     ],
@@ -54,10 +56,11 @@ const sections: Section[] = [
   {
     label: 'Email',
     items: [
-      { to: '/email',        icon: Mail,       label: 'Email Accounts' },
+      { to: '/email',        icon: Mail,        label: 'Email Accounts' },
       { to: '/email-extras', icon: MailPlus,   label: 'Email Extras' },
       { to: '/dkim',         icon: MailSearch, label: 'DKIM / SPF / DMARC' },
       { to: '/mail-queue',   icon: ListOrdered, label: 'Mail Queue' },
+      { to: '/mail-routing', icon: MailOpen,   label: 'Mail Routing & Lists' },
     ],
   },
   {
@@ -95,6 +98,7 @@ const sections: Section[] = [
       { to: '/terminal',        icon: TerminalSquare, label: 'Terminal' },
       { to: '/apps',            icon: Cpu,            label: 'App Manager' },
       { to: '/monitor',         icon: Bell,           label: 'System Monitor' },
+      { to: '/wordpress',       icon: BrainCircuit,   label: 'WordPress Manager' },
     ],
   },
   {
@@ -119,15 +123,30 @@ const sections: Section[] = [
 ];
 
 export default function Sidebar() {
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [panelName, setPanelName] = useState('HostPanel');
+
+  useEffect(() => {
+    fetch('/api/settings/logo', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.url) setLogoUrl(d.url); if (d?.name) setPanelName(d.name); })
+      .catch(() => {});
+  }, []);
+
   return (
     <aside className="w-60 flex-shrink-0 flex flex-col bg-slate-900 dark:bg-slate-950 text-slate-100 select-none transition-colors duration-200">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 h-16 border-b border-white/5 flex-shrink-0">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 shadow-lg shadow-indigo-900/50">
-          <Zap size={16} className="text-white" strokeWidth={2.5} />
-        </div>
+        {logoUrl
+          ? <img src={logoUrl} alt="Logo" className="h-8 w-auto object-contain" />
+          : (
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 shadow-lg shadow-indigo-900/50">
+              <Zap size={16} className="text-white" strokeWidth={2.5} />
+            </div>
+          )
+        }
         <div>
-          <span className="text-[15px] font-bold text-white tracking-tight">HostPanel</span>
+          <span className="text-[15px] font-bold text-white tracking-tight">{panelName}</span>
           <span className="block text-[10px] text-slate-500 -mt-0.5 font-medium">Control Panel</span>
         </div>
       </div>

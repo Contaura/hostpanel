@@ -140,4 +140,23 @@ router.get('/download', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.post('/chmod', async (req: AuthRequest, res: Response) => {
+  const { path: p, mode, recursive } = req.body;
+  if (!p || !mode) return res.status(400).json({ error: 'path and mode required' });
+  if (!/^[0-7]{3,4}$/.test(mode)) return res.status(400).json({ error: 'Invalid mode (e.g. 755)' });
+  try {
+    const target = safePath(p);
+    const flag = recursive ? '-R ' : '';
+    await fs.chmod(target, parseInt(mode, 8));
+    if (recursive) {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      await promisify(exec)(`chmod -R ${mode} "${target}"`);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

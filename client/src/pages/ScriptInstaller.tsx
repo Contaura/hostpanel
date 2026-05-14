@@ -5,11 +5,20 @@ import { useToast } from '../components/Toast';
 
 interface Script { id: string; name: string; description: string }
 
-const SCRIPT_META: Record<string, { color: string; darkColor: string; bg: string; darkBg: string; initial: string }> = {
-  wordpress:  { color: 'text-blue-600',   darkColor: 'dark:text-blue-400',   bg: 'bg-blue-50',   darkBg: 'dark:bg-blue-900/30',   initial: 'W' },
-  joomla:     { color: 'text-orange-600', darkColor: 'dark:text-orange-400', bg: 'bg-orange-50', darkBg: 'dark:bg-orange-900/30', initial: 'J' },
-  drupal:     { color: 'text-teal-600',   darkColor: 'dark:text-teal-400',   bg: 'bg-teal-50',   darkBg: 'dark:bg-teal-900/30',   initial: 'D' },
-  phpmyadmin: { color: 'text-rose-600',   darkColor: 'dark:text-rose-400',   bg: 'bg-rose-50',   darkBg: 'dark:bg-rose-900/30',   initial: 'P' },
+const SCRIPT_META: Record<string, { color: string; darkColor: string; bg: string; darkBg: string; initial: string; category?: string }> = {
+  wordpress:   { color: 'text-blue-600',    darkColor: 'dark:text-blue-400',    bg: 'bg-blue-50',    darkBg: 'dark:bg-blue-900/30',    initial: 'W',  category: 'CMS' },
+  joomla:      { color: 'text-orange-600',  darkColor: 'dark:text-orange-400',  bg: 'bg-orange-50',  darkBg: 'dark:bg-orange-900/30',  initial: 'J',  category: 'CMS' },
+  drupal:      { color: 'text-teal-600',    darkColor: 'dark:text-teal-400',    bg: 'bg-teal-50',    darkBg: 'dark:bg-teal-900/30',    initial: 'D',  category: 'CMS' },
+  phpmyadmin:  { color: 'text-rose-600',    darkColor: 'dark:text-rose-400',    bg: 'bg-rose-50',    darkBg: 'dark:bg-rose-900/30',    initial: 'P',  category: 'Tools' },
+  prestashop:  { color: 'text-indigo-600',  darkColor: 'dark:text-indigo-400',  bg: 'bg-indigo-50',  darkBg: 'dark:bg-indigo-900/30',  initial: 'PS', category: 'eCommerce' },
+  opencart:    { color: 'text-cyan-600',    darkColor: 'dark:text-cyan-400',    bg: 'bg-cyan-50',    darkBg: 'dark:bg-cyan-900/30',    initial: 'OC', category: 'eCommerce' },
+  woocommerce: { color: 'text-purple-600',  darkColor: 'dark:text-purple-400',  bg: 'bg-purple-50',  darkBg: 'dark:bg-purple-900/30',  initial: 'WC', category: 'eCommerce' },
+  laravel:     { color: 'text-red-600',     darkColor: 'dark:text-red-400',     bg: 'bg-red-50',     darkBg: 'dark:bg-red-900/30',     initial: 'L',  category: 'Framework' },
+  symfony:     { color: 'text-slate-600',   darkColor: 'dark:text-slate-400',   bg: 'bg-slate-100',  darkBg: 'dark:bg-slate-700',      initial: 'SF', category: 'Framework' },
+  codeigniter: { color: 'text-orange-600',  darkColor: 'dark:text-orange-400',  bg: 'bg-orange-50',  darkBg: 'dark:bg-orange-900/30',  initial: 'CI', category: 'Framework' },
+  roundcube:   { color: 'text-blue-600',    darkColor: 'dark:text-blue-400',    bg: 'bg-blue-50',    darkBg: 'dark:bg-blue-900/30',    initial: 'RC', category: 'Mail' },
+  nextcloud:   { color: 'text-sky-600',     darkColor: 'dark:text-sky-400',     bg: 'bg-sky-50',     darkBg: 'dark:bg-sky-900/30',     initial: 'NC', category: 'Cloud' },
+  matomo:      { color: 'text-violet-600',  darkColor: 'dark:text-violet-400',  bg: 'bg-violet-50',  darkBg: 'dark:bg-violet-900/30',  initial: 'M',  category: 'Analytics' },
 };
 
 export default function ScriptInstaller() {
@@ -71,17 +80,20 @@ export default function ScriptInstaller() {
       </div>
 
       {!selected ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {scripts.map(script => {
             const m = SCRIPT_META[script.id] || { color: 'text-slate-600', darkColor: 'dark:text-slate-400', bg: 'bg-slate-100', darkBg: 'dark:bg-slate-700', initial: script.name[0] };
             return (
-              <button key={script.id} onClick={() => setSelected(script)} className="card-hover p-6 text-left space-y-3">
-                <div className={`h-12 w-12 rounded-2xl ${m.bg} ${m.darkBg} flex items-center justify-center`}>
-                  <span className={`text-2xl font-black ${m.color} ${m.darkColor}`}>{m.initial}</span>
+              <button key={script.id} onClick={() => setSelected(script)} className="card-hover p-5 text-left space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className={`h-11 w-11 rounded-xl ${m.bg} ${m.darkBg} flex items-center justify-center`}>
+                    <span className={`text-lg font-black ${m.color} ${m.darkColor}`}>{m.initial}</span>
+                  </div>
+                  {m.category && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500">{m.category}</span>}
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-900 dark:text-slate-100">{script.name}</h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{script.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{script.description}</p>
                 </div>
                 <p className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Install →</p>
               </button>

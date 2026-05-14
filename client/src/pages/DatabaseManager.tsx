@@ -1,6 +1,6 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, useRef } from 'react';
 import axios from 'axios';
-import { Database, User, Plus, Trash2 } from 'lucide-react';
+import { Database, User, Plus, Trash2, Download, Upload } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface DB { name: string; size_mb: number | null }
@@ -18,6 +18,9 @@ export default function DatabaseManager() {
   const [dbForm, setDbForm] = useState({ name: '' });
   const [userForm, setUserForm] = useState({ username: '', password: '', database: '', host: 'localhost' });
   const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const [importTarget, setImportTarget] = useState('');
 
   async function load() {
     const [dbs, us] = await Promise.all([
@@ -58,6 +61,30 @@ export default function DatabaseManager() {
     if (!confirm(`Delete user "${user}"?`)) return;
     try { await axios.delete(`/api/databases/users/${user}`, { params: { host } }); toast.success(`User "${user}" deleted`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  function exportDb(name: string) {
+    const token = localStorage.getItem('hp_token') || '';
+    const a = document.createElement('a');
+    a.href = `/api/databases/${name}/export`;
+    // set auth via a short-lived blob workaround isn't needed — use fetch+blob
+    fetch(`/api/databases/${name}/export`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob())
+      .then(blob => { a.href = URL.createObjectURL(blob); a.download = `${name}.sql.gz`; a.click(); })
+      .catch(() => toast.error('Export failed'));
+  }
+
+  async function importDb(file: File) {
+    if (!importTarget) { toast.error('Select a database first'); return; }
+    setImporting(importTarget);
+    const fd = new FormData();
+    fd.append('file', file);
+    const token = localStorage.getItem('hp_token') || '';
+    try {
+      await axios.post(`/api/databases/${importTarget}/import`, fd, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
+      toast.success(`Imported into ${importTarget}`);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Import failed'); }
+    setImporting(null);
   }
 
   return (
@@ -134,45 +161,49 @@ export default function DatabaseManager() {
       )}
 
       {tab === 'databases' && (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className={theadCls}><tr>
-              <th className="table-header-cell">Database</th>
-              <th className="table-header-cell hidden md:table-cell">Size</th>
-              <th className="table-header-cell hidden lg:table-cell">Encoding</th>
-              <th className="px-4 py-3 w-12" />
-            </tr></thead>
-            <tbody>
-              {databases.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-16 text-center">
-                  <Database className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                  <p className="text-slate-400 text-sm">No databases yet</p>
-                </td></tr>
-              ) : databases.map(db => (
-                <tr key={db.name} className={rowCls}>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-7 w-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
-                        <Database size={13} className="text-blue-500 dark:text-blue-400" />
+        <>
+          <input ref={importRef} type="file" accept=".sql,.sql.gz,.gz" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importDb(f); e.target.value = ''; }} />
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Database</th>
+                <th className="table-header-cell hidden md:table-cell">Size</th>
+                <th className="table-header-cell hidden lg:table-cell">Encoding</th>
+                <th className="px-4 py-3" />
+              </tr></thead>
+              <tbody>
+                {databases.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-16 text-center">
+                    <Database className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                    <p className="text-slate-400 text-sm">No databases yet</p>
+                  </td></tr>
+                ) : databases.map(db => (
+                  <tr key={db.name} className={rowCls}>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-7 w-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                          <Database size={13} className="text-blue-500 dark:text-blue-400" />
+                        </div>
+                        <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{db.name}</span>
                       </div>
-                      <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{db.name}</span>
-                    </div>
-                  </td>
-                  <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">
-                    {db.size_mb !== null ? `${db.size_mb} MB` : '—'}
-                  </td>
-                  <td className="table-cell hidden lg:table-cell"><span className="badge badge-gray">utf8mb4</span></td>
-                  <td className="px-3 py-3">
-                    <button onClick={() => deleteDb(db.name)}
-                      className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                      <Trash2 size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">
+                      {db.size_mb !== null ? `${db.size_mb} MB` : '—'}
+                    </td>
+                    <td className="table-cell hidden lg:table-cell"><span className="badge badge-gray">utf8mb4</span></td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                        <button onClick={() => exportDb(db.name)} className="btn-icon text-blue-500" title="Export"><Download size={13} /></button>
+                        <button onClick={() => { setImportTarget(db.name); importRef.current?.click(); }} className="btn-icon text-amber-500" title="Import" disabled={importing === db.name}><Upload size={13} /></button>
+                        <button onClick={() => deleteDb(db.name)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {tab === 'users' && (
