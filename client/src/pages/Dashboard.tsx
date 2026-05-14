@@ -78,6 +78,16 @@ export default function Dashboard() {
   const [history, setHistory] = useState<{ t: string; cpu: number; mem: number }[]>([]);
 
   useEffect(() => {
+    // Seed chart from DB-persisted history so it isn't empty on page load
+    axios.get<{ cpu: number; mem: number; created_at: string }[]>('/api/stats/history').then(r => {
+      const seeded = r.data.map(row => ({
+        t: new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        cpu: row.cpu,
+        mem: row.mem,
+      }));
+      setHistory(seeded);
+    }).catch(() => {});
+
     async function load() {
       try {
         const [s, sv] = await Promise.all([
@@ -87,7 +97,7 @@ export default function Dashboard() {
         setStats(s.data);
         setServices(sv.data);
         setHistory(prev => [
-          ...prev.slice(-29),
+          ...prev.slice(-59),
           {
             t: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             cpu: s.data.cpu.load,
@@ -146,7 +156,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-5">
             <div>
               <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Performance History</h2>
-              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Last 30 snapshots · refreshes every 5s</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">Last 60 snapshots · refreshes every 5s</p>
             </div>
             <div className="flex items-center gap-4 text-xs">
               <span className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">

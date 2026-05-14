@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload } from 'lucide-react';
+import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload, Cloud } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Backup {
@@ -32,6 +32,7 @@ export default function BackupManager() {
   const [scheduleForm, setScheduleForm] = useState({ type: 'files', target: '', schedule: '0 2 * * *' });
   const [remoteConfig, setRemoteConfig] = useState<Record<string, string>>({});
   const [remoteLoaded, setRemoteLoaded] = useState(false);
+  const [pushingRemote, setPushingRemote] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -99,6 +100,15 @@ export default function BackupManager() {
       toast.success('Backup deleted');
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function pushToRemote(name: string) {
+    setPushingRemote(name);
+    try {
+      await axios.post(`/api/backup/push-remote/${encodeURIComponent(name)}`);
+      toast.success(`"${name}" pushed to remote storage`);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Push failed — check remote config'); }
+    setPushingRemote(null);
   }
 
   async function restoreBackup(name: string) {
@@ -319,6 +329,13 @@ export default function BackupManager() {
                       title="Download">
                       <Download size={13} />
                     </a>
+                    <button onClick={() => pushToRemote(b.name)} disabled={pushingRemote === b.name}
+                      className="btn-icon hover:!text-sky-600 dark:hover:!text-sky-400 hover:!bg-sky-50 dark:hover:!bg-sky-900/30"
+                      title="Push to remote storage">
+                      {pushingRemote === b.name
+                        ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg>
+                        : <Cloud size={13} />}
+                    </button>
                     <button onClick={() => restoreBackup(b.name)}
                       className="btn-icon hover:!text-amber-600 dark:hover:!text-amber-400 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
                       title="Restore">

@@ -71,6 +71,9 @@ export default function Billing() {
   const [loading, setLoading] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const [promoCode, setPromoCode] = useState('');
+  const [promoResult, setPromoResult] = useState<{ discount: number; promo: any } | null>(null);
+  const [promoLoading, setPromoLoading] = useState(false);
 
   async function load() {
     try {
@@ -208,6 +211,19 @@ export default function Billing() {
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  async function validatePromo() {
+    if (!promoCode.trim()) return;
+    const subtotal = parseFloat(invoiceForm.subtotal) || 0;
+    setPromoLoading(true);
+    try {
+      const { data } = await axios.post('/api/billing/promo-codes/validate', { code: promoCode.trim(), amount: subtotal }, { headers: authHeaders() });
+      setPromoResult(data);
+      setInvoiceForm(f => ({ ...f, discount: String(data.discount) }));
+      toast.success(`Promo applied: ${data.promo.type === 'percent' ? data.promo.value + '%' : fmt(data.promo.value)} off`);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Invalid promo code'); setPromoResult(null); }
+    setPromoLoading(false);
+  }
+
   async function deleteInvoice(id: number) {
     if (!confirm('Delete this invoice?')) return;
     try { await axios.delete(`/api/billing/invoices/${id}`); toast.success('Invoice deleted'); load(); }
@@ -338,8 +354,25 @@ export default function Billing() {
                 <div>
                   <label className="label">Discount</label>
                   <input type="number" step="0.01" min="0" className="input" placeholder="0.00"
-                    value={invoiceForm.discount} onChange={e => setInvoiceForm({ ...invoiceForm, discount: e.target.value })} />
+                    value={invoiceForm.discount} onChange={e => { setInvoiceForm({ ...invoiceForm, discount: e.target.value }); setPromoResult(null); }} />
                 </div>
+              </div>
+              <div>
+                <label className="label">Promo Code</label>
+                <div className="flex gap-2">
+                  <input className="input uppercase font-mono tracking-wider flex-1" placeholder="SAVE20"
+                    value={promoCode} onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoResult(null); }}
+                    onKeyDown={e => e.key === 'Enter' && validatePromo()} />
+                  <button type="button" onClick={validatePromo} disabled={promoLoading || !promoCode.trim()} className="btn-secondary text-sm">
+                    {promoLoading ? '…' : 'Apply'}
+                  </button>
+                </div>
+                {promoResult && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+                    {promoResult.promo.type === 'percent' ? `${promoResult.promo.value}% off` : fmt(promoResult.promo.value)} — discount set to {fmt(promoResult.discount)}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="label">Due Date</label>
@@ -353,7 +386,7 @@ export default function Billing() {
               </div>
               <div className="flex gap-2">
                 <button onClick={addInvoice} disabled={loading} className="btn-primary">{loading ? 'Creating…' : 'Create invoice'}</button>
-                <button onClick={() => setShowInvoiceForm(false)} className="btn-secondary">Cancel</button>
+                <button onClick={() => { setShowInvoiceForm(false); setPromoCode(''); setPromoResult(null); }} className="btn-secondary">Cancel</button>
               </div>
             </div>
           )}
