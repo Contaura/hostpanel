@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent, Fragment } from 'react';
 import axios from 'axios';
-import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock } from 'lucide-react';
+import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Account {
@@ -42,6 +42,7 @@ export default function Accounts() {
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   const [editAccountForm, setEditAccountForm] = useState({ plan_id: '', client_id: '', notes: '', expires_at: '' });
   const [expiryChecking, setExpiryChecking] = useState(false);
+  const [search, setSearch] = useState('');
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
     plan_id: '', client_id: '', notes: '', expires_at: '',
@@ -163,8 +164,8 @@ export default function Accounts() {
         </div>
       </div>
 
-      {/* Status summary */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Status summary + search */}
+      <div className="flex flex-wrap items-center gap-3">
         {[
           { label: 'Active',     n: counts.active,     cls: 'badge-green' },
           { label: 'Suspended',  n: counts.suspended,  cls: 'badge-yellow' },
@@ -172,6 +173,15 @@ export default function Accounts() {
         ].map(({ label, n, cls }) => (
           <div key={label} className={`${cls} text-sm font-semibold px-3 py-1`}>{n} {label}</div>
         ))}
+        <div className="relative ml-auto">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            className="input pl-8 w-56 text-sm"
+            placeholder="Search accounts…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       {showForm && (
@@ -256,12 +266,22 @@ export default function Accounts() {
             <th className="px-4 py-3 w-32" />
           </tr></thead>
           <tbody>
-            {accounts.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-16 text-center">
-                <Server className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No hosting accounts yet</p>
-              </td></tr>
-            ) : accounts.map(acc => (
+            {(() => {
+              const q = search.trim().toLowerCase();
+              const visible = q ? accounts.filter(a =>
+                [a.username, a.domain, a.status, a.plan_name, a.client_name, a.client_email]
+                  .some(v => v?.toLowerCase().includes(q))
+              ) : accounts;
+              if (accounts.length === 0) return (
+                <tr><td colSpan={6} className="px-4 py-16 text-center">
+                  <Server className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                  <p className="text-slate-400 text-sm">No hosting accounts yet</p>
+                </td></tr>
+              );
+              if (visible.length === 0) return (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-sm">No accounts match "{search}"</td></tr>
+              );
+              return visible.map(acc => (
               <Fragment key={acc.id}>
                 <tr className={rowCls}>
                   <td className="table-cell">
@@ -410,7 +430,8 @@ export default function Accounts() {
                   </tr>
                 )}
               </Fragment>
-            ))}
+            ));
+            })()}
           </tbody>
         </table>
       </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock } from 'lucide-react';
+import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock, X } from 'lucide-react';
 
 type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay' | 'password-policy';
 
@@ -42,6 +42,14 @@ export default function Settings() {
       success('Logo uploaded');
     } catch (e: any) { error(e.response?.data?.error || 'Upload failed'); }
     setUploading(false);
+  }
+
+  async function removeLogo() {
+    try {
+      await axios.delete('/api/settings/logo', { headers: auth() });
+      setLogoPreview(null);
+      success('Logo removed');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed to remove logo'); }
   }
 
   function set(key: string, value: string) { setSettings(p => ({ ...p, [key]: value })); }
@@ -143,6 +151,7 @@ export default function Settings() {
               {logoPreview && <img src={logoPreview} alt="Logo" className="h-10 object-contain rounded border border-slate-200 dark:border-slate-700 p-1" />}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); }} />
               <button className="btn-secondary" onClick={() => fileRef.current?.click()} disabled={uploading}><Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Logo'}</button>
+              {logoPreview && <button className="btn-icon text-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/30" title="Remove logo" onClick={removeLogo}><X size={14} /></button>}
               {logoPreview && <span className="text-xs text-slate-400">Logo active — shows in sidebar</span>}
             </div>
           </div>
