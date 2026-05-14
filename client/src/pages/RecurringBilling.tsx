@@ -22,6 +22,8 @@ export default function RecurringBilling() {
   const [applyInvoiceId, setApplyInvoiceId] = useState('');
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
   const [editScheduleForm, setEditScheduleForm] = useState({ amount: '', cycle: 'monthly', next_run: '', notes: '' });
+  const [editingPromoId, setEditingPromoId] = useState<number | null>(null);
+  const [editPromoForm, setEditPromoForm] = useState({ max_uses: '', expires_at: '' });
 
   useEffect(() => {
     api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
@@ -67,6 +69,15 @@ export default function RecurringBilling() {
 
   async function togglePromo(id: number, active: boolean) {
     await api(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: !active }) });
+    api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
+  }
+
+  async function updatePromo(id: number) {
+    const r = await api(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: promos.find(p => p.id === id)?.active ?? 1, max_uses: editPromoForm.max_uses || null, expires_at: editPromoForm.expires_at || null }) });
+    const d = await r.json();
+    if (d.error) { toast.error(d.error); return; }
+    toast.success('Promo updated');
+    setEditingPromoId(null);
     api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
   }
 
@@ -295,19 +306,50 @@ export default function RecurringBilling() {
             <tbody>
               {promos.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-slate-500">No promo codes</td></tr>}
               {promos.map((p: any) => (
-                <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="table-cell"><span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"><Tag size={11} />{p.code}</span></td>
-                  <td className="table-cell capitalize text-xs">{p.type}</td>
-                  <td className="table-cell">{p.type === 'percent' ? `${p.value}%` : `$${p.value}`}</td>
-                  <td className="table-cell text-xs">{p.uses_count}/{p.max_uses || '∞'}</td>
-                  <td className="table-cell text-xs text-slate-500">{p.expires_at || 'Never'}</td>
-                  <td className="table-cell">
-                    <button onClick={() => togglePromo(p.id, p.active)} className={`relative w-9 h-5 rounded-full transition-colors ${p.active ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${p.active ? 'left-4' : 'left-0.5'}`} />
-                    </button>
-                  </td>
-                  <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => { api(`/promo-codes/${p.id}`, { method: 'DELETE' }); setPromos(pp => pp.filter(x => x.id !== p.id)); }}><Trash2 size={13} /></button></td>
-                </tr>
+                <Fragment key={p.id}>
+                  <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell"><span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"><Tag size={11} />{p.code}</span></td>
+                    <td className="table-cell capitalize text-xs">{p.type}</td>
+                    <td className="table-cell">{p.type === 'percent' ? `${p.value}%` : `$${p.value}`}</td>
+                    <td className="table-cell text-xs">{p.uses_count}/{p.max_uses || '∞'}</td>
+                    <td className="table-cell text-xs text-slate-500">{p.expires_at || 'Never'}</td>
+                    <td className="table-cell">
+                      <button onClick={() => togglePromo(p.id, p.active)} className={`relative w-9 h-5 rounded-full transition-colors ${p.active ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${p.active ? 'left-4' : 'left-0.5'}`} />
+                      </button>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex gap-1">
+                        <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                          if (editingPromoId === p.id) { setEditingPromoId(null); return; }
+                          setEditingPromoId(p.id);
+                          setEditPromoForm({ max_uses: p.max_uses ? String(p.max_uses) : '', expires_at: p.expires_at || '' });
+                        }}><Pencil size={13} /></button>
+                        <button className="btn-icon text-red-500" onClick={() => { api(`/promo-codes/${p.id}`, { method: 'DELETE' }); setPromos(pp => pp.filter(x => x.id !== p.id)); }}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                  {editingPromoId === p.id && (
+                    <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                      <td colSpan={7} className="px-4 py-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div>
+                            <label className="label">Max Uses</label>
+                            <input className="input text-sm w-28" type="number" placeholder="unlimited" value={editPromoForm.max_uses} onChange={e => setEditPromoForm(f => ({ ...f, max_uses: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label className="label">Expires At</label>
+                            <input className="input text-sm" type="date" value={editPromoForm.expires_at} onChange={e => setEditPromoForm(f => ({ ...f, expires_at: e.target.value }))} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button className="btn-primary text-sm" onClick={() => updatePromo(p.id)}>Save</button>
+                            <button className="btn-ghost text-sm" onClick={() => setEditingPromoId(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
