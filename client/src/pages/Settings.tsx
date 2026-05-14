@@ -96,7 +96,7 @@ export default function Settings() {
 
   async function saveRelay() {
     try {
-      await apost('/api/settings/relay', relay);
+      await aput('/api/settings/relay', relay);
       success('Postfix relay settings saved');
     } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
