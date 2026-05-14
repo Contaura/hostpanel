@@ -1,0 +1,103 @@
+import { Router, Request, Response } from 'express';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import si from 'systeminformation';
+import db from '../db';
+
+const router = Router();
+const execAsync = promisify(exec);
+
+/* ── Alert rules CRUD ────────────────────────────────────── */
+
+router.get('/rules', (_req: Request, res: Response) => {
+  res.json(db.prepare('SELECT * FROM alert_rules ORDER BY metric').all());
+});
+
+router.post('/rules', (req: Request, res: Response) => {
+  const { metric, threshold, notify_email } = req.body;
+  const valid = ['cpu', 'memory', 'disk', 'load'];
+  if (!metric || !valid.includes(metric)) return res.status(400).json({ error: `metric must be one of: ${valid.join(', ')}` });
+  try {
+    const r = db.prepare('INSERT INTO alert_rules (metric, threshold, notify_email) VALUES (?, ?, ?)').run(metric, threshold ?? 80, notify_email || '');
+    res.json(db.prepare('SELECT * FROM alert_rules WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/rules/:id', (req: Request, res: Response) => {
+  const { threshold, notify_email, enabled } = req.body;
+  db.prepare('UPDATE alert_rules SET threshold=?, notify_email=?, enabled=? WHERE id=?')
+    .run(threshold, notify_email, enabled ? 1 : 0, req.params.id);
+  res.json(db.prepare('SELECT * FROM alert_rules WHERE id = ?').get(req.params.id));
+});
+
+router.delete('/rules/:id', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM alert_rules WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+/* ── Live alerts (check against rules) ──────────────────── */
+
+router.get('/current', async (_req: Request, res: Response) => {
+  try {
+    const [cpu, mem, disks, load] = await Promise.all([
+      si.currentLoad(),
+      si.mem(),
+      si.fsSize(),
+      si.currentLoad(),
+    ]);
+
+    const rules = db.prepare("SELECT * FROM alert_rules WHERE enabled=1").all() as any[];
+    const alerts: any[] = [];
+
+    const cpuPct = Math.round(cpu.currentLoad);
+    const memPct = Math.round((mem.used / mem.total) * 100);
+    const loadPct = Math.round((load.currentLoad));
+
+    for (const rule of rules) {
+      if (rule.metric === 'cpu' && cpuPct >= rule.threshold) {
+        alerts.push({ id: rule.id, severity: cpuPct >= 95 ? 'critical' : 'warning', metric: 'CPU', value: cpuPct, threshold: rule.threshold, message: `CPU usage is ${cpuPct}%` });
+      }
+      if (rule.metric === 'memory' && memPct >= rule.threshold) {
+        alerts.push({ id: rule.id, severity: memPct >= 95 ? 'critical' : 'warning', metric: 'Memory', value: memPct, threshold: rule.threshold, message: `Memory usage is ${memPct}%` });
+      }
+      if (rule.metric === 'disk') {
+        for (const disk of disks) {
+          const pct = Math.round(disk.use);
+          if (pct >= rule.threshold) {
+            alerts.push({ id: rule.id, severity: pct >= 95 ? 'critical' : 'warning', metric: 'Disk', value: pct, threshold: rule.threshold, message: `Disk ${disk.mount} usage is ${pct}%` });
+          }
+        }
+      }
+    }
+
+    // Always add disk info even without rules
+    const diskInfo = disks.map(d => ({ mount: d.mount, size: d.size, used: d.used, use: Math.round(d.use) }));
+    res.json({ alerts, stats: { cpu: cpuPct, memory: memPct, load: loadPct, disks: diskInfo } });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Package Updates (dnf) ───────────────────────────────── */
+
+router.get('/packages', async (_req: Request, res: Response) => {
+  try {
+    const { stdout } = await execAsync('dnf check-update --quiet 2>/dev/null || true');
+    const lines = stdout.trim().split('\n').filter(l => l.trim() && !l.startsWith('Last') && l.includes(' '));
+    const updates = lines.map(l => {
+      const parts = l.trim().split(/\s+/);
+      return parts.length >= 2 ? { package: parts[0], version: parts[1], repo: parts[2] || '' } : null;
+    }).filter(Boolean);
+    res.json({ count: updates.length, updates });
+  } catch (err: any) { res.json({ count: 0, updates: [], error: err.message }); }
+});
+
+router.post('/packages/update', async (req: Request, res: Response) => {
+  const { packages } = req.body; // array of package names, or empty for all
+  const pkgList = Array.isArray(packages) && packages.length ? packages.map(p => p.replace(/[^a-zA-Z0-9._-]/g, '')).join(' ') : '';
+  try {
+    const cmd = pkgList ? `dnf update -y ${pkgList}` : 'dnf update -y';
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 300000 });
+    res.json({ success: true, output: stdout + stderr });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+export default router;

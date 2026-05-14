@@ -1,0 +1,213 @@
+import { useState, useEffect } from 'react';
+import axios from 'axios';
+import { useToast } from '../components/Toast';
+import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield } from 'lucide-react';
+
+type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas';
+
+interface Forwarder { source: string; dest: string }
+interface Autoresponder { id: number; email: string; subject: string; body: string; start_date: string; end_date: string; enabled: number }
+interface SpamConfig { required_score: string; rewrite_header: string; report_safe: string; use_bayes: string; bayes_auto_learn: string }
+
+function token() { return localStorage.getItem('hp_token') || ''; }
+const api = (path: string) => axios.get(path, { headers: { Authorization: 'Bearer ' + token() } });
+const del = (path: string) => axios.delete(path, { headers: { Authorization: 'Bearer ' + token() } });
+const post = (path: string, data: any) => axios.post(path, data, { headers: { Authorization: 'Bearer ' + token() } });
+const put  = (path: string, data: any) => axios.put(path, data, { headers: { Authorization: 'Bearer ' + token() } });
+
+export default function EmailExtras() {
+  const { success, error } = useToast();
+  const [tab, setTab]   = useState<Tab>('forwarders');
+
+  // Forwarders
+  const [forwarders, setForwarders] = useState<Forwarder[]>([]);
+  const [fwSource, setFwSource] = useState('');
+  const [fwDest, setFwDest]     = useState('');
+
+  // Autoresponders
+  const [autoresponders, setAutoresponders] = useState<Autoresponder[]>([]);
+  const [arForm, setArForm] = useState({ email: '', subject: 'Auto Reply', body: '', start_date: '', end_date: '' });
+  const [showArForm, setShowArForm] = useState(false);
+
+  // Spam
+  const [spam, setSpam] = useState<SpamConfig>({ required_score: '5.0', rewrite_header: 'Subject ***SPAM***', report_safe: '0', use_bayes: '1', bayes_auto_learn: '1' });
+
+  // Quotas
+  const [quotas, setQuotas] = useState<any[]>([]);
+
+  useEffect(() => { loadTab(tab); }, [tab]);
+
+  function loadTab(t: Tab) {
+    if (t === 'forwarders') api('/api/email-extras/forwarders').then(r => setForwarders(r.data)).catch(() => {});
+    if (t === 'autoresponders') api('/api/email-extras/autoresponders').then(r => setAutoresponders(r.data)).catch(() => {});
+    if (t === 'spam') api('/api/email-extras/spam').then(r => setSpam(r.data)).catch(() => {});
+    if (t === 'quotas') api('/api/email-extras/quotas').then(r => setQuotas(r.data)).catch(() => {});
+  }
+
+  async function addForwarder() {
+    if (!fwSource || !fwDest) return;
+    try { await post('/api/email-extras/forwarders', { source: fwSource, dest: fwDest }); success('Forwarder added'); setFwSource(''); setFwDest(''); loadTab('forwarders'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteForwarder(source: string) {
+    try { await del(`/api/email-extras/forwarders/${encodeURIComponent(source)}`); success('Deleted'); loadTab('forwarders'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function saveAutoresponder() {
+    try { await post('/api/email-extras/autoresponders', arForm); success('Autoresponder created'); setShowArForm(false); setArForm({ email: '', subject: 'Auto Reply', body: '', start_date: '', end_date: '' }); loadTab('autoresponders'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function toggleAutoresponder(ar: Autoresponder) {
+    try { await put(`/api/email-extras/autoresponders/${ar.id}`, { ...ar, enabled: ar.enabled ? 0 : 1 }); loadTab('autoresponders'); }
+    catch (e: any) { error('Failed'); }
+  }
+
+  async function deleteAutoresponder(id: number) {
+    try { await del(`/api/email-extras/autoresponders/${id}`); success('Deleted'); loadTab('autoresponders'); }
+    catch (e: any) { error('Failed'); }
+  }
+
+  async function saveSpam() {
+    try { await put('/api/email-extras/spam', spam); success('SpamAssassin config saved'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  const tabs: { id: Tab; label: string; icon: any }[] = [
+    { id: 'forwarders', label: 'Forwarders', icon: Forward },
+    { id: 'autoresponders', label: 'Autoresponders', icon: Mail },
+    { id: 'spam', label: 'Spam Filter', icon: Shield },
+    { id: 'quotas', label: 'Disk Quotas', icon: Mail },
+  ];
+
+  return (
+    <div className="p-6 space-y-6">
+      <div>
+        <h1 className="page-title">Email Extras</h1>
+        <p className="page-subtitle">Manage forwarders, autoresponders, spam filtering, and disk quotas</p>
+      </div>
+
+      <div className="tab-bar">
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={tab === t.id ? 'tab-item-active' : 'tab-item'}>
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Forwarders */}
+      {tab === 'forwarders' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <h3 className="font-semibold text-sm text-slate-900 dark:text-slate-100 mb-3">Add Forwarder</h3>
+            <div className="flex gap-3">
+              <input className="input flex-1" placeholder="from@domain.com" value={fwSource} onChange={e => setFwSource(e.target.value)} />
+              <span className="flex items-center text-slate-400 text-sm">→</span>
+              <input className="input flex-1" placeholder="to@destination.com" value={fwDest} onChange={e => setFwDest(e.target.value)} />
+              <button className="btn-primary" onClick={addForwarder}><Plus size={14} /> Add</button>
+            </div>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Source</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+              <tbody>
+                {forwarders.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No forwarders configured</td></tr>}
+                {forwarders.map(f => (
+                  <tr key={f.source} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="table-cell font-medium">{f.source}</td>
+                    <td className="table-cell text-slate-600 dark:text-slate-400">{f.dest}</td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteForwarder(f.source)}><Trash2 size={14} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Autoresponders */}
+      {tab === 'autoresponders' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button className="btn-primary" onClick={() => setShowArForm(true)}><Plus size={14} /> New Autoresponder</button>
+          </div>
+
+          {showArForm && (
+            <div className="card p-5 space-y-3">
+              <h3 className="font-semibold text-sm mb-2">New Autoresponder</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label">Email Address</label><input className="input" placeholder="user@domain.com" value={arForm.email} onChange={e => setArForm(p => ({ ...p, email: e.target.value }))} /></div>
+                <div><label className="label">Subject</label><input className="input" value={arForm.subject} onChange={e => setArForm(p => ({ ...p, subject: e.target.value }))} /></div>
+                <div><label className="label">Start Date (optional)</label><input type="date" className="input" value={arForm.start_date} onChange={e => setArForm(p => ({ ...p, start_date: e.target.value }))} /></div>
+                <div><label className="label">End Date (optional)</label><input type="date" className="input" value={arForm.end_date} onChange={e => setArForm(p => ({ ...p, end_date: e.target.value }))} /></div>
+              </div>
+              <div><label className="label">Message Body</label><textarea className="input min-h-[100px]" value={arForm.body} onChange={e => setArForm(p => ({ ...p, body: e.target.value }))} /></div>
+              <div className="flex gap-2 justify-end"><button className="btn-secondary" onClick={() => setShowArForm(false)}>Cancel</button><button className="btn-primary" onClick={saveAutoresponder}>Save</button></div>
+            </div>
+          )}
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Email</th><th className="table-header-cell">Subject</th><th className="table-header-cell">Active</th><th className="table-header-cell w-20"></th></tr></thead>
+              <tbody>
+                {autoresponders.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>}
+                {autoresponders.map(ar => (
+                  <tr key={ar.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="table-cell font-medium">{ar.email}</td>
+                    <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
+                    <td className="table-cell">
+                      <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
+                    </td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Spam */}
+      {tab === 'spam' && (
+        <div className="card p-5 space-y-4 max-w-xl">
+          <h3 className="font-semibold text-sm">SpamAssassin Configuration</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">Required Score (default 5.0)</label><input type="number" step="0.1" className="input" value={spam.required_score} onChange={e => setSpam(p => ({ ...p, required_score: e.target.value }))} /></div>
+            <div><label className="label">Rewrite Header</label><input className="input" value={spam.rewrite_header} onChange={e => setSpam(p => ({ ...p, rewrite_header: e.target.value }))} /></div>
+          </div>
+          <div className="flex gap-6">
+            {(['report_safe', 'use_bayes', 'bayes_auto_learn'] as const).map(k => (
+              <label key={k} className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="rounded" checked={spam[k] === '1'} onChange={e => setSpam(p => ({ ...p, [k]: e.target.checked ? '1' : '0' }))} />
+                <span className="text-sm text-slate-700 dark:text-slate-300">{k.replace(/_/g, ' ')}</span>
+              </label>
+            ))}
+          </div>
+          <button className="btn-primary" onClick={saveSpam}>Save SpamAssassin Config</button>
+        </div>
+      )}
+
+      {/* Quotas */}
+      {tab === 'quotas' && (
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">User</th><th className="table-header-cell">Used</th><th className="table-header-cell">Limit</th><th className="table-header-cell">Grace</th></tr></thead>
+            <tbody>
+              {quotas.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No quota data available — ensure the quota package is installed</td></tr>}
+              {quotas.map((q, i) => (
+                <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
+                  <td className="table-cell font-medium">{q.user}</td>
+                  <td className="table-cell">{q.used}</td>
+                  <td className="table-cell">{q.limit}</td>
+                  <td className="table-cell">{q.grace}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

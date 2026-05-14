@@ -1,0 +1,49 @@
+import { Router, Response } from 'express';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { AuthRequest } from '../middleware/auth';
+
+const router = Router();
+const execAsync = promisify(exec);
+
+router.get('/list', async (_req: AuthRequest, res: Response) => {
+  try {
+    const { stdout } = await execAsync(
+      'ps aux --no-headers --sort=-%cpu | head -60'
+    );
+    const processes = stdout
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        const p = line.trim().split(/\s+/);
+        return {
+          user:    p[0],
+          pid:     p[1],
+          cpu:     p[2],
+          mem:     p[3],
+          vsz:     p[4],
+          rss:     p[5],
+          stat:    p[7],
+          start:   p[8],
+          time:    p[9],
+          command: p.slice(10).join(' '),
+        };
+      });
+    res.json(processes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:pid', async (req: AuthRequest, res: Response) => {
+  const pid = parseInt(req.params.pid, 10);
+  if (!pid || pid < 2) return res.status(400).json({ error: 'Invalid PID' });
+  try {
+    await execAsync(`kill -15 ${pid} 2>/dev/null || kill -9 ${pid}`);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;

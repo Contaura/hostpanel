@@ -1,0 +1,14 @@
+{
+  "name": "hostpanel",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
+    "build": "npm run build --workspace=server && npm run build --workspace=client",
+    "install:all": "npm install && npm install --workspace=server && npm install --workspace=client"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

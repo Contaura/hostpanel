@@ -1,0 +1,151 @@
+import { useEffect, useState, FormEvent } from 'react';
+import axios from 'axios';
+import { FolderUp, Plus, Trash2, Key } from 'lucide-react';
+import { useToast } from '../components/Toast';
+
+interface FTPUser { username: string; directory: string }
+
+const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
+const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
+
+export default function FTPManager() {
+  const toast = useToast();
+  const [users, setUsers] = useState<FTPUser[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [passTarget, setPassTarget] = useState<string | null>(null);
+  const [form, setForm] = useState({ username: '', password: '', directory: '' });
+  const [newPass, setNewPass] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    const { data } = await axios.get<FTPUser[]>('/api/ftp/users');
+    setUsers(data);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function createUser(e: FormEvent) {
+    e.preventDefault(); setLoading(true);
+    try {
+      await axios.post('/api/ftp/users', form);
+      toast.success(`FTP user "${form.username}" created`);
+      setForm({ username: '', password: '', directory: '' }); setShowForm(false); load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setLoading(false); }
+  }
+
+  async function deleteUser(username: string) {
+    if (!confirm(`Delete FTP user "${username}"?`)) return;
+    try { await axios.delete(`/api/ftp/users/${username}`); toast.success(`"${username}" deleted`); load(); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function changePassword(username: string) {
+    if (!newPass || newPass.length < 6) { toast.error('Password must be at least 6 characters'); return; }
+    try {
+      await axios.put(`/api/ftp/users/${username}/password`, { password: newPass });
+      toast.success('Password updated'); setNewPass(''); setPassTarget(null);
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="page-title">FTP Accounts</h1>
+          <p className="page-subtitle">Manage vsftpd user accounts and home directories</p>
+        </div>
+        <button onClick={() => setShowForm(v => !v)} className="btn-primary">
+          <Plus size={14} /> New FTP user
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={createUser} className="card p-5 space-y-4 max-w-md">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Create FTP User</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="label">Username</label>
+              <input className="input" placeholder="ftpuser" value={form.username}
+                onChange={e => setForm({ ...form, username: e.target.value })}
+                pattern="[a-zA-Z0-9_]+" required />
+            </div>
+            <div>
+              <label className="label">Password</label>
+              <input type="password" className="input" placeholder="••••••••" value={form.password}
+                onChange={e => setForm({ ...form, password: e.target.value })} required />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Home Directory (blank = /var/www/username)</label>
+              <input className="input" placeholder="/var/www/example.com/public_html" value={form.directory}
+                onChange={e => setForm({ ...form, directory: e.target.value })} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Creating…' : 'Create user'}</button>
+            <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className={theadCls}><tr>
+            <th className="table-header-cell">Username</th>
+            <th className="table-header-cell hidden md:table-cell">Home Directory</th>
+            <th className="px-4 py-3 w-24" />
+          </tr></thead>
+          <tbody>
+            {users.length === 0 ? (
+              <tr><td colSpan={3} className="px-4 py-16 text-center">
+                <FolderUp className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                <p className="text-slate-400 text-sm">No FTP accounts yet</p>
+              </td></tr>
+            ) : users.map(u => (
+              <>
+                <tr key={u.username} className={rowCls}>
+                  <td className="table-cell">
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-7 w-7 rounded-lg bg-orange-50 dark:bg-orange-900/30 flex items-center justify-center flex-shrink-0">
+                        <FolderUp size={13} className="text-orange-500 dark:text-orange-400" />
+                      </div>
+                      <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{u.username}</span>
+                    </div>
+                  </td>
+                  <td className="table-cell font-mono text-slate-400 dark:text-slate-500 text-xs hidden md:table-cell">{u.directory}</td>
+                  <td className="px-3 py-3">
+                    <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => setPassTarget(passTarget === u.username ? null : u.username)}
+                        className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
+                        title="Change password"
+                      >
+                        <Key size={13} />
+                      </button>
+                      <button onClick={() => deleteUser(u.username)}
+                        className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {passTarget === u.username && (
+                  <tr key={`${u.username}-pass`} className="bg-indigo-50/50 dark:bg-indigo-900/20 border-b border-slate-50 dark:border-slate-700/40">
+                    <td colSpan={3} className="px-4 py-3">
+                      <div className="flex items-center gap-2 max-w-sm">
+                        <Key size={14} className="text-indigo-400 flex-shrink-0" />
+                        <input type="password" className="input flex-1" placeholder="New password (min 6 chars)"
+                          value={newPass} onChange={e => setNewPass(e.target.value)} autoFocus />
+                        <button onClick={() => changePassword(u.username)} className="btn-primary flex-shrink-0">Update</button>
+                        <button onClick={() => setPassTarget(null)} className="btn-ghost flex-shrink-0">Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

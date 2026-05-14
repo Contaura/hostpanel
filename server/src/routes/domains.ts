@@ -1,0 +1,155 @@
+import { Router, Response } from 'express';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import path from 'path';
+import { AuthRequest } from '../middleware/auth';
+
+const router = Router();
+const execAsync = promisify(exec);
+
+const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
+const WEBROOT = process.env.WEBROOT || '/var/www';
+const NAMED_DIR = process.env.NAMED_DIR || '/etc/named';
+const NAMED_CONF = process.env.NAMED_CONF || '/etc/named.conf';
+
+function sanitizeDomain(domain: string): boolean {
+  return /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$/.test(domain);
+}
+
+router.get('/domains', async (_req: AuthRequest, res: Response) => {
+  try {
+    const files = await fs.readdir(VHOST_DIR).catch(() => [] as string[]);
+    const domains = files
+      .filter(f => f.endsWith('.conf') && !f.startsWith('ssl_'))
+      .map(f => f.replace('.conf', ''));
+    res.json(domains);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/domains', async (req: AuthRequest, res: Response) => {
+  const { domain, phpVersion = '8.2' } = req.body;
+  if (!domain || !sanitizeDomain(domain)) {
+    res.status(400).json({ error: 'Invalid domain name' });
+    return;
+  }
+
+  const docRoot = path.join(WEBROOT, domain, 'public_html');
+  const vhostConf = `<VirtualHost *:80>
+    ServerName ${domain}
+    ServerAlias www.${domain}
+    DocumentRoot ${docRoot}
+    ErrorLog /var/log/httpd/${domain}-error.log
+    CustomLog /var/log/httpd/${domain}-access.log combined
+
+    <Directory ${docRoot}>
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+`;
+
+  try {
+    await fs.mkdir(docRoot, { recursive: true });
+    await fs.writeFile(path.join(VHOST_DIR, `${domain}.conf`), vhostConf);
+    await fs.writeFile(
+      path.join(docRoot, 'index.html'),
+      `<html><body><h1>Welcome to ${domain}</h1><p>Hosted by HostPanel</p></body></html>`
+    );
+    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    res.json({ message: `Domain ${domain} added` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/domains/:domain', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  if (!sanitizeDomain(domain)) {
+    res.status(400).json({ error: 'Invalid domain name' });
+    return;
+  }
+
+  try {
+    await fs.unlink(path.join(VHOST_DIR, `${domain}.conf`)).catch(() => {});
+    await fs.unlink(path.join(VHOST_DIR, `ssl_${domain}.conf`)).catch(() => {});
+    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    res.json({ message: `Domain ${domain} removed` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/ssl/:domain', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  const { email } = req.body;
+  if (!sanitizeDomain(domain)) {
+    res.status(400).json({ error: 'Invalid domain name' });
+    return;
+  }
+
+  try {
+    const emailArg = email ? `--email ${email}` : '--register-unsafely-without-email';
+    const { stdout } = await execAsync(
+      `certbot --apache -d ${domain} -d www.${domain} ${emailArg} --agree-tos --non-interactive 2>&1`
+    );
+    res.json({ message: 'SSL certificate issued', output: stdout });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/dns/:domain', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  if (!sanitizeDomain(domain)) {
+    res.status(400).json({ error: 'Invalid domain name' });
+    return;
+  }
+
+  try {
+    const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
+    const content = await fs.readFile(zoneFile, 'utf-8').catch(() => null);
+    if (!content) {
+      res.json({ records: [] });
+      return;
+    }
+
+    // Parse basic zone file records
+    const records: { type: string; name: string; value: string; ttl: string }[] = [];
+    const lines = content.split('\n').filter(l => l.trim() && !l.startsWith(';'));
+    for (const line of lines) {
+      const match = line.match(/^(\S+)\s+(\d+)?\s*IN\s+(\w+)\s+(.+)$/);
+      if (match) {
+        records.push({ name: match[1], ttl: match[2] || '3600', type: match[3], value: match[4].trim() });
+      }
+    }
+    res.json({ records });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/dns/:domain', async (req: AuthRequest, res: Response) => {
+  const { domain } = req.params;
+  const { name, type, value, ttl = '3600' } = req.body;
+
+  const allowedTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV'];
+  if (!allowedTypes.includes(type)) {
+    res.status(400).json({ error: `Record type must be one of: ${allowedTypes.join(', ')}` });
+    return;
+  }
+
+  try {
+    const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
+    const record = `${name}\t${ttl}\tIN\t${type}\t${value}\n`;
+    await fs.appendFile(zoneFile, record);
+    await execAsync('rndc reload 2>/dev/null || true');
+    res.json({ message: 'DNS record added' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+export default router;
