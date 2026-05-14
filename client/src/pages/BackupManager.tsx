@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload, Cloud } from 'lucide-react';
+import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload, Cloud, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Backup {
@@ -33,6 +33,8 @@ export default function BackupManager() {
   const [remoteConfig, setRemoteConfig] = useState<Record<string, string>>({});
   const [remoteLoaded, setRemoteLoaded] = useState(false);
   const [pushingRemote, setPushingRemote] = useState<string | null>(null);
+  const [backupSearch, setBackupSearch] = useState('');
+  const [scheduleSearch, setScheduleSearch] = useState('');
 
   async function load() {
     try {
@@ -222,31 +224,47 @@ export default function BackupManager() {
             </button>
           </div>
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                {['Type', 'Target', 'Schedule', 'Last Run', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {schedules.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-400">No schedules configured</td></tr>
-                ) : schedules.map((s: any) => (
-                  <tr key={s.id} className={rowCls}>
-                    <td className="table-cell">
-                      <span className={`badge-${s.type === 'database' ? 'purple' : 'blue'} text-xs`}>{s.type}</span>
-                    </td>
-                    <td className="table-cell font-mono text-xs">{s.target || 'All'}</td>
-                    <td className="table-cell font-mono text-xs">{s.schedule}</td>
-                    <td className="table-cell text-xs text-slate-400">{s.last_run ? new Date(s.last_run).toLocaleString() : 'Never'}</td>
-                    <td className="px-3 py-3">
-                      <button onClick={() => deleteSchedule(s.id)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400">
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search schedules…" value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  {['Type', 'Target', 'Schedule', 'Last Run', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = scheduleSearch.trim().toLowerCase();
+                    const visible = q ? schedules.filter((s: any) => [s.type, s.target, s.schedule].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : schedules;
+                    if (schedules.length === 0) return (
+                      <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-400">No schedules configured</td></tr>
+                    );
+                    if (visible.length === 0) return (
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">No schedules match "{scheduleSearch}"</td></tr>
+                    );
+                    return visible.map((s: any) => (
+                      <tr key={s.id} className={rowCls}>
+                        <td className="table-cell">
+                          <span className={`badge-${s.type === 'database' ? 'purple' : 'blue'} text-xs`}>{s.type}</span>
+                        </td>
+                        <td className="table-cell font-mono text-xs">{s.target || 'All'}</td>
+                        <td className="table-cell font-mono text-xs">{s.schedule}</td>
+                        <td className="table-cell text-xs text-slate-400">{s.last_run ? new Date(s.last_run).toLocaleString() : 'Never'}</td>
+                        <td className="px-3 py-3">
+                          <button onClick={() => deleteSchedule(s.id)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -290,67 +308,83 @@ export default function BackupManager() {
       )}
 
       {tab === 'backups' && (
-        <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className={theadCls}>
-            <tr>
-              <th className="table-header-cell">Filename</th>
-              <th className="table-header-cell hidden md:table-cell">Size</th>
-              <th className="table-header-cell hidden lg:table-cell">Created</th>
-              <th className="px-4 py-3 w-20" />
-            </tr>
-          </thead>
-          <tbody>
-            {backups.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-16 text-center">
-                <Archive className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No backups yet</p>
-              </td></tr>
-            ) : backups.map(b => (
-              <tr key={b.name} className={rowCls}>
-                <td className="table-cell">
-                  <div className="flex items-center gap-2.5">
-                    <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ${b.name.includes('db_') ? 'bg-purple-50 dark:bg-purple-900/30' : 'bg-emerald-50 dark:bg-emerald-900/30'}`}>
-                      {b.name.includes('db_')
-                        ? <Database size={13} className="text-purple-600 dark:text-purple-400" />
-                        : <FolderOpen size={13} className="text-emerald-600 dark:text-emerald-400" />}
-                    </div>
-                    <span className="font-mono text-xs text-slate-900 dark:text-slate-100">{b.name}</span>
-                  </div>
-                </td>
-                <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{fmt(b.size)}</td>
-                <td className="table-cell text-slate-500 dark:text-slate-400 hidden lg:table-cell">
-                  {new Date(b.created).toLocaleString()}
-                </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                    <a href={`/api/backup/download/${encodeURIComponent(b.name)}`}
-                      className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
-                      title="Download">
-                      <Download size={13} />
-                    </a>
-                    <button onClick={() => pushToRemote(b.name)} disabled={pushingRemote === b.name}
-                      className="btn-icon hover:!text-sky-600 dark:hover:!text-sky-400 hover:!bg-sky-50 dark:hover:!bg-sky-900/30"
-                      title="Push to remote storage">
-                      {pushingRemote === b.name
-                        ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg>
-                        : <Cloud size={13} />}
-                    </button>
-                    <button onClick={() => restoreBackup(b.name)}
-                      className="btn-icon hover:!text-amber-600 dark:hover:!text-amber-400 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
-                      title="Restore">
-                      <RotateCcw size={13} />
-                    </button>
-                    <button onClick={() => deleteBackup(b.name)}
-                      className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search backups…" value={backupSearch} onChange={e => setBackupSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}>
+                <tr>
+                  <th className="table-header-cell">Filename</th>
+                  <th className="table-header-cell hidden md:table-cell">Size</th>
+                  <th className="table-header-cell hidden lg:table-cell">Created</th>
+                  <th className="px-4 py-3 w-20" />
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const q = backupSearch.trim().toLowerCase();
+                  const visible = q ? backups.filter(b => b.name.toLowerCase().includes(q)) : backups;
+                  if (backups.length === 0) return (
+                    <tr><td colSpan={4} className="px-4 py-16 text-center">
+                      <Archive className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                      <p className="text-slate-400 text-sm">No backups yet</p>
+                    </td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No backups match "{backupSearch}"</td></tr>
+                  );
+                  return visible.map(b => (
+                    <tr key={b.name} className={rowCls}>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`h-7 w-7 rounded-lg flex items-center justify-center flex-shrink-0 ${b.name.includes('db_') ? 'bg-purple-50 dark:bg-purple-900/30' : 'bg-emerald-50 dark:bg-emerald-900/30'}`}>
+                            {b.name.includes('db_')
+                              ? <Database size={13} className="text-purple-600 dark:text-purple-400" />
+                              : <FolderOpen size={13} className="text-emerald-600 dark:text-emerald-400" />}
+                          </div>
+                          <span className="font-mono text-xs text-slate-900 dark:text-slate-100">{b.name}</span>
+                        </div>
+                      </td>
+                      <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{fmt(b.size)}</td>
+                      <td className="table-cell text-slate-500 dark:text-slate-400 hidden lg:table-cell">
+                        {new Date(b.created).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                          <a href={`/api/backup/download/${encodeURIComponent(b.name)}`}
+                            className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
+                            title="Download">
+                            <Download size={13} />
+                          </a>
+                          <button onClick={() => pushToRemote(b.name)} disabled={pushingRemote === b.name}
+                            className="btn-icon hover:!text-sky-600 dark:hover:!text-sky-400 hover:!bg-sky-50 dark:hover:!bg-sky-900/30"
+                            title="Push to remote storage">
+                            {pushingRemote === b.name
+                              ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg>
+                              : <Cloud size={13} />}
+                          </button>
+                          <button onClick={() => restoreBackup(b.name)}
+                            className="btn-icon hover:!text-amber-600 dark:hover:!text-amber-400 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
+                            title="Restore">
+                            <RotateCcw size={13} />
+                          </button>
+                          <button onClick={() => deleteBackup(b.name)}
+                            className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
