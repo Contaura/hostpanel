@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Trash2, Send, FileSearch } from 'lucide-react';
+import { RefreshCw, Trash2, Send, FileSearch, RotateCcw, PauseCircle, PlayCircle, AlertOctagon } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/mail-queue${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
-type Tab = 'queue' | 'delivery-log';
+type Tab = 'queue' | 'delivery-log' | 'bounce-log';
 
 export default function MailQueue() {
   const toast = useToast();
@@ -15,6 +15,8 @@ export default function MailQueue() {
   const [deliveryLog, setDeliveryLog] = useState<any[]>([]);
   const [logSearch, setLogSearch] = useState('');
   const [logLoading, setLogLoading] = useState(false);
+  const [bounceLog, setBounceLog] = useState<string[]>([]);
+  const [bounceLoading, setBounceLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -33,8 +35,16 @@ export default function MailQueue() {
     setLogLoading(false);
   }
 
+  async function loadBounceLog() {
+    setBounceLoading(true);
+    const r = await api('/bounce-log');
+    const d = await r.json();
+    setBounceLog(d.lines || []);
+    setBounceLoading(false);
+  }
+
   useEffect(() => { load(); }, []);
-  useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); }, [tab]);
+  useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); if (tab === 'bounce-log') loadBounceLog(); }, [tab]);
 
   async function flush() {
     await api('/flush', { method: 'POST' });
@@ -54,6 +64,24 @@ export default function MailQueue() {
     load();
   }
 
+  async function retryMsg(id: string) {
+    await api(`/retry/${id}`, { method: 'POST' });
+    toast.success('Retry queued');
+    load();
+  }
+
+  async function holdMsg(id: string) {
+    await api(`/hold/${id}`, { method: 'POST' });
+    toast.success('Message held');
+    load();
+  }
+
+  async function unholdMsg(id: string) {
+    await api(`/unhold/${id}`, { method: 'POST' });
+    toast.success('Message released');
+    load();
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -65,12 +93,14 @@ export default function MailQueue() {
             <button className="btn-danger" onClick={deleteAll}><Trash2 size={14} className="mr-1" />Clear Deferred</button>
           </>}
           {tab === 'delivery-log' && <button className="btn-secondary" onClick={loadDeliveryLog}><RefreshCw size={14} /> Refresh</button>}
+          {tab === 'bounce-log' && <button className="btn-secondary" onClick={loadBounceLog}><RefreshCw size={14} /> Refresh</button>}
         </div>
       </div>
 
       <div className="tab-bar">
         <button className={tab === 'queue' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('queue')}><Send size={14} /> Mail Queue</button>
         <button className={tab === 'delivery-log' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('delivery-log')}><FileSearch size={14} /> Delivery Log</button>
+        <button className={tab === 'bounce-log' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('bounce-log')}><AlertOctagon size={14} /> Bounce Log</button>
       </div>
 
       {tab === 'delivery-log' && (
@@ -88,6 +118,18 @@ export default function MailQueue() {
                 {l.queue_id && <span className="text-indigo-400 text-xs font-mono mr-2">[{l.queue_id}]</span>}
                 <span className="text-slate-300 text-xs">{l.message}</span>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'bounce-log' && (
+        <div className="space-y-4">
+          <div className="card bg-slate-950 p-4 max-h-[60vh] overflow-y-auto">
+            {bounceLoading && <p className="text-slate-400 text-xs">Loading…</p>}
+            {!bounceLoading && bounceLog.length === 0 && <p className="text-slate-400 text-xs">No bounce entries found in mail log.</p>}
+            {bounceLog.map((line, i) => (
+              <div key={i} className="text-xs font-mono text-slate-300 py-0.5 border-b border-slate-800/50 last:border-0">{line}</div>
             ))}
           </div>
         </div>
@@ -128,7 +170,14 @@ export default function MailQueue() {
                   <span className={`badge-${m.status === 'active' ? 'success' : m.status === 'deferred' ? 'warning' : 'danger'}`}>{m.status}</span>
                 </td>
                 <td className="table-cell">
-                  <button className="btn-icon text-red-500" onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
+                  <div className="flex gap-1">
+                    <button className="btn-icon text-blue-500" title="Retry" onClick={() => retryMsg(m.id)}><RotateCcw size={13} /></button>
+                    {m.status === 'held'
+                      ? <button className="btn-icon text-emerald-500" title="Unhold" onClick={() => unholdMsg(m.id)}><PlayCircle size={13} /></button>
+                      : <button className="btn-icon text-amber-500" title="Hold" onClick={() => holdMsg(m.id)}><PauseCircle size={13} /></button>
+                    }
+                    <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
+                  </div>
                 </td>
               </tr>
             ))}

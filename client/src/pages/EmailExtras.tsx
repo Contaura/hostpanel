@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useToast } from '../components/Toast';
 import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield } from 'lucide-react';
 
-type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam';
+type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all';
 
 interface Forwarder { source: string; dest: string }
 interface Autoresponder { id: number; email: string; subject: string; body: string; start_date: string; end_date: string; enabled: number }
@@ -40,6 +40,10 @@ export default function EmailExtras() {
   const [dsRules, setDsRules] = useState<any[]>([]);
   const [dsForm, setDsForm] = useState({ type: 'whitelist', address: '' });
 
+  // Catch-all
+  const [catchAlls, setCatchAlls] = useState<{ domain: string; destination: string }[]>([]);
+  const [caForm, setCaForm] = useState({ domain: '', destination: '' });
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
@@ -47,6 +51,18 @@ export default function EmailExtras() {
     if (t === 'autoresponders') api('/api/email-extras/autoresponders').then(r => setAutoresponders(r.data)).catch(() => {});
     if (t === 'spam') api('/api/email-extras/spam').then(r => setSpam(r.data)).catch(() => {});
     if (t === 'quotas') api('/api/email-extras/quotas').then(r => setQuotas(r.data)).catch(() => {});
+    if (t === 'catch-all') api('/api/email-extras/catch-all').then(r => setCatchAlls(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+  }
+
+  async function addCatchAll() {
+    if (!caForm.domain || !caForm.destination) return;
+    try { await post('/api/email-extras/catch-all', caForm); success('Catch-all set'); setCaForm({ domain: '', destination: '' }); loadTab('catch-all'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteCatchAll(domain: string) {
+    try { await del(`/api/email-extras/catch-all/${encodeURIComponent(domain)}`); success('Removed'); loadTab('catch-all'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function addForwarder() {
@@ -92,6 +108,7 @@ export default function EmailExtras() {
     { id: 'spam', label: 'Spam Filter', icon: Shield },
     { id: 'quotas', label: 'Disk Quotas', icon: Mail },
     { id: 'domain-spam', label: 'Per-Domain Rules', icon: Shield },
+    { id: 'catch-all', label: 'Catch-All', icon: Mail },
   ];
 
   return (
@@ -267,6 +284,40 @@ export default function EmailExtras() {
               </table>
             </div>
           )}
+        </div>
+      )}
+      {tab === 'catch-all' && (
+        <div className="space-y-4">
+          <div className="card p-4">
+            <h3 className="font-semibold text-sm text-slate-900 dark:text-slate-100 mb-3">Set Catch-All Address</h3>
+            <p className="text-xs text-slate-500 mb-3">Any mail sent to an unknown address at the domain will be forwarded here.</p>
+            <div className="flex gap-3">
+              <div>
+                <label className="label">Domain</label>
+                <input className="input" placeholder="example.com" value={caForm.domain} onChange={e => setCaForm(f => ({ ...f, domain: e.target.value }))} />
+              </div>
+              <div className="flex-1">
+                <label className="label">Destination Address</label>
+                <input className="input" placeholder="catchall@example.com" value={caForm.destination} onChange={e => setCaForm(f => ({ ...f, destination: e.target.value }))} />
+              </div>
+              <button className="btn-primary self-end" onClick={addCatchAll}><Plus size={14} /> Set</button>
+            </div>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Domain</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+              <tbody>
+                {catchAlls.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No catch-all addresses configured</td></tr>}
+                {catchAlls.map(ca => (
+                  <tr key={ca.domain} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="table-cell font-mono">@{ca.domain}</td>
+                    <td className="table-cell text-slate-600 dark:text-slate-400">{ca.destination}</td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteCatchAll(ca.domain)}><Trash2 size={14} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

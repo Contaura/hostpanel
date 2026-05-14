@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Globe, Shield, Plus, Trash2, ShieldCheck } from 'lucide-react';
+import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface DNSRecord { name: string; type: string; value: string; ttl: string }
@@ -25,6 +25,8 @@ export default function DomainManager() {
   const [dnsRecords, setDnsRecords] = useState<DNSRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [sslOutput, setSslOutput] = useState('');
+  const [editingDns, setEditingDns] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<DNSRecord>({ name: '', type: 'A', value: '', ttl: '3600' });
 
   async function loadDomains() {
     const { data } = await axios.get<string[]>('/api/domains/domains');
@@ -71,6 +73,18 @@ export default function DomainManager() {
       toast.success('DNS record added'); loadDNS(dnsForm.domain);
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setLoading(false); }
+  }
+
+  async function deleteDNSRecord(index: number) {
+    if (!dnsForm.domain) return;
+    try { await axios.delete(`/api/domains/dns/${dnsForm.domain}/${index}`); toast.success('Record deleted'); loadDNS(dnsForm.domain); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function saveEditDNSRecord(index: number) {
+    if (!dnsForm.domain) return;
+    try { await axios.put(`/api/domains/dns/${dnsForm.domain}/${index}`, editForm); toast.success('Record updated'); setEditingDns(null); loadDNS(dnsForm.domain); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
   return (
@@ -251,14 +265,34 @@ export default function DomainManager() {
                   <th className="table-header-cell">Type</th>
                   <th className="table-header-cell">TTL</th>
                   <th className="table-header-cell">Value</th>
+                  <th className="px-4 py-3 w-20" />
                 </tr></thead>
                 <tbody>
-                  {dnsRecords.map((r, i) => (
+                  {dnsRecords.map((r, i) => editingDns === i ? (
+                    <tr key={i} className={rowCls}>
+                      <td className="table-cell"><input className="input text-xs py-1" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} /></td>
+                      <td className="table-cell"><select className="input text-xs py-1" value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}>{DNS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
+                      <td className="table-cell"><input className="input text-xs py-1 w-20" value={editForm.ttl} onChange={e => setEditForm(f => ({ ...f, ttl: e.target.value }))} /></td>
+                      <td className="table-cell"><input className="input text-xs py-1" value={editForm.value} onChange={e => setEditForm(f => ({ ...f, value: e.target.value }))} /></td>
+                      <td className="px-3 py-3">
+                        <div className="flex gap-1">
+                          <button className="btn-icon text-emerald-500" onClick={() => saveEditDNSRecord(i)}><Check size={13} /></button>
+                          <button className="btn-icon text-slate-400" onClick={() => setEditingDns(null)}><X size={13} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
                     <tr key={i} className={rowCls}>
                       <td className="table-cell font-mono font-medium text-slate-900 dark:text-slate-100">{r.name}</td>
                       <td className="table-cell"><span className={`badge ${TYPE_COLORS[r.type] || 'badge-gray'}`}>{r.type}</span></td>
                       <td className="table-cell text-slate-500 dark:text-slate-400">{r.ttl}</td>
                       <td className="table-cell font-mono text-slate-600 dark:text-slate-400 text-xs truncate max-w-xs">{r.value}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100">
+                          <button className="btn-icon text-indigo-500" onClick={() => { setEditingDns(i); setEditForm({ ...r }); }}><Edit2 size={12} /></button>
+                          <button className="btn-icon hover:!text-rose-600" onClick={() => deleteDNSRecord(i)}><Trash2 size={12} /></button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

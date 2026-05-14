@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Edit2, Building2 } from 'lucide-react';
+import { Plus, Trash2, Edit2, Building2, BarChart2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/resellers${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -12,6 +12,8 @@ export default function Reseller() {
   const [form, setForm] = useState<any>(blank);
   const [editing, setEditing] = useState<any>(null);
   const [adding, setAdding] = useState(false);
+  const [summaries, setSummaries] = useState<Record<number, any>>({});
+  const [showSummary, setShowSummary] = useState<number | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -42,6 +44,16 @@ export default function Reseller() {
     if (!confirm('Delete reseller? This removes the login account.')) return;
     await api(`/${id}`, { method: 'DELETE' });
     load();
+  }
+
+  async function loadSummary(id: number) {
+    if (showSummary === id) { setShowSummary(null); return; }
+    try {
+      const r = await api(`/${id}/summary`);
+      const d = await r.json();
+      setSummaries(p => ({ ...p, [id]: d }));
+      setShowSummary(id);
+    } catch { toast.error('Failed to load usage stats'); }
   }
 
   const AllocField = ({ label, field, obj, setObj }: any) => (
@@ -114,6 +126,7 @@ export default function Reseller() {
                 </div>
               </div>
               <div className="flex gap-2">
+                <button className="btn-icon text-indigo-500" title="Usage stats" onClick={() => loadSummary(r.id)}><BarChart2 size={13} /></button>
                 <button className="btn-icon" onClick={() => setEditing({ ...r })}><Edit2 size={13} /></button>
                 <button className="btn-icon text-red-500" onClick={() => del(r.id)}><Trash2 size={13} /></button>
               </div>
@@ -126,6 +139,25 @@ export default function Reseller() {
                 </div>
               ))}
             </div>
+            {showSummary === r.id && summaries[r.id] && (
+              <div className="mt-3 border-t border-slate-100 dark:border-slate-700 pt-3">
+                <p className="text-xs font-semibold text-slate-500 mb-2">Current Usage</p>
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded p-2">
+                    <p className="text-indigo-600 dark:text-indigo-400">Accounts</p>
+                    <p className="font-bold">{summaries[r.id].usage?.accounts ?? 0} / {summaries[r.id].alloc?.accounts ?? r.alloc_accounts}</p>
+                  </div>
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded p-2">
+                    <p className="text-indigo-600 dark:text-indigo-400">Clients</p>
+                    <p className="font-bold">{summaries[r.id].usage?.clients ?? 0}</p>
+                  </div>
+                  <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded p-2">
+                    <p className="text-indigo-600 dark:text-indigo-400">Disk Used</p>
+                    <p className="font-bold">{summaries[r.id].usage?.disk_mb ?? 0} MB / {summaries[r.id].alloc?.disk_mb ?? r.alloc_disk} MB</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>

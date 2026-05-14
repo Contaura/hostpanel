@@ -75,6 +75,24 @@ export default function Accounts() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  async function suspendAccount(id: number) {
+    try { await axios.post(`/api/accounts/${id}/suspend`); toast.success('Account suspended'); load(); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function unsuspendAccount(id: number) {
+    try { await axios.post(`/api/accounts/${id}/unsuspend`); toast.success('Account unsuspended'); load(); }
+    catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  function expiryBadge(expires_at: string | null) {
+    if (!expires_at) return null;
+    const daysLeft = Math.ceil((new Date(expires_at).getTime() - Date.now()) / 86400000);
+    if (daysLeft < 0) return <span className="badge-red text-xs">Expired</span>;
+    if (daysLeft <= 7) return <span className="badge-yellow text-xs">{daysLeft}d left</span>;
+    return null;
+  }
+
   async function deleteAccount(id: number, username: string) {
     if (!confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
     try { await axios.delete(`/api/accounts/${id}`); toast.success('Account deleted'); load(); }
@@ -228,14 +246,27 @@ export default function Accounts() {
                       : <span className="text-slate-300 dark:text-slate-600">—</span>}
                   </td>
                   <td className="table-cell">
-                    <span className={STATUS_STYLE[acc.status] || 'badge-gray'}>{acc.status}</span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={STATUS_STYLE[acc.status] || 'badge-gray'}>{acc.status}</span>
+                      {expiryBadge(acc.expires_at)}
+                    </div>
                   </td>
                   <td className="table-cell text-slate-500 dark:text-slate-400 hidden lg:table-cell">
                     {new Date(acc.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                      {(statusActions[acc.status] ?? []).map(a => (
+                      {acc.status === 'active' && (
+                        <button onClick={() => suspendAccount(acc.id)} className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30" title="Suspend (disables vhost)">
+                          <Ban size={13} />
+                        </button>
+                      )}
+                      {acc.status === 'suspended' && (
+                        <button onClick={() => unsuspendAccount(acc.id)} className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30" title="Unsuspend (re-enables vhost)">
+                          <Power size={13} />
+                        </button>
+                      )}
+                      {(statusActions[acc.status] ?? []).filter(a => a.target === 'terminated').map(a => (
                         <button key={a.target} onClick={() => setStatus(acc.id, a.target)}
                           className={`btn-icon ${a.cls}`} title={a.label}>
                           <a.icon size={13} />

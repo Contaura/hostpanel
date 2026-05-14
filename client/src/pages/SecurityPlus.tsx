@@ -26,6 +26,8 @@ export default function SecurityPlus() {
   const [tfaStatus, setTfaStatus] = useState<{ enabled: boolean; configured: boolean } | null>(null);
   const [tfaSetup, setTfaSetup]   = useState<{ secret: string; qrDataUrl: string } | null>(null);
   const [tfaCode, setTfaCode]     = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [backupCodesInfo, setBackupCodesInfo] = useState<{ count: number; has_codes: boolean } | null>(null);
 
   // IP Whitelist
   const [whitelist, setWhitelist] = useState<{ id: number; ip: string; label: string; created_at: string }[]>([]);
@@ -35,7 +37,10 @@ export default function SecurityPlus() {
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
-    if (t === '2fa') api('/api/security-extra/2fa').then(r => setTfaStatus(r.data)).catch(() => {});
+    if (t === '2fa') {
+      api('/api/security-extra/2fa').then(r => setTfaStatus(r.data)).catch(() => {});
+      api('/api/security-extra/2fa/backup-codes').then(r => setBackupCodesInfo(r.data)).catch(() => {});
+    }
     if (t === 'whitelist') api('/api/security-extra/ip-whitelist').then(r => setWhitelist(r.data)).catch(() => {});
   }
 
@@ -66,6 +71,11 @@ export default function SecurityPlus() {
   async function disable2FA() {
     try { await adel('/api/security-extra/2fa'); success('2FA disabled'); loadTab('2fa'); }
     catch (e: any) { error('Failed'); }
+  }
+
+  async function generateBackupCodes() {
+    try { const r = await apost('/api/security-extra/2fa/backup-codes', {}); setBackupCodes(r.data.codes); loadTab('2fa'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function addToWhitelist() {
@@ -159,7 +169,26 @@ export default function SecurityPlus() {
           )}
 
           {tfaStatus?.enabled && (
-            <button className="btn-danger" onClick={disable2FA}>Disable 2FA</button>
+            <div className="space-y-3">
+              <button className="btn-danger" onClick={disable2FA}>Disable 2FA</button>
+              <div className="border-t border-slate-100 dark:border-slate-700 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-sm font-medium">Backup Codes</p>
+                    <p className="text-xs text-slate-500">{backupCodesInfo?.has_codes ? `${backupCodesInfo.count} codes stored` : 'No backup codes generated'}</p>
+                  </div>
+                  <button className="btn-secondary text-xs" onClick={generateBackupCodes}>Regenerate</button>
+                </div>
+                {backupCodes && (
+                  <div className="bg-slate-900 rounded-lg p-3 space-y-1">
+                    <p className="text-xs text-amber-400 mb-2">Save these codes — they won't be shown again.</p>
+                    <div className="grid grid-cols-2 gap-1">
+                      {backupCodes.map(c => <code key={c} className="text-xs font-mono text-emerald-400 bg-slate-800 px-2 py-1 rounded">{c}</code>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}

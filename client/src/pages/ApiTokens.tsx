@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History } from 'lucide-react';
 
 interface Token { id: number; name: string; token_prefix: string; permissions: string; last_used: string; expires_at: string; created_at: string }
+interface Webhook { id: number; name: string; url: string; events: string; active: number; created_at: string }
+interface WebhookDelivery { id: number; event: string; status_code: number; success: number; response_body: string; delivered_at: string }
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const auth = () => ({ Authorization: 'Bearer ' + token() });
@@ -13,17 +15,54 @@ const adel  = (p: string) => axios.delete(p, { headers: auth() });
 
 const PERM_BADGE: Record<string, string> = { read: 'badge-info', write: 'badge-warning', admin: 'badge-danger' };
 
+const WEBHOOK_EVENTS = ['account.created', 'account.suspended', 'account.deleted', 'domain.created', 'domain.deleted', 'backup.completed', 'alert.triggered'];
+
 export default function ApiTokens() {
   const { success, error } = useToast();
+  const [tab, setTab] = useState<'tokens' | 'webhooks'>('tokens');
   const [tokens, setTokens] = useState<Token[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', permissions: 'read', expires_at: '' });
   const [newToken, setNewToken] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
 
+  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
+  const [showWebhookForm, setShowWebhookForm] = useState(false);
+  const [whForm, setWhForm] = useState({ name: '', url: '', events: [] as string[], secret: '' });
+  const [whDeliveries, setWhDeliveries] = useState<Record<number, WebhookDelivery[]>>({});
+  const [showDeliveries, setShowDeliveries] = useState<number | null>(null);
+
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
 
   async function load() { try { const r = await api('/api/api-tokens/'); setTokens(r.data); } catch {} }
+
+  async function loadWebhooks() { try { const r = await api('/api/api-tokens/webhooks'); setWebhooks(r.data); } catch {} }
+
+  async function createWebhook() {
+    if (!whForm.name || !whForm.url || !whForm.events.length) { error('Name, URL, and at least one event required'); return; }
+    try {
+      await apost('/api/api-tokens/webhooks', { ...whForm, events: whForm.events.join(',') });
+      success('Webhook created'); setShowWebhookForm(false); setWhForm({ name: '', url: '', events: [], secret: '' }); loadWebhooks();
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteWebhook(id: number) {
+    if (!confirm('Delete this webhook?')) return;
+    try { await adel(`/api/api-tokens/webhooks/${id}`); success('Webhook deleted'); loadWebhooks(); }
+    catch { error('Failed'); }
+  }
+
+  async function testWebhook(id: number) {
+    try { await apost(`/api/api-tokens/webhooks/${id}/test`, {}); success('Test delivery sent'); }
+    catch { error('Failed'); }
+  }
+
+  async function loadDeliveries(id: number) {
+    if (showDeliveries === id) { setShowDeliveries(null); return; }
+    try { const r = await api(`/api/api-tokens/webhooks/${id}/deliveries`); setWhDeliveries(p => ({ ...p, [id]: r.data })); setShowDeliveries(id); }
+    catch { error('Failed to load deliveries'); }
+  }
 
   async function create() {
     if (!form.name) { error('Name required'); return; }
@@ -48,12 +87,19 @@ export default function ApiTokens() {
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="page-title">API Tokens</h1>
-          <p className="page-subtitle">Generate tokens for API access and automation integrations</p>
+          <h1 className="page-title">API Tokens & Webhooks</h1>
+          <p className="page-subtitle">Generate tokens for API access and configure webhook integrations</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> New Token</button>
+        {tab === 'tokens' && <button className="btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> New Token</button>}
+        {tab === 'webhooks' && <button className="btn-primary" onClick={() => setShowWebhookForm(true)}><Plus size={14} /> New Webhook</button>}
       </div>
 
+      <div className="tab-bar">
+        <button className={tab === 'tokens' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('tokens')}><Key size={14} /> API Tokens</button>
+        <button className={tab === 'webhooks' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('webhooks')}><Webhook size={14} /> Webhooks</button>
+      </div>
+
+      {tab === 'tokens' && <>
       {/* Newly created token — shown once */}
       {newToken && (
         <div className="card border-2 border-emerald-400 p-5 space-y-3">
@@ -124,6 +170,82 @@ export default function ApiTokens() {
         <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Usage</h4>
         <pre className="text-xs font-mono text-slate-600 dark:text-slate-400">{`curl -H "Authorization: Bearer hp_your_token" https://panel.example.com/api/billing/summary`}</pre>
       </div>
+      </>}
+
+      {tab === 'webhooks' && (
+        <div className="space-y-4">
+          {showWebhookForm && (
+            <div className="card p-5 space-y-4 max-w-lg">
+              <h3 className="font-semibold text-sm">New Webhook</h3>
+              <div><label className="label">Name</label><input className="input" placeholder="Slack notifications" value={whForm.name} onChange={e => setWhForm(p => ({ ...p, name: e.target.value }))} /></div>
+              <div><label className="label">Payload URL</label><input className="input font-mono" placeholder="https://hooks.slack.com/..." value={whForm.url} onChange={e => setWhForm(p => ({ ...p, url: e.target.value }))} /></div>
+              <div><label className="label">Secret (optional, for HMAC signature)</label><input className="input font-mono" placeholder="my-secret-key" value={whForm.secret} onChange={e => setWhForm(p => ({ ...p, secret: e.target.value }))} /></div>
+              <div>
+                <label className="label">Events</label>
+                <div className="grid grid-cols-2 gap-1.5 mt-1">
+                  {WEBHOOK_EVENTS.map(ev => (
+                    <label key={ev} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" checked={whForm.events.includes(ev)} onChange={e => setWhForm(p => ({ ...p, events: e.target.checked ? [...p.events, ev] : p.events.filter(x => x !== ev) }))} />
+                      <span className="font-mono">{ev}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className="btn-secondary" onClick={() => setShowWebhookForm(false)}>Cancel</button>
+                <button className="btn-primary" onClick={createWebhook}><Webhook size={14} /> Create Webhook</button>
+              </div>
+            </div>
+          )}
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="table-header-cell">Name</th>
+                <th className="table-header-cell">URL</th>
+                <th className="table-header-cell">Events</th>
+                <th className="table-header-cell w-32"></th>
+              </tr></thead>
+              <tbody>
+                {webhooks.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No webhooks configured</td></tr>}
+                {webhooks.map(wh => (
+                  <>
+                    <tr key={wh.id} className="border-b border-slate-100 dark:border-slate-800">
+                      <td className="table-cell font-medium">{wh.name}</td>
+                      <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 truncate max-w-[200px]">{wh.url}</td>
+                      <td className="table-cell text-xs text-slate-500">{wh.events}</td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          <button className="btn-icon text-indigo-500" title="Test" onClick={() => testWebhook(wh.id)}><Send size={13} /></button>
+                          <button className="btn-icon text-slate-500" title="Delivery history" onClick={() => loadDeliveries(wh.id)}><History size={13} /></button>
+                          <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteWebhook(wh.id)}><Trash2 size={13} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                    {showDeliveries === wh.id && (
+                      <tr key={`${wh.id}-deliveries`} className="bg-slate-50 dark:bg-slate-800/30">
+                        <td colSpan={4} className="px-4 py-3">
+                          <p className="text-xs font-semibold text-slate-500 mb-2">Recent Deliveries</p>
+                          {(whDeliveries[wh.id] || []).length === 0 && <p className="text-xs text-slate-400">No deliveries yet</p>}
+                          <div className="space-y-1">
+                            {(whDeliveries[wh.id] || []).map(d => (
+                              <div key={d.id} className="flex items-center gap-3 text-xs">
+                                <span className={`badge-${d.success ? 'success' : 'danger'}`}>{d.status_code}</span>
+                                <span className="font-mono text-slate-500">{d.event}</span>
+                                <span className="text-slate-400">{d.delivered_at?.slice(0, 19)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

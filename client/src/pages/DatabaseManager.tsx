@@ -15,7 +15,7 @@ export default function DatabaseManager() {
   const toast = useToast();
   const [databases, setDatabases] = useState<DB[]>([]);
   const [users, setUsers] = useState<DBUser[]>([]);
-  const [tab, setTab] = useState<'databases' | 'users' | 'slow-query'>('databases');
+  const [tab, setTab] = useState<'databases' | 'users' | 'slow-query' | 'remote-access'>('databases');
   const [slowLog, setSlowLog] = useState<any>(null);
   const [slowLoading, setSlowLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -30,6 +30,9 @@ export default function DatabaseManager() {
   const [newPrivs, setNewPrivs] = useState<Set<string>>(new Set());
   const [newPrivDb, setNewPrivDb] = useState('');
   const [pmaUrl, setPmaUrl] = useState<string | null>(null);
+  const [remoteAccess, setRemoteAccess] = useState<{ user: string; host: string }[]>([]);
+  const [raForm, setRaForm] = useState({ user: '', host: '%', database: '*', privileges: ['ALL PRIVILEGES'] });
+  const [raLoading, setRaLoading] = useState(false);
 
   useEffect(() => {
     axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
@@ -110,6 +113,31 @@ export default function DatabaseManager() {
     openPrivEditor(privTarget);
   }
 
+  async function loadRemoteAccess() {
+    try { const { data } = await axios.get('/api/databases/remote-access'); setRemoteAccess(data); }
+    catch { toast.error('Failed to load remote access users'); }
+  }
+
+  async function grantRemoteAccess() {
+    if (!raForm.user || !raForm.host) { toast.error('User and host required'); return; }
+    setRaLoading(true);
+    try {
+      await axios.post('/api/databases/remote-access', raForm);
+      toast.success(`Remote access granted for ${raForm.user}@${raForm.host}`);
+      setRaForm({ user: '', host: '%', database: '*', privileges: ['ALL PRIVILEGES'] });
+      loadRemoteAccess();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setRaLoading(false); }
+  }
+
+  async function revokeRemoteAccess(user: string, host: string) {
+    if (!confirm(`Revoke remote access for ${user}@${host}?`)) return;
+    try {
+      await axios.delete(`/api/databases/remote-access/${user}/${encodeURIComponent(host)}`);
+      toast.success('Remote access revoked'); loadRemoteAccess();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
   async function loadSlowLog() {
     setSlowLoading(true);
     try {
@@ -146,10 +174,10 @@ export default function DatabaseManager() {
       </div>
 
       <div className="tab-bar">
-        {(['databases', 'users', 'slow-query'] as const).map(t => (
-          <button key={t} onClick={() => { setTab(t); setShowForm(false); if (t === 'slow-query') loadSlowLog(); }}
+        {(['databases', 'users', 'slow-query', 'remote-access'] as const).map(t => (
+          <button key={t} onClick={() => { setTab(t); setShowForm(false); if (t === 'slow-query') loadSlowLog(); if (t === 'remote-access') loadRemoteAccess(); }}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>
-            {t === 'databases' ? `Databases (${databases.length})` : t === 'users' ? `Users (${users.length})` : 'Slow Query Log'}
+            {t === 'databases' ? `Databases (${databases.length})` : t === 'users' ? `Users (${users.length})` : t === 'slow-query' ? 'Slow Query Log' : 'Remote Access'}
           </button>
         ))}
       </div>
@@ -329,6 +357,59 @@ export default function DatabaseManager() {
       )}
 
       {/* Privilege editor modal */}
+      {tab === 'remote-access' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-4">
+            <h3 className="font-semibold text-sm">Grant Remote Access</h3>
+            <p className="text-xs text-slate-500">Creates a user@host grant so external hosts can connect. Use <code className="font-mono">%</code> as host wildcard.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Username</label>
+                <select className="input" value={raForm.user} onChange={e => setRaForm(f => ({ ...f, user: e.target.value }))}>
+                  <option value="">Select existing user…</option>
+                  {users.map(u => <option key={u.user} value={u.user}>{u.user}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Remote Host</label>
+                <input className="input font-mono" placeholder="% or 192.168.1.%" value={raForm.host} onChange={e => setRaForm(f => ({ ...f, host: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Database</label>
+                <select className="input" value={raForm.database} onChange={e => setRaForm(f => ({ ...f, database: e.target.value }))}>
+                  <option value="*">All databases (*.*)</option>
+                  {databases.map(db => <option key={db.name} value={db.name}>{db.name}</option>)}
+                </select>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={grantRemoteAccess} disabled={raLoading}>{raLoading ? 'Granting…' : 'Grant Access'}</button>
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Username</th>
+                <th className="table-header-cell">Remote Host</th>
+                <th className="px-4 py-3 w-12" />
+              </tr></thead>
+              <tbody>
+                {remoteAccess.length === 0 ? (
+                  <tr><td colSpan={3} className="px-4 py-12 text-center text-slate-400 text-sm">No remote access grants configured</td></tr>
+                ) : remoteAccess.map(ra => (
+                  <tr key={`${ra.user}@${ra.host}`} className={rowCls}>
+                    <td className="table-cell font-mono font-medium">{ra.user}</td>
+                    <td className="table-cell font-mono text-slate-500">{ra.host}</td>
+                    <td className="px-3 py-3">
+                      <button className="btn-icon hover:!text-rose-600 opacity-0 group-hover:opacity-100" onClick={() => revokeRemoteAccess(ra.user, ra.host)}><Trash2 size={13} /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {privTarget && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setPrivTarget(null)}>
           <div className="card p-5 w-[520px] space-y-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>

@@ -6,7 +6,7 @@ const api = (p: string, o?: RequestInit) => fetch(`/api/ssl-advanced${p}`, { hea
 
 export default function SslAdvanced() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew' | 'acme'>('ciphers');
+  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew' | 'acme' | 'csr' | 'self-signed' | 'import'>('ciphers');
   const [ciphers, setCiphers] = useState<any>(null);
   const [ciphersLoaded, setCiphersLoaded] = useState(false);
   const [preset, setPreset] = useState('intermediate');
@@ -21,6 +21,19 @@ export default function SslAdvanced() {
   const [acmeDomain, setAcmeDomain] = useState('');
   const [acmeResult, setAcmeResult] = useState<any>(null);
   const [acmeChecking, setAcmeChecking] = useState(false);
+
+  const csrBlank = { domain: '', country: 'US', state: '', locality: '', organization: '', email: '' };
+  const [csrForm, setCsrForm] = useState(csrBlank);
+  const [csrOutput, setCsrOutput] = useState('');
+  const [csrLoading, setCsrLoading] = useState(false);
+
+  const [selfSignedForm, setSelfSignedForm] = useState(csrBlank);
+  const [selfSignedOutput, setSelfSignedOutput] = useState('');
+  const [selfSignedLoading, setSelfSignedLoading] = useState(false);
+
+  const importBlank = { domain: '', cert: '', key: '' };
+  const [importForm, setImportForm] = useState(importBlank);
+  const [importLoading, setImportLoading] = useState(false);
 
   async function loadCiphers() {
     if (ciphersLoaded) return;
@@ -81,6 +94,31 @@ export default function SslAdvanced() {
     setCertsLoaded(false);
   }
 
+  async function generateCsr() {
+    setCsrLoading(true); setCsrOutput('');
+    const r = await api('/csr', { method: 'POST', body: JSON.stringify(csrForm) });
+    const d = await r.json();
+    if (d.error) toast.error(d.error); else setCsrOutput(d.csr || d.key || JSON.stringify(d, null, 2));
+    setCsrLoading(false);
+  }
+
+  async function generateSelfSigned() {
+    setSelfSignedLoading(true); setSelfSignedOutput('');
+    const r = await api('/self-signed', { method: 'POST', body: JSON.stringify(selfSignedForm) });
+    const d = await r.json();
+    if (d.error) toast.error(d.error); else setSelfSignedOutput(d.cert || JSON.stringify(d, null, 2));
+    setSelfSignedLoading(false);
+  }
+
+  async function importCert() {
+    if (!importForm.domain || !importForm.cert || !importForm.key) { toast.error('Domain, certificate, and key are required'); return; }
+    setImportLoading(true);
+    const r = await api('/import', { method: 'POST', body: JSON.stringify(importForm) });
+    const d = await r.json();
+    if (d.error) toast.error(d.error); else { toast.success('Certificate imported'); setImportForm(importBlank); }
+    setImportLoading(false);
+  }
+
   async function checkAcme() {
     if (!acmeDomain.trim()) return;
     setAcmeChecking(true); setAcmeResult(null);
@@ -103,6 +141,9 @@ export default function SslAdvanced() {
         <button className={`tab-item ${tab === 'test' ? 'tab-item-active' : ''}`} onClick={() => setTab('test')}>Test Certificate</button>
         <button className={`tab-item ${tab === 'renew' ? 'tab-item-active' : ''}`} onClick={() => setTab('renew')}>Auto-Renew Status</button>
         <button className={`tab-item ${tab === 'acme' ? 'tab-item-active' : ''}`} onClick={() => setTab('acme')}>ACME Check</button>
+        <button className={`tab-item ${tab === 'csr' ? 'tab-item-active' : ''}`} onClick={() => setTab('csr')}>CSR Generator</button>
+        <button className={`tab-item ${tab === 'self-signed' ? 'tab-item-active' : ''}`} onClick={() => setTab('self-signed')}>Self-Signed</button>
+        <button className={`tab-item ${tab === 'import' ? 'tab-item-active' : ''}`} onClick={() => setTab('import')}>Import Cert</button>
       </div>
 
       {tab === 'ciphers' && (
@@ -262,6 +303,66 @@ export default function SslAdvanced() {
               )}
             </div>
           )}
+        </div>
+      )}
+      {tab === 'csr' && (
+        <div className="card space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">Generate a Certificate Signing Request (CSR) and private key for use with a CA.</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['Domain (CN)', 'domain', 'example.com'], ['Country (2-letter)', 'country', 'US'], ['State', 'state', 'California'], ['City', 'locality', 'San Francisco'], ['Organization', 'organization', 'ACME Corp'], ['Email', 'email', 'admin@example.com']].map(([label, field, ph]) => (
+              <div key={field}>
+                <label className="label">{label}</label>
+                <input className="input" placeholder={ph} value={(csrForm as any)[field]} onChange={e => setCsrForm(f => ({ ...f, [field]: e.target.value }))} />
+              </div>
+            ))}
+          </div>
+          <button className="btn-primary" onClick={generateCsr} disabled={csrLoading}>{csrLoading ? 'Generating…' : 'Generate CSR'}</button>
+          {csrOutput && (
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-1">CSR / Key Output</p>
+              <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-64 overflow-y-auto whitespace-pre-wrap">{csrOutput}</pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'self-signed' && (
+        <div className="card space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">Generate a self-signed certificate for testing or internal use.</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[['Domain (CN)', 'domain', 'example.com'], ['Country (2-letter)', 'country', 'US'], ['State', 'state', 'California'], ['City', 'locality', 'San Francisco'], ['Organization', 'organization', 'ACME Corp'], ['Email', 'email', 'admin@example.com']].map(([label, field, ph]) => (
+              <div key={field}>
+                <label className="label">{label}</label>
+                <input className="input" placeholder={ph} value={(selfSignedForm as any)[field]} onChange={e => setSelfSignedForm(f => ({ ...f, [field]: e.target.value }))} />
+              </div>
+            ))}
+          </div>
+          <button className="btn-primary" onClick={generateSelfSigned} disabled={selfSignedLoading}>{selfSignedLoading ? 'Generating…' : 'Generate Self-Signed Cert'}</button>
+          {selfSignedOutput && (
+            <div>
+              <p className="text-xs font-medium text-slate-500 mb-1">Certificate</p>
+              <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-64 overflow-y-auto whitespace-pre-wrap">{selfSignedOutput}</pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'import' && (
+        <div className="card space-y-4 max-w-2xl">
+          <p className="text-sm text-slate-600 dark:text-slate-400">Import an existing certificate and private key for a domain. Files are written to <code className="text-xs font-mono bg-slate-100 dark:bg-slate-800 px-1 rounded">/etc/letsencrypt/live/:domain/</code>.</p>
+          <div>
+            <label className="label">Domain</label>
+            <input className="input" placeholder="example.com" value={importForm.domain} onChange={e => setImportForm(f => ({ ...f, domain: e.target.value }))} />
+          </div>
+          <div>
+            <label className="label">Certificate (PEM)</label>
+            <textarea className="input font-mono text-xs min-h-[120px]" placeholder="-----BEGIN CERTIFICATE-----&#10;..." value={importForm.cert} onChange={e => setImportForm(f => ({ ...f, cert: e.target.value }))} />
+          </div>
+          <div>
+            <label className="label">Private Key (PEM)</label>
+            <textarea className="input font-mono text-xs min-h-[120px]" placeholder="-----BEGIN PRIVATE KEY-----&#10;..." value={importForm.key} onChange={e => setImportForm(f => ({ ...f, key: e.target.value }))} />
+          </div>
+          <button className="btn-primary" onClick={importCert} disabled={importLoading}>{importLoading ? 'Importing…' : 'Import Certificate'}</button>
         </div>
       )}
     </div>
