@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent, useRef } from 'react';
 import axios from 'axios';
-import { Database, User, Plus, Trash2, Download, Upload, Shield, ExternalLink } from 'lucide-react';
+import { Database, User, Plus, Trash2, Download, Upload, Shield, ExternalLink, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface DB { name: string; size_mb: number | null }
@@ -33,6 +33,8 @@ export default function DatabaseManager() {
   const [remoteAccess, setRemoteAccess] = useState<{ user: string; host: string }[]>([]);
   const [raForm, setRaForm] = useState({ user: '', host: '%', database: '*', privileges: ['ALL PRIVILEGES'] });
   const [raLoading, setRaLoading] = useState(false);
+  const [dbSearch, setDbSearch] = useState('');
+  const [userSearch, setUserSearch] = useState('');
 
   useEffect(() => {
     axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
@@ -237,84 +239,116 @@ export default function DatabaseManager() {
       {tab === 'databases' && (
         <>
           <input ref={importRef} type="file" accept=".sql,.sql.gz,.gz" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importDb(f); e.target.value = ''; }} />
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                <th className="table-header-cell">Database</th>
-                <th className="table-header-cell hidden md:table-cell">Size</th>
-                <th className="table-header-cell hidden lg:table-cell">Encoding</th>
-                <th className="px-4 py-3" />
-              </tr></thead>
-              <tbody>
-                {databases.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-16 text-center">
-                    <Database className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                    <p className="text-slate-400 text-sm">No databases yet</p>
-                  </td></tr>
-                ) : databases.map(db => (
-                  <tr key={db.name} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-7 w-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
-                          <Database size={13} className="text-blue-500 dark:text-blue-400" />
-                        </div>
-                        <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{db.name}</span>
-                      </div>
-                    </td>
-                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">
-                      {db.size_mb !== null ? `${db.size_mb} MB` : '—'}
-                    </td>
-                    <td className="table-cell hidden lg:table-cell"><span className="badge badge-gray">utf8mb4</span></td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                        <button onClick={() => exportDb(db.name)} className="btn-icon text-blue-500" title="Export"><Download size={13} /></button>
-                        <button onClick={() => { setImportTarget(db.name); importRef.current?.click(); }} className="btn-icon text-amber-500" title="Import" disabled={importing === db.name}><Upload size={13} /></button>
-                        <button onClick={() => deleteDb(db.name)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search databases…" value={dbSearch} onChange={e => setDbSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  <th className="table-header-cell">Database</th>
+                  <th className="table-header-cell hidden md:table-cell">Size</th>
+                  <th className="table-header-cell hidden lg:table-cell">Encoding</th>
+                  <th className="px-4 py-3" />
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = dbSearch.trim().toLowerCase();
+                    const visible = q ? databases.filter(db => db.name.toLowerCase().includes(q)) : databases;
+                    if (databases.length === 0) return (
+                      <tr><td colSpan={4} className="px-4 py-16 text-center">
+                        <Database className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                        <p className="text-slate-400 text-sm">No databases yet</p>
+                      </td></tr>
+                    );
+                    if (visible.length === 0) return (
+                      <tr><td colSpan={4} className="px-4 py-8 text-center text-sm text-slate-400">No databases match "{dbSearch}"</td></tr>
+                    );
+                    return visible.map(db => (
+                      <tr key={db.name} className={rowCls}>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-7 w-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+                              <Database size={13} className="text-blue-500 dark:text-blue-400" />
+                            </div>
+                            <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{db.name}</span>
+                          </div>
+                        </td>
+                        <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">
+                          {db.size_mb !== null ? `${db.size_mb} MB` : '—'}
+                        </td>
+                        <td className="table-cell hidden lg:table-cell"><span className="badge badge-gray">utf8mb4</span></td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                            <button onClick={() => exportDb(db.name)} className="btn-icon text-blue-500" title="Export"><Download size={13} /></button>
+                            <button onClick={() => { setImportTarget(db.name); importRef.current?.click(); }} className="btn-icon text-amber-500" title="Import" disabled={importing === db.name}><Upload size={13} /></button>
+                            <button onClick={() => deleteDb(db.name)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
 
       {tab === 'users' && (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className={theadCls}><tr>
-              <th className="table-header-cell">Username</th>
-              <th className="table-header-cell">Host</th>
-              <th className="px-4 py-3 w-12" />
-            </tr></thead>
-            <tbody>
-              {users.length === 0 ? (
-                <tr><td colSpan={3} className="px-4 py-16 text-center">
-                  <User className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                  <p className="text-slate-400 text-sm">No database users</p>
-                </td></tr>
-              ) : users.map(u => (
-                <tr key={`${u.user}@${u.host}`} className={rowCls}>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-7 w-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
-                        <User size={13} className="text-violet-600 dark:text-violet-400" />
-                      </div>
-                      <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{u.user}</span>
-                    </div>
-                  </td>
-                  <td className="table-cell font-mono text-slate-500 dark:text-slate-400">{u.host}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                      <button onClick={() => openPrivEditor(u)} className="btn-icon text-indigo-500" title="Manage Privileges"><Shield size={13} /></button>
-                      <button onClick={() => deleteUser(u.user, u.host)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search users…" value={userSearch} onChange={e => setUserSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Username</th>
+                <th className="table-header-cell">Host</th>
+                <th className="px-4 py-3 w-12" />
+              </tr></thead>
+              <tbody>
+                {(() => {
+                  const q = userSearch.trim().toLowerCase();
+                  const visible = q ? users.filter(u => [u.user, u.host].some(v => v?.toLowerCase().includes(q))) : users;
+                  if (users.length === 0) return (
+                    <tr><td colSpan={3} className="px-4 py-16 text-center">
+                      <User className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                      <p className="text-slate-400 text-sm">No database users</p>
+                    </td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-400">No users match "{userSearch}"</td></tr>
+                  );
+                  return visible.map(u => (
+                    <tr key={`${u.user}@${u.host}`} className={rowCls}>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-7 w-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
+                            <User size={13} className="text-violet-600 dark:text-violet-400" />
+                          </div>
+                          <span className="font-semibold font-mono text-slate-900 dark:text-slate-100">{u.user}</span>
+                        </div>
+                      </td>
+                      <td className="table-cell font-mono text-slate-500 dark:text-slate-400">{u.host}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                          <button onClick={() => openPrivEditor(u)} className="btn-icon text-indigo-500" title="Manage Privileges"><Shield size={13} /></button>
+                          <button onClick={() => deleteUser(u.user, u.host)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

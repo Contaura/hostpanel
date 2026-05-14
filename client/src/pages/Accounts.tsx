@@ -349,7 +349,7 @@ export default function Accounts() {
                           fetch(`/api/accounts/${acc.id}/export`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
                             .then(r => r.blob())
                             .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `account_${acc.username}.tar.gz`; a.click(); })
-                            .catch(() => alert('Export failed'));
+                            .catch(() => toast.error('Export failed'));
                         }}>
                         <PackageOpen size={13} />
                       </button>
