@@ -34,8 +34,21 @@ import alertsRoutes      from './routes/alerts';
 import settingsRoutes    from './routes/settings';
 import adminUsersRoutes  from './routes/admin-users';
 import apiTokensRoutes   from './routes/api-tokens';
-import paypalRoutes      from './routes/paypal';
-import clientPortalRoutes from './routes/client-portal';
+import paypalRoutes          from './routes/paypal';
+import clientPortalRoutes    from './routes/client-portal';
+import dkimRoutes            from './routes/dkim';
+import mailQueueRoutes       from './routes/mail-queue';
+import mailRoutingRoutes     from './routes/mail-routing';
+import cloudflareRoutes      from './routes/cloudflare';
+import gitDeployRoutes       from './routes/git-deploy';
+import cacheRoutes           from './routes/cache';
+import wafRoutes             from './routes/waf';
+import auditLogRoutes, { auditMiddleware } from './routes/audit-log';
+import sslAdvancedRoutes     from './routes/ssl-advanced';
+import phpDomainsRoutes      from './routes/php-domains';
+import resourceLimitsRoutes  from './routes/resource-limits';
+import notificationsRoutes   from './routes/notifications';
+import resellerRoutes        from './routes/reseller';
 import { authenticateToken } from './middleware/auth';
 import { setupTerminal } from './terminal';
 
@@ -110,6 +123,33 @@ app.use('/api/stripe',         authenticateToken, stripeRoutes);
 
 // PayPal
 app.use('/api/paypal', authenticateToken, paypalRoutes);
+
+// Audit log middleware (after auth routes, before protected routes)
+app.use(auditMiddleware);
+
+// Email extras
+app.use('/api/dkim',         authenticateToken, dkimRoutes);
+app.use('/api/mail-queue',   authenticateToken, mailQueueRoutes);
+app.use('/api/mail-routing', authenticateToken, mailRoutingRoutes);
+
+// Web / CDN / Deploy
+app.use('/api/cloudflare',      authenticateToken, cloudflareRoutes);
+app.use('/api/git-deploy',      authenticateToken, gitDeployRoutes);
+app.use('/api/git-deploy/webhook', gitDeployRoutes); // public webhook endpoint
+app.use('/api/cache',           authenticateToken, cacheRoutes);
+
+// Security extras
+app.use('/api/waf',         authenticateToken, wafRoutes);
+app.use('/api/audit-log',   authenticateToken, auditLogRoutes);
+app.use('/api/ssl-advanced', authenticateToken, sslAdvancedRoutes);
+
+// Server / Runtime
+app.use('/api/php-domains',      authenticateToken, phpDomainsRoutes);
+app.use('/api/resource-limits',  authenticateToken, resourceLimitsRoutes);
+
+// Notifications / Resellers
+app.use('/api/notifications', authenticateToken, notificationsRoutes);
+app.use('/api/resellers',     authenticateToken, resellerRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

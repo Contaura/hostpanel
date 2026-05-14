@@ -36,6 +36,19 @@ import AdminUsers from './pages/AdminUsers';
 import ApiTokens from './pages/ApiTokens';
 import ClientPortal from './pages/ClientPortal';
 import ClientPortalLogin from './pages/ClientPortalLogin';
+import DkimManager from './pages/DkimManager';
+import MailQueue from './pages/MailQueue';
+import CloudflareManager from './pages/CloudflareManager';
+import GitDeploy from './pages/GitDeploy';
+import CacheManager from './pages/CacheManager';
+import WafManager from './pages/WafManager';
+import AuditLog from './pages/AuditLog';
+import SslAdvanced from './pages/SslAdvanced';
+import PhpVersions from './pages/PhpVersions';
+import ResourceLimits from './pages/ResourceLimits';
+import RecurringBilling from './pages/RecurringBilling';
+import Reseller from './pages/Reseller';
+import Notifications from './pages/Notifications';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -94,6 +107,33 @@ function AppRoutes() {
         <Route path="accounts" element={<Accounts />} />
         <Route path="plans"    element={<Plans />} />
         <Route path="billing"  element={<Billing />} />
+
+        {/* Email / DNS extras */}
+        <Route path="dkim"       element={<DkimManager />} />
+        <Route path="mail-queue" element={<MailQueue />} />
+
+        {/* Web / CDN / Deploy */}
+        <Route path="cloudflare"   element={<CloudflareManager />} />
+        <Route path="git-deploy"   element={<GitDeploy />} />
+        <Route path="cache"        element={<CacheManager />} />
+        <Route path="ssl-advanced" element={<SslAdvanced />} />
+
+        {/* Security */}
+        <Route path="waf"       element={<WafManager />} />
+        <Route path="audit-log" element={<AuditLog />} />
+
+        {/* Server / Runtime */}
+        <Route path="php-versions"    element={<PhpVersions />} />
+        <Route path="resource-limits" element={<ResourceLimits />} />
+
+        {/* Billing extras */}
+        <Route path="recurring"  element={<RecurringBilling />} />
+
+        {/* Resellers */}
+        <Route path="resellers" element={<Reseller />} />
+
+        {/* Notifications */}
+        <Route path="notifications" element={<Notifications />} />
 
         {/* Admin Config */}
         <Route path="settings"    element={<Settings />} />

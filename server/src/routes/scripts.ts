@@ -10,26 +10,84 @@ const execAsync = promisify(exec);
 
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
-const SCRIPTS: Record<string, { name: string; description: string; url: string }> = {
+const SCRIPTS: Record<string, { name: string; description: string; category: string; url: string }> = {
   wordpress: {
     name: 'WordPress',
     description: 'The world\'s most popular CMS',
+    category: 'CMS',
     url: 'https://wordpress.org/latest.tar.gz',
   },
   joomla: {
     name: 'Joomla',
     description: 'Flexible open-source CMS',
+    category: 'CMS',
     url: 'https://downloads.joomla.org/cms/joomla5/5-2-6/Joomla_5-2-6-Stable-Full_Package.tar.gz',
   },
   drupal: {
     name: 'Drupal',
     description: 'Enterprise-grade open-source CMS',
+    category: 'CMS',
     url: 'https://www.drupal.org/download-latest/tar.gz',
   },
   phpmyadmin: {
     name: 'phpMyAdmin',
     description: 'Web-based MySQL administration',
+    category: 'Tools',
     url: 'https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz',
+  },
+  prestashop: {
+    name: 'PrestaShop',
+    description: 'Feature-rich open-source e-commerce platform',
+    category: 'E-Commerce',
+    url: 'https://github.com/PrestaShop/PrestaShop/releases/download/8.1.7/prestashop_8.1.7.zip',
+  },
+  opencart: {
+    name: 'OpenCart',
+    description: 'Simple and powerful online store solution',
+    category: 'E-Commerce',
+    url: 'https://github.com/opencart/opencart/releases/download/4.0.2.3/opencart-4.0.2.3.zip',
+  },
+  woocommerce: {
+    name: 'WooCommerce (via WordPress)',
+    description: 'WordPress e-commerce plugin — installs WordPress first',
+    category: 'E-Commerce',
+    url: 'https://wordpress.org/latest.tar.gz',
+  },
+  laravel: {
+    name: 'Laravel',
+    description: 'Elegant PHP web application framework',
+    category: 'Framework',
+    url: 'composer',
+  },
+  symfony: {
+    name: 'Symfony',
+    description: 'High-performance PHP framework',
+    category: 'Framework',
+    url: 'composer',
+  },
+  codeigniter: {
+    name: 'CodeIgniter 4',
+    description: 'Lightweight PHP framework for rapid development',
+    category: 'Framework',
+    url: 'https://github.com/CodeIgniter/CodeIgniter4/releases/download/v4.5.1/CodeIgniter4-4.5.1.zip',
+  },
+  roundcube: {
+    name: 'Roundcube',
+    description: 'Browser-based IMAP email client',
+    category: 'Email',
+    url: 'https://github.com/roundcube/roundcubemail/releases/download/1.6.7/roundcubemail-1.6.7-complete.tar.gz',
+  },
+  nextcloud: {
+    name: 'Nextcloud',
+    description: 'Self-hosted file sharing and collaboration',
+    category: 'Cloud',
+    url: 'https://download.nextcloud.com/server/releases/latest.tar.bz2',
+  },
+  matomo: {
+    name: 'Matomo Analytics',
+    description: 'Open-source web analytics platform',
+    category: 'Analytics',
+    url: 'https://builds.matomo.org/matomo-latest.tar.gz',
   },
 };
 
@@ -56,12 +114,28 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
   try {
     await fs.mkdir(installPath, { recursive: true });
 
-    // Download and extract
-    const tarFile = `/tmp/${script}-latest.tar.gz`;
-    await execAsync(`curl -L -o ${tarFile} '${meta.url}' 2>&1`, { timeout: 120000 });
-    await execAsync(`tar -xzf ${tarFile} -C /tmp/${script}-extract --strip-components=1 2>/dev/null || (mkdir -p /tmp/${script}-extract && tar -xzf ${tarFile} -C /tmp/${script}-extract)`);
-    await execAsync(`cp -r /tmp/${script}-extract/. ${installPath}/`);
-    await execAsync(`rm -rf /tmp/${script}-extract ${tarFile}`);
+    if (meta.url === 'composer') {
+      const pkg = script === 'laravel' ? 'laravel/laravel' : `symfony/skeleton`;
+      await execAsync(`composer create-project ${pkg} "${installPath}" --no-interaction 2>&1`, { timeout: 300000 });
+    } else {
+      const isZip = meta.url.endsWith('.zip');
+      const isBz2 = meta.url.endsWith('.bz2');
+      const tmpFile = `/tmp/${script}-latest.${isZip ? 'zip' : isBz2 ? 'tar.bz2' : 'tar.gz'}`;
+      await execAsync(`curl -L -o "${tmpFile}" '${meta.url}' 2>&1`, { timeout: 180000 });
+      await fs.mkdir(`/tmp/${script}-extract`, { recursive: true });
+      if (isZip) {
+        await execAsync(`unzip -q "${tmpFile}" -d /tmp/${script}-extract 2>/dev/null`);
+      } else if (isBz2) {
+        await execAsync(`tar -xjf "${tmpFile}" -C /tmp/${script}-extract --strip-components=1 2>/dev/null || tar -xjf "${tmpFile}" -C /tmp/${script}-extract`);
+      } else {
+        await execAsync(`tar -xzf "${tmpFile}" -C /tmp/${script}-extract --strip-components=1 2>/dev/null || tar -xzf "${tmpFile}" -C /tmp/${script}-extract`);
+      }
+      // Handle nested directory from zip
+      const extracted = await fs.readdir(`/tmp/${script}-extract`);
+      const src = extracted.length === 1 ? `/tmp/${script}-extract/${extracted[0]}` : `/tmp/${script}-extract`;
+      await execAsync(`cp -r "${src}/." "${installPath}/"`);
+      await execAsync(`rm -rf /tmp/${script}-extract "${tmpFile}"`);
+    }
 
     if (script === 'wordpress' && dbName && dbUser && dbPass) {
       // Configure WordPress

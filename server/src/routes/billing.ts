@@ -329,6 +329,149 @@ router.post('/clients/:id/portal-password', async (req, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ─── Recurring billing schedules ───────────────────────── */
+
+router.get('/recurring', (_req, res: Response) => {
+  res.json(db.prepare(`
+    SELECT rs.*, c.name as client_name, c.email as client_email, p.name as plan_name
+    FROM recurring_schedules rs
+    LEFT JOIN clients c ON rs.client_id = c.id
+    LEFT JOIN plans p ON rs.plan_id = p.id
+    ORDER BY rs.next_run ASC
+  `).all());
+});
+
+router.post('/recurring', (req, res: Response) => {
+  const { client_id, plan_id, account_id, amount, currency, cycle, next_run, notes } = req.body;
+  if (!client_id || !amount || !cycle || !next_run) return res.status(400).json({ error: 'client_id, amount, cycle, next_run required' });
+  try {
+    const r = db.prepare(`
+      INSERT INTO recurring_schedules (client_id, plan_id, account_id, amount, currency, cycle, next_run, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(client_id, plan_id || null, account_id || null, amount, currency || getSetting('currency') || 'USD', cycle, next_run, notes || '');
+    res.json(db.prepare('SELECT * FROM recurring_schedules WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/recurring/:id', (req, res: Response) => {
+  const { amount, currency, cycle, next_run, status, notes } = req.body;
+  db.prepare('UPDATE recurring_schedules SET amount=?, currency=?, cycle=?, next_run=?, status=?, notes=? WHERE id=?')
+    .run(amount, currency, cycle, next_run, status, notes || '', req.params.id);
+  res.json(db.prepare('SELECT * FROM recurring_schedules WHERE id = ?').get(req.params.id));
+});
+
+router.delete('/recurring/:id', (req, res: Response) => {
+  db.prepare('DELETE FROM recurring_schedules WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+router.post('/recurring/:id/run', async (req, res: Response) => {
+  const schedule = db.prepare('SELECT * FROM recurring_schedules WHERE id = ?').get(req.params.id) as any;
+  if (!schedule) return res.status(404).json({ error: 'Not found' });
+  try {
+    const prefix = getSetting('invoice_prefix') || 'INV';
+    const invoiceNum = `${prefix}-${Date.now()}`;
+    const dueDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const r = db.prepare(`
+      INSERT INTO invoices (invoice_number, client_id, account_id, subtotal, tax_rate, tax_amount, discount, amount, currency, due_date, notes, items)
+      VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, '[]')
+    `).run(invoiceNum, schedule.client_id, schedule.account_id, schedule.amount, schedule.amount, schedule.currency, dueDate, `Recurring — ${schedule.cycle}`);
+
+    // advance next_run
+    const next = new Date(schedule.next_run);
+    if (schedule.cycle === 'monthly') next.setMonth(next.getMonth() + 1);
+    else if (schedule.cycle === 'yearly') next.setFullYear(next.getFullYear() + 1);
+    else if (schedule.cycle === 'weekly') next.setDate(next.getDate() + 7);
+    db.prepare('UPDATE recurring_schedules SET next_run=?, last_run=date("now") WHERE id=?').run(next.toISOString().slice(0, 10), schedule.id);
+
+    res.json({ success: true, invoice_id: r.lastInsertRowid });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ─── Credit notes ───────────────────────────────────────── */
+
+router.get('/credit-notes', (_req, res: Response) => {
+  res.json(db.prepare(`
+    SELECT cn.*, c.name as client_name FROM credit_notes cn
+    LEFT JOIN clients c ON cn.client_id = c.id
+    ORDER BY cn.created_at DESC
+  `).all());
+});
+
+router.post('/credit-notes', (req, res: Response) => {
+  const { client_id, amount, currency, reason, invoice_id } = req.body;
+  if (!client_id || !amount) return res.status(400).json({ error: 'client_id and amount required' });
+  try {
+    const prefix = getSetting('invoice_prefix') || 'INV';
+    const num = `CN-${prefix}-${Date.now()}`;
+    const r = db.prepare(`
+      INSERT INTO credit_notes (credit_number, client_id, invoice_id, amount, currency, reason)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(num, client_id, invoice_id || null, amount, currency || getSetting('currency') || 'USD', reason || '');
+    res.json(db.prepare('SELECT * FROM credit_notes WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.patch('/credit-notes/:id/apply', (req, res: Response) => {
+  const { invoice_id } = req.body;
+  const cn = db.prepare('SELECT * FROM credit_notes WHERE id = ? AND status="active"').get(req.params.id) as any;
+  if (!cn) return res.status(404).json({ error: 'Active credit note not found' });
+  const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice_id) as any;
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  const newAmount = Math.max(0, Number(invoice.amount) - Number(cn.amount));
+  db.prepare("UPDATE invoices SET amount=? WHERE id=?").run(newAmount, invoice_id);
+  db.prepare("UPDATE credit_notes SET status='used', invoice_id=? WHERE id=?").run(invoice_id, cn.id);
+  if (newAmount === 0) db.prepare("UPDATE invoices SET status='paid', paid_date=date('now') WHERE id=?").run(invoice_id);
+  res.json({ success: true, new_amount: newAmount });
+});
+
+router.delete('/credit-notes/:id', (req, res: Response) => {
+  db.prepare('DELETE FROM credit_notes WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+/* ─── Promo codes ────────────────────────────────────────── */
+
+router.get('/promo-codes', (_req, res: Response) => {
+  res.json(db.prepare('SELECT * FROM promo_codes ORDER BY created_at DESC').all());
+});
+
+router.post('/promo-codes', (req, res: Response) => {
+  const { code, type, value, max_uses, expires_at } = req.body;
+  if (!code || !type || value === undefined) return res.status(400).json({ error: 'code, type, value required' });
+  if (!['percent', 'fixed'].includes(type)) return res.status(400).json({ error: 'type must be percent or fixed' });
+  try {
+    const r = db.prepare('INSERT INTO promo_codes (code, type, value, max_uses, expires_at) VALUES (?, ?, ?, ?, ?)')
+      .run(code.toUpperCase(), type, value, max_uses || null, expires_at || null);
+    res.json(db.prepare('SELECT * FROM promo_codes WHERE id = ?').get(r.lastInsertRowid));
+  } catch (err: any) {
+    if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Code already exists' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/promo-codes/validate', (req, res: Response) => {
+  const { code, amount } = req.body;
+  const promo = db.prepare("SELECT * FROM promo_codes WHERE code=? AND active=1").get(code?.toUpperCase()) as any;
+  if (!promo) return res.status(404).json({ error: 'Invalid or inactive promo code' });
+  if (promo.expires_at && new Date(promo.expires_at) < new Date()) return res.status(400).json({ error: 'Promo code expired' });
+  if (promo.max_uses && promo.uses_count >= promo.max_uses) return res.status(400).json({ error: 'Promo code usage limit reached' });
+  const discount = promo.type === 'percent' ? Math.round(amount * promo.value / 100 * 100) / 100 : Math.min(Number(promo.value), Number(amount));
+  res.json({ valid: true, promo, discount, final_amount: Math.max(0, Number(amount) - discount) });
+});
+
+router.put('/promo-codes/:id', (req, res: Response) => {
+  const { active, max_uses, expires_at } = req.body;
+  db.prepare('UPDATE promo_codes SET active=?, max_uses=?, expires_at=? WHERE id=?')
+    .run(active ? 1 : 0, max_uses || null, expires_at || null, req.params.id);
+  res.json(db.prepare('SELECT * FROM promo_codes WHERE id = ?').get(req.params.id));
+});
+
+router.delete('/promo-codes/:id', (req, res: Response) => {
+  db.prepare('DELETE FROM promo_codes WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 /* ─── Summary ────────────────────────────────────────────── */
 
 router.get('/summary', (_req, res: Response) => {

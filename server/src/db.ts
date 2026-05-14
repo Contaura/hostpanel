@@ -143,6 +143,113 @@ db.exec(`
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    username   TEXT NOT NULL DEFAULT 'system',
+    action     TEXT NOT NULL,
+    resource   TEXT NOT NULL DEFAULT '',
+    details    TEXT NOT NULL DEFAULT '',
+    ip         TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS recurring_schedules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id  INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    client_id   INTEGER REFERENCES clients(id)  ON DELETE CASCADE,
+    amount      REAL    NOT NULL,
+    currency    TEXT    NOT NULL DEFAULT 'USD',
+    interval    TEXT    NOT NULL DEFAULT 'monthly',
+    next_due    TEXT    NOT NULL,
+    last_run    TEXT,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS credit_notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    invoice_id  INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+    amount      REAL    NOT NULL,
+    reason      TEXT    NOT NULL DEFAULT '',
+    status      TEXT    NOT NULL DEFAULT 'issued',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS promo_codes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    code           TEXT    NOT NULL UNIQUE,
+    discount_type  TEXT    NOT NULL DEFAULT 'percent',
+    discount_value REAL    NOT NULL DEFAULT 0,
+    max_uses       INTEGER NOT NULL DEFAULT 0,
+    uses           INTEGER NOT NULL DEFAULT 0,
+    expires_at     TEXT,
+    enabled        INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS resellers (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    admin_user_id       INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
+    company             TEXT    NOT NULL DEFAULT '',
+    alloc_disk          INTEGER NOT NULL DEFAULT 102400,
+    alloc_bandwidth     INTEGER NOT NULL DEFAULT 1024000,
+    alloc_accounts      INTEGER NOT NULL DEFAULT 10,
+    alloc_emails        INTEGER NOT NULL DEFAULT 50,
+    alloc_dbs           INTEGER NOT NULL DEFAULT 20,
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS git_deployments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL UNIQUE,
+    repo_url        TEXT NOT NULL,
+    branch          TEXT NOT NULL DEFAULT 'main',
+    deploy_path     TEXT NOT NULL,
+    deploy_command  TEXT NOT NULL DEFAULT 'git pull && npm install && pm2 restart all',
+    webhook_secret  TEXT NOT NULL DEFAULT '',
+    last_deployed   TEXT,
+    last_status     TEXT NOT NULL DEFAULT 'never',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS notification_webhooks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    type       TEXT NOT NULL DEFAULT 'webhook',
+    events     TEXT NOT NULL DEFAULT '[]',
+    secret     TEXT NOT NULL DEFAULT '',
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS cloudflare_zones (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    zone_id    TEXT NOT NULL UNIQUE,
+    zone_name  TEXT NOT NULL,
+    api_token  TEXT NOT NULL,
+    enabled    INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS mailing_lists (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    domain      TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    admin_email TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(name, domain)
+  );
+
+  CREATE TABLE IF NOT EXISTS php_domain_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain     TEXT NOT NULL UNIQUE,
+    php_version TEXT NOT NULL DEFAULT '8.1',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS autoresponders (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     email       TEXT NOT NULL,

@@ -3,12 +3,12 @@ import {
   LayoutDashboard, FolderOpen, Archive,
   Globe, Network, ArrowRightLeft, AlertTriangle, Globe2,
   Database,
-  Mail, MailPlus,
-  Key, ShieldCheck, Lock, Shield,
+  Mail, MailPlus, MailSearch, ListOrdered,
+  Key, ShieldCheck, Lock, Shield, ShieldAlert, ClipboardList,
   Clock, Code2, Activity, FileText, Upload, PackageOpen, TerminalSquare,
   Server, Package, Receipt,
   Settings, Users, KeyRound, Bell, Cpu, ExternalLink,
-  Zap,
+  Zap, Cloud, GitBranch, Layers, RefreshCw, UserCheck, Tag,
 } from 'lucide-react';
 
 interface NavItem {
@@ -30,14 +30,6 @@ const sections: Section[] = [
     ],
   },
   {
-    label: 'Hosting & Billing',
-    items: [
-      { to: '/accounts', icon: Server,   label: 'Hosting Accounts' },
-      { to: '/plans',    icon: Package,  label: 'Hosting Plans' },
-      { to: '/billing',  icon: Receipt,  label: 'Billing & Invoices' },
-    ],
-  },
-  {
     label: 'Files & Storage',
     items: [
       { to: '/files',  icon: FolderOpen, label: 'File Manager' },
@@ -51,7 +43,6 @@ const sections: Section[] = [
       { to: '/subdomains',  icon: Network,        label: 'Subdomains' },
       { to: '/redirects',   icon: ArrowRightLeft, label: 'Redirects' },
       { to: '/error-pages', icon: AlertTriangle,  label: 'Error Pages' },
-      { to: '/web-extras',  icon: Globe2,         label: 'Web Extras' },
     ],
   },
   {
@@ -63,39 +54,66 @@ const sections: Section[] = [
   {
     label: 'Email',
     items: [
-      { to: '/email',        icon: Mail,    label: 'Email Accounts' },
-      { to: '/email-extras', icon: MailPlus, label: 'Email Extras' },
+      { to: '/email',        icon: Mail,       label: 'Email Accounts' },
+      { to: '/email-extras', icon: MailPlus,   label: 'Email Extras' },
+      { to: '/dkim',         icon: MailSearch, label: 'DKIM / SPF / DMARC' },
+      { to: '/mail-queue',   icon: ListOrdered, label: 'Mail Queue' },
+    ],
+  },
+  {
+    label: 'Web & CDN',
+    items: [
+      { to: '/web-extras',  icon: Globe2,     label: 'Web Extras' },
+      { to: '/ssl-advanced', icon: Lock,      label: 'SSL Advanced' },
+      { to: '/cloudflare',  icon: Cloud,      label: 'Cloudflare CDN' },
+      { to: '/git-deploy',  icon: GitBranch,  label: 'Git Deploy' },
+      { to: '/cache',       icon: Layers,     label: 'Cache Manager' },
     ],
   },
   {
     label: 'Security',
     items: [
-      { to: '/ssh-keys',  icon: Key,        label: 'SSH Keys' },
-      { to: '/firewall',  icon: ShieldCheck, label: 'Firewall & IPs' },
-      { to: '/htpasswd',  icon: Lock,        label: 'Protected Dirs' },
-      { to: '/security',  icon: Shield,      label: 'Security Center' },
+      { to: '/ssh-keys',        icon: Key,          label: 'SSH Keys' },
+      { to: '/firewall',        icon: ShieldCheck,  label: 'Firewall & IPs' },
+      { to: '/htpasswd',        icon: Lock,         label: 'Protected Dirs' },
+      { to: '/security',        icon: Shield,       label: 'Security Center' },
+      { to: '/waf',             icon: ShieldAlert,  label: 'WAF & Fail2Ban' },
+      { to: '/audit-log',       icon: ClipboardList, label: 'Audit Log' },
     ],
   },
   {
     label: 'Server',
     items: [
-      { to: '/cron',      icon: Clock,         label: 'Cron Jobs' },
-      { to: '/php',       icon: Code2,         label: 'PHP Manager' },
-      { to: '/processes', icon: Activity,      label: 'Process Manager' },
-      { to: '/logs',      icon: FileText,      label: 'Log Viewer' },
-      { to: '/ftp',       icon: Upload,        label: 'FTP Accounts' },
-      { to: '/scripts',   icon: PackageOpen,   label: 'Script Installer' },
-      { to: '/terminal',  icon: TerminalSquare, label: 'Terminal' },
-      { to: '/apps',      icon: Cpu,           label: 'App Manager' },
-      { to: '/monitor',   icon: Bell,          label: 'System Monitor' },
+      { to: '/cron',            icon: Clock,          label: 'Cron Jobs' },
+      { to: '/php',             icon: Code2,          label: 'PHP Manager' },
+      { to: '/php-versions',    icon: Code2,          label: 'Multi-PHP / nvm' },
+      { to: '/resource-limits', icon: Cpu,            label: 'Resource Limits' },
+      { to: '/processes',       icon: Activity,       label: 'Process Manager' },
+      { to: '/logs',            icon: FileText,       label: 'Log Viewer' },
+      { to: '/ftp',             icon: Upload,         label: 'FTP Accounts' },
+      { to: '/scripts',         icon: PackageOpen,    label: 'Script Installer' },
+      { to: '/terminal',        icon: TerminalSquare, label: 'Terminal' },
+      { to: '/apps',            icon: Cpu,            label: 'App Manager' },
+      { to: '/monitor',         icon: Bell,           label: 'System Monitor' },
+    ],
+  },
+  {
+    label: 'Billing',
+    items: [
+      { to: '/accounts',  icon: Server,      label: 'Hosting Accounts' },
+      { to: '/plans',     icon: Package,     label: 'Hosting Plans' },
+      { to: '/billing',   icon: Receipt,     label: 'Billing & Invoices' },
+      { to: '/recurring', icon: RefreshCw,   label: 'Recurring Billing' },
+      { to: '/resellers', icon: UserCheck,   label: 'Resellers (WHM)' },
     ],
   },
   {
     label: 'Admin',
     items: [
-      { to: '/settings',    icon: Settings,    label: 'Settings' },
-      { to: '/admin-users', icon: Users,       label: 'Admin Users' },
-      { to: '/api-tokens',  icon: KeyRound,    label: 'API Tokens' },
+      { to: '/settings',       icon: Settings,      label: 'Settings' },
+      { to: '/admin-users',    icon: Users,         label: 'Admin Users' },
+      { to: '/api-tokens',     icon: KeyRound,      label: 'API Tokens' },
+      { to: '/notifications',  icon: Bell,          label: 'Notifications' },
     ],
   },
 ];
