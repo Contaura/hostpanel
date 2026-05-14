@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Edit2, Building2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/resellers${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/resellers${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 const blank = { username: '', email: '', password: '', company: '', alloc_disk: 102400, alloc_bandwidth: 1024000, alloc_accounts: 10, alloc_emails: 50, alloc_dbs: 20 };
 

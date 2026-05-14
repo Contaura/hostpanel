@@ -3,7 +3,7 @@ import { RefreshCw, Power, Trash2, Download, Zap } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/wordpress${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o,
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
 });
 
 export default function WordPressManager() {

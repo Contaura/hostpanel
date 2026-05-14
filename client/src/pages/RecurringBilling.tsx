@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Play, Tag } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/billing${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/billing${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 const blankSchedule = { client_id: '', amount: '', currency: 'USD', cycle: 'monthly', next_run: '', notes: '' };
 const blankPromo = { code: '', type: 'percent', value: '', max_uses: '', expires_at: '' };

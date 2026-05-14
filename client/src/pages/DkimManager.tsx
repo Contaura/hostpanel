@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/dkim${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/dkim${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 export default function DkimManager() {
   const toast = useToast();

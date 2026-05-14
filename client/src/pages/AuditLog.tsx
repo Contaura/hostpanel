@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Search, Trash2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/audit-log${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/audit-log${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 export default function AuditLog() {
   const toast = useToast();

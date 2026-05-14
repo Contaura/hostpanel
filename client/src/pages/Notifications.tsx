@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Bell, Send } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/notifications${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/notifications${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 const blank = { name: '', url: '', type: 'webhook', events: [] as string[], secret: '' };
 

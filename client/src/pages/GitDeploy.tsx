@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2, Play, Copy, GitBranch } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
-const api = (p: string, o?: RequestInit) => fetch(`/api/git-deploy${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o });
+const api = (p: string, o?: RequestInit) => fetch(`/api/git-deploy${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 const blank = { name: '', repo_url: '', branch: 'main', deploy_path: '', command: 'git pull && npm install && npm run build', auto_deploy: true };
 

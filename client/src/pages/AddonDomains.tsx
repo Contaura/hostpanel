@@ -3,7 +3,7 @@ import { Plus, Trash2, Globe } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/addon-domains${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, ...o,
+  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
 });
 
 export default function AddonDomains() {
@@ -15,7 +15,7 @@ export default function AddonDomains() {
 
   useEffect(() => {
     api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : []));
-    fetch('/api/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+    fetch('/api/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
       .then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : []));
   }, []);
 
