@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Shield, Ban } from 'lucide-react';
+import { RefreshCw, Shield, Ban, FileText, Power } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/waf${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -8,21 +8,32 @@ export default function WafManager() {
   const toast = useToast();
   const [waf, setWaf] = useState<any>(null);
   const [f2b, setF2b] = useState<any>(null);
+  const [rules, setRules] = useState<any[]>([]);
+  const [rulesLoaded, setRulesLoaded] = useState(false);
   const [jailDetail, setJailDetail] = useState<Record<string, any>>({});
-  const [tab, setTab] = useState<'modsec' | 'fail2ban'>('modsec');
+  const [togglingJail, setTogglingJail] = useState<string | null>(null);
+  const [tab, setTab] = useState<'modsec' | 'fail2ban' | 'rules'>('modsec');
   const [unbanIp, setUnbanIp] = useState('');
   const [banJail, setBanJail] = useState('');
   const [banIp, setBanIp] = useState('');
 
   async function load() {
-    const [w, f] = await Promise.all([api('/modsecurity').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
+    const [w, f] = await Promise.all([api('/modsec').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
     setWaf(w); setF2b(f);
   }
 
+  async function loadRules() {
+    if (rulesLoaded) return;
+    const r = await api('/modsec/rules');
+    setRules(await r.json());
+    setRulesLoaded(true);
+  }
+
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (tab === 'rules') loadRules(); }, [tab]);
 
   async function setWafMode(mode: string) {
-    const r = await api('/modsecurity', { method: 'PUT', body: JSON.stringify({ mode }) });
+    const r = await api('/modsec', { method: 'PUT', body: JSON.stringify({ mode }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`ModSecurity set to ${mode}`); load(); }
@@ -33,6 +44,15 @@ export default function WafManager() {
     const r = await api(`/fail2ban/${name}`);
     const data = await r.json();
     setJailDetail(j => ({ ...j, [name]: data }));
+  }
+
+  async function toggleJail(name: string, currentlyRunning: boolean) {
+    setTogglingJail(name);
+    const r = await api(`/fail2ban/${name}/toggle`, { method: 'POST', body: JSON.stringify({ action: currentlyRunning ? 'stop' : 'start' }) });
+    const d = await r.json();
+    if (d.error) toast.error(d.error);
+    else { toast.success(`Jail ${name} ${currentlyRunning ? 'stopped' : 'started'}`); load(); }
+    setTogglingJail(null);
   }
 
   async function ban() {
@@ -57,8 +77,9 @@ export default function WafManager() {
       </div>
 
       <div className="tab-bar">
-        <button className={`tab-item ${tab === 'modsec' ? 'tab-item-active' : ''}`} onClick={() => setTab('modsec')}>ModSecurity WAF</button>
-        <button className={`tab-item ${tab === 'fail2ban' ? 'tab-item-active' : ''}`} onClick={() => setTab('fail2ban')}>Fail2Ban</button>
+        <button className={`tab-item ${tab === 'modsec' ? 'tab-item-active' : ''}`} onClick={() => setTab('modsec')}><Shield size={13} /> ModSecurity WAF</button>
+        <button className={`tab-item ${tab === 'fail2ban' ? 'tab-item-active' : ''}`} onClick={() => setTab('fail2ban')}><Ban size={13} /> Fail2Ban</button>
+        <button className={`tab-item ${tab === 'rules' ? 'tab-item-active' : ''}`} onClick={() => setTab('rules')}><FileText size={13} /> Rule Files</button>
       </div>
 
       {tab === 'modsec' && waf && (
@@ -96,6 +117,41 @@ export default function WafManager() {
         </div>
       )}
 
+      {tab === 'rules' && (
+        <div className="space-y-4">
+          <div className="card overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+              <p className="text-sm font-medium">ModSecurity Rule Files</p>
+              <button className="btn-secondary text-xs" onClick={() => { setRulesLoaded(false); loadRules(); }}><RefreshCw size={12} /> Reload</button>
+            </div>
+            {rules.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-sm">
+                <FileText size={28} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                No rule files found
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700">
+                  <tr>
+                    <th className="table-header-cell">Rule File</th>
+                    <th className="table-header-cell">Path</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.map((r: any, i: number) => (
+                    <tr key={i} className="border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                      <td className="table-cell font-mono text-xs font-medium">{r.name}</td>
+                      <td className="table-cell font-mono text-xs text-slate-500 truncate max-w-xs">{r.file}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <p className="text-xs text-slate-400">Rule files are loaded from the ModSecurity rules directory. {rules.length > 0 && `${rules.length} file${rules.length !== 1 ? 's' : ''} found.`}</p>
+        </div>
+      )}
+
       {tab === 'fail2ban' && f2b && (
         <div className="space-y-4">
           <div className="card flex items-center gap-2">
@@ -127,34 +183,49 @@ export default function WafManager() {
 
           {/* Jails */}
           <div className="space-y-2">
-            {(f2b.jails || []).map((jail: string) => (
-              <div key={jail} className="card">
-                <button
-                  className="flex items-center justify-between w-full text-sm font-medium"
-                  onClick={() => { loadJail(jail); setJailDetail(j => ({ ...j, [jail]: j[jail] === undefined ? null : j[jail] })); }}
-                >
-                  <span>{jail}</span>
-                  <span className="text-slate-400 text-xs">Click to expand</span>
-                </button>
-                {jailDetail[jail] && (
-                  <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-                    <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Currently Banned</p><p className="font-bold text-lg">{jailDetail[jail].currently_banned ?? '—'}</p></div>
-                    <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Total Banned</p><p className="font-bold text-lg">{jailDetail[jail].total_banned ?? '—'}</p></div>
-                    <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Failed Attempts</p><p className="font-bold text-lg">{jailDetail[jail].currently_failed ?? '—'}</p></div>
-                    {jailDetail[jail].banned_ips?.length > 0 && (
-                      <div className="col-span-3">
-                        <p className="text-slate-500 mb-1">Banned IPs</p>
-                        <div className="flex flex-wrap gap-1">
-                          {jailDetail[jail].banned_ips.map((ip: string) => (
-                            <span key={ip} className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded text-xs font-mono">{ip}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+            {(f2b.jails || []).map((jail: string) => {
+              const detail = jailDetail[jail];
+              const isRunning = f2b.running;
+              return (
+                <div key={jail} className="card">
+                  <div className="flex items-center justify-between">
+                    <button
+                      className="flex items-center gap-2 text-sm font-medium flex-1 text-left"
+                      onClick={() => { loadJail(jail); setJailDetail(j => ({ ...j, [jail]: j[jail] === undefined ? null : j[jail] })); }}
+                    >
+                      <span>{jail}</span>
+                      <span className="text-slate-400 text-xs">Click to expand</span>
+                    </button>
+                    <button
+                      onClick={() => toggleJail(jail, isRunning)}
+                      disabled={togglingJail === jail}
+                      className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${isRunning ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'}`}
+                      title={isRunning ? 'Stop jail' : 'Start jail'}
+                    >
+                      <Power size={11} />
+                      {togglingJail === jail ? '…' : isRunning ? 'Stop' : 'Start'}
+                    </button>
                   </div>
-                )}
-              </div>
-            ))}
+                  {detail && (
+                    <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Currently Banned</p><p className="font-bold text-lg">{detail.currently_banned ?? '—'}</p></div>
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Total Banned</p><p className="font-bold text-lg">{detail.total_banned ?? '—'}</p></div>
+                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Failed Attempts</p><p className="font-bold text-lg">{detail.currently_failed ?? '—'}</p></div>
+                      {detail.banned_ips?.length > 0 && (
+                        <div className="col-span-3">
+                          <p className="text-slate-500 mb-1">Banned IPs</p>
+                          <div className="flex flex-wrap gap-1">
+                            {detail.banned_ips.map((ip: string) => (
+                              <span key={ip} className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded text-xs font-mono">{ip}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Users, Plus, Trash2, Edit2, Save, X, Shield, Eye, Clock } from 'lucide-react';
+import { Users, Plus, Trash2, Edit2, Save, X, Shield, Eye, Clock, Lock } from 'lucide-react';
 
 interface AdminUser { id: number; username: string; email: string; role: string; totp_enabled: number; last_login: string; created_at: string }
 
@@ -14,16 +14,27 @@ const adel  = (p: string) => axios.delete(p, { headers: auth() });
 
 const ROLE_BADGE: Record<string, string> = { superadmin: 'badge-danger', admin: 'badge-info', readonly: 'badge-warning' };
 
+interface PasswordPolicy { min_length: number; require_upper: boolean; require_number: boolean; require_special: boolean; }
+
 export default function AdminUsers() {
   const { success, error } = useToast();
   const [users, setUsers]   = useState<AdminUser[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState<AdminUser | null>(null);
   const [form, setForm] = useState({ username: '', email: '', password: '', role: 'admin' });
+  const [policy, setPolicy] = useState<PasswordPolicy>({ min_length: 8, require_upper: false, require_number: false, require_special: false });
+  const [policySaving, setPolicySaving] = useState(false);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadPolicy(); }, []);
 
   async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} }
+  async function loadPolicy() { try { const r = await api('/api/admin-users/password-policy'); setPolicy(r.data); } catch {} }
+  async function savePolicy() {
+    setPolicySaving(true);
+    try { await aput('/api/admin-users/password-policy', policy); success('Password policy saved'); }
+    catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    setPolicySaving(false);
+  }
 
   async function save() {
     if (!form.username && !editing) { error('Username required'); return; }
@@ -83,6 +94,29 @@ export default function AdminUsers() {
           </div>
         </div>
       )}
+
+      {/* Password Policy */}
+      <div className="card p-5 space-y-4 max-w-lg">
+        <div className="flex items-center gap-2">
+          <Lock size={15} className="text-slate-500" />
+          <h3 className="font-semibold text-sm">Password Policy</h3>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="label mb-0 w-40">Minimum length</label>
+          <input type="number" min={6} max={64} className="input w-24" value={policy.min_length}
+            onChange={e => setPolicy(p => ({ ...p, min_length: Math.max(6, parseInt(e.target.value) || 8) }))} />
+        </div>
+        {([['require_upper', 'Require uppercase letter'], ['require_number', 'Require number'], ['require_special', 'Require special character']] as const).map(([field, label]) => (
+          <label key={field} className="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-indigo-600"
+              checked={policy[field]} onChange={e => setPolicy(p => ({ ...p, [field]: e.target.checked }))} />
+            <span className="text-sm text-slate-700 dark:text-slate-300">{label}</span>
+          </label>
+        ))}
+        <button className="btn-primary text-sm w-fit" onClick={savePolicy} disabled={policySaving}>
+          <Save size={13} /> {policySaving ? 'Saving…' : 'Save Policy'}
+        </button>
+      </div>
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
