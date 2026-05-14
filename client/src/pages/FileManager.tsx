@@ -3,6 +3,7 @@ import axios from 'axios';
 import {
   Folder, File, Upload, FolderPlus, Trash2, Edit3,
   Download, ChevronRight, Home, RefreshCw, X, Save, AlertCircle, Lock,
+  Archive, PackageOpen,
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
@@ -31,6 +32,10 @@ export default function FileManager() {
   const [chmodTarget, setChmodTarget] = useState<FileItem | null>(null);
   const [chmodMode, setChmodMode] = useState('755');
   const [chmodRecursive, setChmodRecursive] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [compressFormat, setCompressFormat] = useState<'tar.gz' | 'zip'>('tar.gz');
+  const [compressName, setCompressName] = useState('');
+  const [showCompress, setShowCompress] = useState(false);
 
   async function loadDir(path: string) {
     setLoading(true); setError('');
@@ -101,6 +106,24 @@ export default function FileManager() {
     finally { setUploading(false); e.target.value = ''; }
   }
 
+  async function compressSelected() {
+    if (!selected.size || !compressName) { toast.error('Select files and enter archive name'); return; }
+    const paths = Array.from(selected).map(n => `${currentPath}/${n}`);
+    const dest = `${currentPath}/${compressName}.${compressFormat}`;
+    try {
+      await axios.post('/api/files/compress', { paths, destination: dest, format: compressFormat });
+      toast.success('Archive created'); setShowCompress(false); setSelected(new Set()); setCompressName('');
+      loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Compress failed'); }
+  }
+
+  async function extractItem(item: FileItem) {
+    try {
+      await axios.post('/api/files/extract', { path: `${currentPath}/${item.name}` });
+      toast.success('Extracted'); loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Extract failed'); }
+  }
+
   async function applyChmod() {
     if (!chmodTarget || !/^[0-7]{3,4}$/.test(chmodMode)) { toast.error('Invalid permission mode'); return; }
     try {
@@ -148,6 +171,11 @@ export default function FileManager() {
           <button onClick={() => setShowNewFolder(v => !v)} className="btn-secondary">
             <FolderPlus size={14} /> New folder
           </button>
+          {selected.size > 0 && (
+            <button onClick={() => setShowCompress(true)} className="btn-secondary">
+              <Archive size={14} /> Compress {selected.size} file{selected.size !== 1 ? 's' : ''}
+            </button>
+          )}
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="btn-primary">
             {uploading
               ? <><svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Uploading…</>
@@ -198,11 +226,12 @@ export default function FileManager() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700">
             <tr>
+              <th className="w-8 px-2"><input type="checkbox" onChange={e => setSelected(e.target.checked ? new Set(items.map(i => i.name)) : new Set())} /></th>
               <th className="table-header-cell">Name</th>
               <th className="table-header-cell hidden md:table-cell">Size</th>
               <th className="table-header-cell hidden lg:table-cell">Modified</th>
               <th className="table-header-cell hidden lg:table-cell">Perms</th>
-              <th className="px-4 py-3 w-24" />
+              <th className="px-4 py-3 w-28" />
             </tr>
           </thead>
           <tbody>
@@ -223,6 +252,7 @@ export default function FileManager() {
               <tr><td colSpan={5} className="px-4 py-16 text-center text-slate-400 text-sm">This directory is empty</td></tr>
             ) : items.map(item => (
               <tr key={item.name} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 border-b border-slate-50 dark:border-slate-700/40 last:border-0 group">
+                <td className="w-8 px-2"><input type="checkbox" checked={selected.has(item.name)} onChange={e => setSelected(s => { const n = new Set(s); e.target.checked ? n.add(item.name) : n.delete(item.name); return n; })} /></td>
                 <td className="table-cell cursor-pointer" onClick={() => navigate(item)}>
                   <div className="flex items-center gap-2.5">
                     {item.type === 'directory'
@@ -251,6 +281,9 @@ export default function FileManager() {
                         <a href={`/api/files/download?path=${encodeURIComponent(`${currentPath}/${item.name}`)}`} className="btn-icon" title="Download">
                           <Download size={13} />
                         </a>
+                        {/\.(zip|tar\.gz|tgz|tar\.bz2|tar)$/i.test(item.name) && (
+                          <button onClick={() => extractItem(item)} className="btn-icon text-amber-500" title="Extract"><PackageOpen size={13} /></button>
+                        )}
                       </>
                     )}
                     <button onClick={() => { setChmodTarget(item); setChmodMode('755'); setChmodRecursive(false); }} className="btn-icon" title="Permissions"><Lock size={13} /></button>
@@ -265,6 +298,31 @@ export default function FileManager() {
           </tbody>
         </table>
       </div>
+
+      {/* Compress dialog */}
+      {showCompress && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCompress(false)}>
+          <div className="card p-5 w-80 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-sm">Create Archive</h3>
+            <p className="text-xs text-slate-500">{selected.size} item{selected.size !== 1 ? 's' : ''} selected</p>
+            <div>
+              <label className="label">Archive Name</label>
+              <input className="input font-mono" placeholder="archive" value={compressName} onChange={e => setCompressName(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Format</label>
+              <select className="input" value={compressFormat} onChange={e => setCompressFormat(e.target.value as any)}>
+                <option value="tar.gz">tar.gz (recommended)</option>
+                <option value="zip">zip</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={compressSelected}><Archive size={14} /> Create</button>
+              <button className="btn-ghost" onClick={() => setShowCompress(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Chmod modal */}
       {chmodTarget && (

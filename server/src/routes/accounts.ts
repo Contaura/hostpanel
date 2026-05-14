@@ -159,4 +159,36 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// GET /api/accounts/:id/usage — disk usage for account's webroot dir
+router.get('/:id/usage', async (req: AuthRequest, res: Response) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const accountDir = path.join(WEBROOT, account.username || account.domain);
+  try {
+    // Disk usage
+    let diskBytes = 0;
+    let breakdown: { dir: string; bytes: number }[] = [];
+    try {
+      const { stdout } = await execAsync(`du -sb "${accountDir}" 2>/dev/null`);
+      diskBytes = parseInt(stdout.split('\t')[0]) || 0;
+      // Breakdown by top-level subdir
+      const { stdout: sub } = await execAsync(`du -sb "${accountDir}"/* 2>/dev/null | sort -rn | head -10`);
+      breakdown = sub.trim().split('\n').filter(Boolean).map(line => {
+        const [bytes, dir] = line.split('\t');
+        return { dir: dir?.replace(accountDir + '/', '') || dir, bytes: parseInt(bytes) || 0 };
+      });
+    } catch {}
+
+    // File count
+    let fileCount = 0;
+    try {
+      const { stdout } = await execAsync(`find "${accountDir}" -type f 2>/dev/null | wc -l`);
+      fileCount = parseInt(stdout.trim()) || 0;
+    } catch {}
+
+    res.json({ disk_bytes: diskBytes, file_count: fileCount, breakdown, directory: accountDir });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

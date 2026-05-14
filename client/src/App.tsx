@@ -52,6 +52,8 @@ import Notifications from './pages/Notifications';
 import MailRouting from './pages/MailRouting';
 import AddonDomains from './pages/AddonDomains';
 import WordPressManager from './pages/WordPressManager';
+import ParkedDomains from './pages/ParkedDomains';
+import NodeApps from './pages/NodeApps';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -139,9 +141,11 @@ function AppRoutes() {
         <Route path="notifications" element={<Notifications />} />
 
         {/* Mail Routing / Addon Domains / WordPress */}
-        <Route path="mail-routing"  element={<MailRouting />} />
-        <Route path="addon-domains" element={<AddonDomains />} />
-        <Route path="wordpress"     element={<WordPressManager />} />
+        <Route path="mail-routing"   element={<MailRouting />} />
+        <Route path="addon-domains"  element={<AddonDomains />} />
+        <Route path="wordpress"      element={<WordPressManager />} />
+        <Route path="parked-domains" element={<ParkedDomains />} />
+        <Route path="node-apps"      element={<NodeApps />} />
 
         {/* Admin Config */}
         <Route path="settings"    element={<Settings />} />

@@ -51,6 +51,8 @@ import notificationsRoutes   from './routes/notifications';
 import resellerRoutes        from './routes/reseller';
 import addonDomainsRoutes    from './routes/addon-domains';
 import wordpressRoutes       from './routes/wordpress';
+import parkedDomainsRoutes   from './routes/parked-domains';
+import nodeAppsRoutes        from './routes/node-apps';
 import { authenticateToken } from './middleware/auth';
 import { setupTerminal } from './terminal';
 
@@ -154,6 +156,8 @@ app.use('/api/notifications',  authenticateToken, notificationsRoutes);
 app.use('/api/resellers',      authenticateToken, resellerRoutes);
 app.use('/api/addon-domains',  authenticateToken, addonDomainsRoutes);
 app.use('/api/wordpress',      authenticateToken, wordpressRoutes);
+app.use('/api/parked-domains', authenticateToken, parkedDomainsRoutes);
+app.use('/api/node-apps',      authenticateToken, nodeAppsRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

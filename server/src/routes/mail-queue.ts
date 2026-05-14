@@ -70,4 +70,30 @@ router.delete('/', async (_req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Email delivery log (Postfix mail.log) ───────────────────*/
+
+router.get('/delivery-log', async (req: Request, res: Response) => {
+  const limit = parseInt((req.query.limit as string) || '500');
+  const search = (req.query.search as string) || '';
+  const LOG_PATHS = ['/var/log/maillog', '/var/log/mail.log', '/var/log/mail/mail.log'];
+  let logPath = LOG_PATHS.find(p => require('fs').existsSync(p));
+  if (!logPath) return res.json({ lines: [], source: 'none' });
+
+  try {
+    const grepFlag = search ? `| grep -i "${search.replace(/"/g, '')}"` : '';
+    const { stdout } = await execAsync(`tail -${limit} "${logPath}" ${grepFlag} 2>/dev/null || true`);
+    const lines = stdout.trim().split('\n').filter(Boolean).reverse().map((line, i) => {
+      const m = line.match(/^(\w+ +\d+ \d+:\d+:\d+).*postfix\S*: (\S+): (.+)/);
+      return {
+        id: i,
+        raw: line,
+        time: m?.[1] || '',
+        queue_id: m?.[2] || '',
+        message: m?.[3] || line,
+      };
+    });
+    res.json({ lines, source: logPath });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderOpen, Archive,
   Globe, Network, ArrowRightLeft, AlertTriangle, Globe2,
   Database,
-  Mail, MailPlus, MailSearch, ListOrdered, MailOpen, PlusSquare, BrainCircuit,
+  Mail, MailPlus, MailSearch, ListOrdered, MailOpen, PlusSquare, BrainCircuit, ServerCog,
   Key, ShieldCheck, Lock, Shield, ShieldAlert, ClipboardList,
   Clock, Code2, Activity, FileText, Upload, PackageOpen, TerminalSquare,
   Server, Package, Receipt,
@@ -42,8 +42,9 @@ const sections: Section[] = [
     items: [
       { to: '/domains',      icon: Globe,          label: 'Domains & DNS' },
       { to: '/subdomains',  icon: Network,        label: 'Subdomains' },
-      { to: '/addon-domains', icon: PlusSquare,   label: 'Addon Domains' },
-      { to: '/redirects',   icon: ArrowRightLeft, label: 'Redirects' },
+      { to: '/addon-domains',  icon: PlusSquare,    label: 'Addon Domains' },
+      { to: '/parked-domains', icon: Globe,         label: 'Parked Domains' },
+      { to: '/redirects',     icon: ArrowRightLeft, label: 'Redirects' },
       { to: '/error-pages', icon: AlertTriangle,  label: 'Error Pages' },
     ],
   },
@@ -99,6 +100,7 @@ const sections: Section[] = [
       { to: '/apps',            icon: Cpu,            label: 'App Manager' },
       { to: '/monitor',         icon: Bell,           label: 'System Monitor' },
       { to: '/wordpress',       icon: BrainCircuit,   label: 'WordPress Manager' },
+      { to: '/node-apps',       icon: ServerCog,      label: 'Node.js / Python' },
     ],
   },
   {

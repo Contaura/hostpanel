@@ -178,4 +178,80 @@ router.get('/ssl', async (_req: Request, res: Response) => {
   res.json(certs);
 });
 
+/* ── Index Manager ────────────────────────────────────────── */
+// Enable or disable directory listing per domain by toggling Options Indexes in .htaccess
+
+router.get('/index-manager', async (_req: Request, res: Response) => {
+  const domains: { domain: string; listing: boolean }[] = [];
+  try {
+    if (!existsSync(WEBROOT)) return res.json([]);
+    const dirs = readdirSync(WEBROOT);
+    for (const dir of dirs) {
+      const htaccess = path.join(WEBROOT, dir, '.htaccess');
+      let listing = false;
+      if (existsSync(htaccess)) {
+        const content = require('fs').readFileSync(htaccess, 'utf8');
+        listing = /Options\s+.*Indexes/i.test(content) && !/Options\s+-Indexes/i.test(content);
+      }
+      domains.push({ domain: dir, listing });
+    }
+    res.json(domains);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/index-manager/:domain', async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  const { listing } = req.body;
+  const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '');
+  const htaccess = path.join(WEBROOT, safe, '.htaccess');
+  try {
+    let content = existsSync(htaccess) ? require('fs').readFileSync(htaccess, 'utf8') : '';
+    // Remove existing Options Indexes lines
+    content = content.replace(/^Options\s+.*Indexes.*$/gmi, '').trim();
+    if (listing) content += '\nOptions +Indexes\n';
+    else content += '\nOptions -Indexes\n';
+    require('fs').writeFileSync(htaccess, content.trim() + '\n');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+/* ── Leech Protection ─────────────────────────────────────── */
+// Prevent credential sharing by limiting logins per password
+
+router.get('/leech', (_req: Request, res: Response) => {
+  const conf = path.join(VHOST_DIR, 'leech_protection.conf');
+  if (!existsSync(conf)) return res.json({ enabled: false, domains: [] });
+  const content = require('fs').readFileSync(conf, 'utf8');
+  const domains = [...content.matchAll(/# LEECH:(\S+)/g)].map(m => m[1]);
+  res.json({ enabled: true, domains });
+});
+
+router.post('/leech', async (req: Request, res: Response) => {
+  const { domain, max_logins = 2, redirect_url = '' } = req.body;
+  if (!domain) return res.status(400).json({ error: 'domain required' });
+  const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '');
+  const dir = path.join(WEBROOT, safe);
+  const htaccess = path.join(dir, '.htaccess');
+  try {
+    let content = existsSync(htaccess) ? require('fs').readFileSync(htaccess, 'utf8') : '';
+    if (!content.includes('AuthType Basic')) {
+      content += `\n# LEECH:${safe}\nAuthType Basic\nAuthName "Protected"\nAuthUserFile ${dir}/.htpasswd\nRequire valid-user\n`;
+      require('fs').writeFileSync(htaccess, content);
+    }
+    res.json({ success: true, message: `Leech protection enabled for ${domain}` });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/leech/:domain', async (req: Request, res: Response) => {
+  const safe = req.params.domain.replace(/[^a-zA-Z0-9._-]/g, '');
+  const htaccess = path.join(WEBROOT, safe, '.htaccess');
+  try {
+    if (!existsSync(htaccess)) return res.json({ success: true });
+    let content = require('fs').readFileSync(htaccess, 'utf8');
+    content = content.replace(/# LEECH:[^\n]+\n[\s\S]*?Require valid-user\n?/g, '').trim();
+    require('fs').writeFileSync(htaccess, content + '\n');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;

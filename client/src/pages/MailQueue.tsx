@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Trash2, Send } from 'lucide-react';
+import { RefreshCw, Trash2, Send, FileSearch } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/mail-queue${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
+type Tab = 'queue' | 'delivery-log';
+
 export default function MailQueue() {
   const toast = useToast();
+  const [tab, setTab] = useState<Tab>('queue');
   const [messages, setMessages] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
+  const [deliveryLog, setDeliveryLog] = useState<any[]>([]);
+  const [logSearch, setLogSearch] = useState('');
+  const [logLoading, setLogLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -19,7 +25,16 @@ export default function MailQueue() {
     } finally { setLoading(false); }
   }
 
+  async function loadDeliveryLog() {
+    setLogLoading(true);
+    const r = await api(`/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
+    const d = await r.json();
+    setDeliveryLog(d.lines || []);
+    setLogLoading(false);
+  }
+
   useEffect(() => { load(); }, []);
+  useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); }, [tab]);
 
   async function flush() {
     await api('/flush', { method: 'POST' });
@@ -44,13 +59,41 @@ export default function MailQueue() {
       <div className="flex items-center justify-between">
         <h1 className="page-title">Mail Queue</h1>
         <div className="flex gap-2">
-          <button className="btn-ghost" onClick={load}><RefreshCw size={14} /></button>
-          <button className="btn-secondary" onClick={flush}><Send size={14} className="mr-1" />Flush Queue</button>
-          <button className="btn-danger" onClick={deleteAll}><Trash2 size={14} className="mr-1" />Clear Deferred</button>
+          {tab === 'queue' && <>
+            <button className="btn-ghost" onClick={load}><RefreshCw size={14} /></button>
+            <button className="btn-secondary" onClick={flush}><Send size={14} className="mr-1" />Flush Queue</button>
+            <button className="btn-danger" onClick={deleteAll}><Trash2 size={14} className="mr-1" />Clear Deferred</button>
+          </>}
+          {tab === 'delivery-log' && <button className="btn-secondary" onClick={loadDeliveryLog}><RefreshCw size={14} /> Refresh</button>}
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="tab-bar">
+        <button className={tab === 'queue' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('queue')}><Send size={14} /> Mail Queue</button>
+        <button className={tab === 'delivery-log' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('delivery-log')}><FileSearch size={14} /> Delivery Log</button>
+      </div>
+
+      {tab === 'delivery-log' && (
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <input className="input flex-1" placeholder="Search by address, queue ID, domain…" value={logSearch} onChange={e => setLogSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadDeliveryLog()} />
+            <button className="btn-secondary" onClick={loadDeliveryLog}><FileSearch size={14} /> Search</button>
+          </div>
+          <div className="card bg-slate-950 p-4 max-h-[60vh] overflow-y-auto">
+            {logLoading && <p className="text-slate-400 text-xs">Loading…</p>}
+            {!logLoading && deliveryLog.length === 0 && <p className="text-slate-400 text-xs">No log entries found.</p>}
+            {deliveryLog.map((l: any) => (
+              <div key={l.id} className="border-b border-slate-800 py-1.5">
+                <span className="text-slate-500 text-xs mr-2">{l.time}</span>
+                {l.queue_id && <span className="text-indigo-400 text-xs font-mono mr-2">[{l.queue_id}]</span>}
+                <span className="text-slate-300 text-xs">{l.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {tab === 'queue' && <><div className="grid grid-cols-3 gap-4">
         {[['Active', stats.active ?? 0, 'bg-emerald-500'], ['Deferred', stats.deferred ?? 0, 'bg-amber-500'], ['Held', stats.held ?? 0, 'bg-red-500']].map(([label, val, color]) => (
           <div key={label as string} className="card flex items-center gap-4">
             <div className={`w-3 h-3 rounded-full ${color}`} />
@@ -91,7 +134,7 @@ export default function MailQueue() {
             ))}
           </tbody>
         </table>
-      </div>
+      </div></>}
     </div>
   );
 }

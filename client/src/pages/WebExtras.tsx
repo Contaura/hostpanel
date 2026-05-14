@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { ShieldOff, FileType, HardDrive, BarChart2, Lock, Plus, Trash2, RefreshCw, AlertTriangle, CheckCircle } from 'lucide-react';
+import { ShieldOff, FileType, HardDrive, BarChart2, Lock, Plus, Trash2, RefreshCw, AlertTriangle, CheckCircle, List, ShieldAlert } from 'lucide-react';
 
-type Tab = 'hotlink' | 'mime' | 'diskusage' | 'bandwidth' | 'ssl';
+type Tab = 'hotlink' | 'mime' | 'diskusage' | 'bandwidth' | 'ssl' | 'index' | 'leech';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() });
@@ -38,6 +38,8 @@ export default function WebExtras() {
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
+    if (t === 'index') api('/api/web/index-manager').then(r => setIndexDomains(r.data || [])).catch(() => {});
+    if (t === 'leech') api('/api/web/leech').then(r => setLeechDomains(r.data || { enabled: false, domains: [] })).catch(() => {});
     if (t === 'hotlink') api('/api/web/hotlink').then(r => setHotlink(r.data)).catch(() => {});
     if (t === 'mime') api('/api/web/mime').then(r => setMimeTypes(r.data)).catch(() => {});
     if (t === 'diskusage') loadDisk();
@@ -64,12 +66,18 @@ export default function WebExtras() {
     catch (e: any) { error('Failed'); }
   }
 
+  const [indexDomains, setIndexDomains] = useState<{ domain: string; listing: boolean }[]>([]);
+  const [leechDomains, setLeechDomains] = useState<{ enabled: boolean; domains: string[] }>({ enabled: false, domains: [] });
+  const [newLeechDomain, setNewLeechDomain] = useState('');
+
   const tabs = [
-    { id: 'hotlink' as Tab, label: 'Hotlink Protection', icon: ShieldOff },
-    { id: 'mime'    as Tab, label: 'MIME Types',          icon: FileType  },
-    { id: 'diskusage' as Tab, label: 'Disk Usage',        icon: HardDrive },
-    { id: 'bandwidth' as Tab, label: 'Bandwidth',         icon: BarChart2 },
-    { id: 'ssl'     as Tab, label: 'SSL Certificates',    icon: Lock      },
+    { id: 'hotlink'   as Tab, label: 'Hotlink Protection', icon: ShieldOff  },
+    { id: 'mime'      as Tab, label: 'MIME Types',          icon: FileType   },
+    { id: 'diskusage' as Tab, label: 'Disk Usage',          icon: HardDrive  },
+    { id: 'bandwidth' as Tab, label: 'Bandwidth',           icon: BarChart2  },
+    { id: 'ssl'       as Tab, label: 'SSL Certificates',    icon: Lock       },
+    { id: 'index'     as Tab, label: 'Index Manager',       icon: List       },
+    { id: 'leech'     as Tab, label: 'Leech Protection',    icon: ShieldAlert},
   ];
 
   return (
@@ -237,6 +245,69 @@ export default function WebExtras() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tab === 'index' && (
+        <div className="card overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <thead><tr><th className="table-header-cell">Directory</th><th className="table-header-cell">Directory Listing</th></tr></thead>
+            <tbody>
+              {indexDomains.length === 0 && <tr><td colSpan={2} className="table-cell text-center py-8 text-slate-400">No web directories found</td></tr>}
+              {indexDomains.map(d => (
+                <tr key={d.domain} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <td className="table-cell font-mono text-sm">{d.domain}</td>
+                  <td className="table-cell">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={d.listing} onChange={async e => {
+                        await aput(`/api/web/index-manager/${d.domain}`, { listing: e.target.checked });
+                        setIndexDomains(ds => ds.map(x => x.domain === d.domain ? { ...x, listing: e.target.checked } : x));
+                        success(`Directory listing ${e.target.checked ? 'enabled' : 'disabled'} for ${d.domain}`);
+                      }} />
+                      <span className={`text-xs font-medium ${d.listing ? 'text-emerald-600' : 'text-slate-400'}`}>{d.listing ? 'Enabled' : 'Disabled'}</span>
+                    </label>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'leech' && (
+        <div className="space-y-4">
+          <div className="card p-4 space-y-3">
+            <p className="text-sm font-medium">Enable Leech Protection</p>
+            <p className="text-xs text-slate-500">Adds basic HTTP authentication to a domain's directory to limit credential sharing.</p>
+            <div className="flex gap-3">
+              <input className="input flex-1" placeholder="example.com" value={newLeechDomain} onChange={e => setNewLeechDomain(e.target.value)} />
+              <button className="btn-primary" onClick={async () => {
+                if (!newLeechDomain) return;
+                await apost('/api/web/leech', { domain: newLeechDomain });
+                success(`Leech protection enabled for ${newLeechDomain}`);
+                setNewLeechDomain('');
+                loadTab('leech');
+              }}><Plus size={14} /> Enable</button>
+            </div>
+          </div>
+          <div className="card overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead><tr><th className="table-header-cell">Domain</th><th className="table-header-cell w-16"></th></tr></thead>
+              <tbody>
+                {leechDomains.domains.length === 0 && <tr><td colSpan={2} className="table-cell text-center py-8 text-slate-400">No leech protection configured</td></tr>}
+                {leechDomains.domains.map(d => (
+                  <tr key={d} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-mono text-sm">{d}</td>
+                    <td className="table-cell">
+                      <button className="btn-icon text-red-500" onClick={async () => {
+                        await adel(`/api/web/leech/${d}`);
+                        loadTab('leech');
+                      }}><Trash2 size={13} /></button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

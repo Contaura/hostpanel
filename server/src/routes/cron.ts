@@ -5,7 +5,16 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
+import db from '../db';
 import { AuthRequest } from '../middleware/auth';
+
+db.prepare(`CREATE TABLE IF NOT EXISTS cron_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  command TEXT NOT NULL,
+  exit_code INTEGER,
+  output TEXT,
+  ran_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`).run();
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -89,6 +98,31 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Run a cron job on-demand and log output
+router.post('/run', async (req: AuthRequest, res: Response) => {
+  const { command } = req.body;
+  if (!command?.trim()) return res.status(400).json({ error: 'command required' });
+  try {
+    const { stdout, stderr } = await execAsync(command, { timeout: 60000 });
+    const output = (stdout + stderr).trim();
+    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, 0, output);
+    res.json({ output, exit_code: 0 });
+  } catch (err: any) {
+    const output = (err.stdout + err.stderr || err.message).trim();
+    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, err.code || 1, output);
+    res.json({ output, exit_code: err.code || 1 });
+  }
+});
+
+router.get('/logs', (_req: AuthRequest, res: Response) => {
+  res.json(db.prepare('SELECT * FROM cron_logs ORDER BY ran_at DESC LIMIT 200').all());
+});
+
+router.delete('/logs', (_req: AuthRequest, res: Response) => {
+  db.prepare('DELETE FROM cron_logs').run();
+  res.json({ success: true });
 });
 
 export default router;

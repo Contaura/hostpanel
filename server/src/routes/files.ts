@@ -140,6 +140,45 @@ router.get('/download', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.post('/compress', async (req: AuthRequest, res: Response) => {
+  const { paths, destination, format } = req.body; // paths: string[], destination: string, format: 'zip'|'tar.gz'
+  if (!paths?.length || !destination) return res.status(400).json({ error: 'paths and destination required' });
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execA = promisify(exec);
+  try {
+    const dest = safePath(destination);
+    const srcList = (paths as string[]).map(p => `"${safePath(p)}"`).join(' ');
+    if (format === 'zip') {
+      await execA(`zip -r "${dest}" ${srcList}`);
+    } else {
+      await execA(`tar -czf "${dest}" ${srcList}`);
+    }
+    res.json({ message: 'Archive created', destination });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/extract', async (req: AuthRequest, res: Response) => {
+  const { path: archivePath, destination } = req.body;
+  if (!archivePath) return res.status(400).json({ error: 'path required' });
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  const execA = promisify(exec);
+  try {
+    const src = safePath(archivePath);
+    const dest = destination ? safePath(destination) : path.dirname(src);
+    const ext = archivePath.toLowerCase();
+    let cmd = '';
+    if (ext.endsWith('.zip'))    cmd = `unzip -o "${src}" -d "${dest}"`;
+    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) cmd = `tar -xzf "${src}" -C "${dest}"`;
+    else if (ext.endsWith('.tar.bz2')) cmd = `tar -xjf "${src}" -C "${dest}"`;
+    else if (ext.endsWith('.tar'))     cmd = `tar -xf "${src}" -C "${dest}"`;
+    else return res.status(400).json({ error: 'Unsupported archive format' });
+    await execA(cmd);
+    res.json({ message: 'Extracted successfully' });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/chmod', async (req: AuthRequest, res: Response) => {
   const { path: p, mode, recursive } = req.body;
   if (!p || !mode) return res.status(400).json({ error: 'path and mode required' });

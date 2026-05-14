@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent, useRef } from 'react';
 import axios from 'axios';
-import { Database, User, Plus, Trash2, Download, Upload } from 'lucide-react';
+import { Database, User, Plus, Trash2, Download, Upload, Shield, ExternalLink } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface DB { name: string; size_mb: number | null }
@@ -8,6 +8,8 @@ interface DBUser { user: string; host: string }
 
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
+
+const ALL_PRIVS = ['SELECT','INSERT','UPDATE','DELETE','CREATE','DROP','INDEX','ALTER','CREATE TEMPORARY TABLES','LOCK TABLES','EXECUTE','CREATE VIEW','SHOW VIEW','CREATE ROUTINE','ALTER ROUTINE','EVENT','TRIGGER'];
 
 export default function DatabaseManager() {
   const toast = useToast();
@@ -21,6 +23,15 @@ export default function DatabaseManager() {
   const [importing, setImporting] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const [importTarget, setImportTarget] = useState('');
+  const [privTarget, setPrivTarget] = useState<DBUser | null>(null);
+  const [grants, setGrants] = useState<any>(null);
+  const [newPrivs, setNewPrivs] = useState<Set<string>>(new Set());
+  const [newPrivDb, setNewPrivDb] = useState('');
+  const [pmaUrl, setPmaUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
+  }, []);
 
   async function load() {
     const [dbs, us] = await Promise.all([
@@ -74,6 +85,29 @@ export default function DatabaseManager() {
       .catch(() => toast.error('Export failed'));
   }
 
+  async function openPrivEditor(u: DBUser) {
+    setPrivTarget(u); setNewPrivs(new Set()); setNewPrivDb('');
+    try {
+      const r = await axios.get(`/api/databases/users/${u.user}/grants`, { params: { host: u.host } });
+      setGrants(r.data);
+    } catch { setGrants(null); }
+  }
+
+  async function grantPrivs() {
+    if (!privTarget || !newPrivs.size) return;
+    await axios.post(`/api/databases/users/${privTarget.user}/grants`, { host: privTarget.host, database: newPrivDb || undefined, privileges: Array.from(newPrivs) });
+    toast.success('Privileges granted');
+    openPrivEditor(privTarget);
+  }
+
+  async function revokeAll() {
+    if (!privTarget) return;
+    if (!confirm('Revoke ALL privileges for this user?')) return;
+    await axios.delete(`/api/databases/users/${privTarget.user}/grants`, { data: { host: privTarget.host } });
+    toast.success('All privileges revoked');
+    openPrivEditor(privTarget);
+  }
+
   async function importDb(file: File) {
     if (!importTarget) { toast.error('Select a database first'); return; }
     setImporting(importTarget);
@@ -94,9 +128,10 @@ export default function DatabaseManager() {
           <h1 className="page-title">Database Management</h1>
           <p className="page-subtitle">Manage MariaDB databases and users</p>
         </div>
-        <button onClick={() => setShowForm(v => !v)} className="btn-primary">
-          <Plus size={14} /> New {tab === 'databases' ? 'Database' : 'User'}
-        </button>
+        <div className="flex gap-2">
+          {pmaUrl && <a href={pmaUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary"><ExternalLink size={14} /> phpMyAdmin</a>}
+          <button onClick={() => setShowForm(v => !v)} className="btn-primary"><Plus size={14} /> New {tab === 'databases' ? 'Database' : 'User'}</button>
+        </div>
       </div>
 
       <div className="tab-bar">
@@ -232,15 +267,66 @@ export default function DatabaseManager() {
                   </td>
                   <td className="table-cell font-mono text-slate-500 dark:text-slate-400">{u.host}</td>
                   <td className="px-3 py-3">
-                    <button onClick={() => deleteUser(u.user, u.host)}
-                      className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                      <button onClick={() => openPrivEditor(u)} className="btn-icon text-indigo-500" title="Manage Privileges"><Shield size={13} /></button>
+                      <button onClick={() => deleteUser(u.user, u.host)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Privilege editor modal */}
+      {privTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setPrivTarget(null)}>
+          <div className="card p-5 w-[520px] space-y-4 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-sm">Privileges — {privTarget.user}@{privTarget.host}</h3>
+
+            {grants?.database?.length > 0 && (
+              <div>
+                <p className="text-xs text-slate-500 mb-2 font-medium">Current database grants</p>
+                <div className="space-y-1">
+                  {grants.database.map((g: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-xs bg-slate-50 dark:bg-slate-800 rounded px-3 py-1.5">
+                      <span className="font-mono">{g.db_name}</span>
+                      <span className="text-slate-500">{g.PRIVILEGE_TYPE}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="border-t border-slate-200 dark:border-slate-700 pt-4 space-y-3">
+              <p className="text-xs font-medium">Grant additional privileges</p>
+              <div>
+                <label className="label">Database (leave blank for global)</label>
+                <select className="input" value={newPrivDb} onChange={e => setNewPrivDb(e.target.value)}>
+                  <option value="">Global (*.*)</option>
+                  {databases.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="label">Privileges</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {ALL_PRIVS.map(p => (
+                    <label key={p} className="flex items-center gap-1.5 text-xs cursor-pointer">
+                      <input type="checkbox" checked={newPrivs.has(p)} onChange={e => setNewPrivs(s => { const n = new Set(s); e.target.checked ? n.add(p) : n.delete(p); return n; })} />
+                      <span>{p}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button className="btn-primary" onClick={grantPrivs} disabled={!newPrivs.size}>Grant Selected</button>
+              <button className="btn-secondary text-red-500" onClick={revokeAll}>Revoke All</button>
+              <button className="btn-ghost ml-auto" onClick={() => setPrivTarget(null)}>Close</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
