@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock } from 'lucide-react';
+import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock, Pencil } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
@@ -74,6 +74,8 @@ export default function Billing() {
   const [promoCode, setPromoCode] = useState('');
   const [promoResult, setPromoResult] = useState<{ discount: number; promo: any } | null>(null);
   const [promoLoading, setPromoLoading] = useState(false);
+  const [editingClientId, setEditingClientId] = useState<number | null>(null);
+  const [editClientForm, setEditClientForm] = useState({ name: '', email: '', company: '', phone: '', address: '', notes: '' });
 
   async function load() {
     try {
@@ -209,6 +211,15 @@ export default function Billing() {
     if (!confirm('Delete this client? All related invoices will also be deleted.')) return;
     try { await axios.delete(`/api/billing/clients/${id}`); toast.success('Client deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function updateClient(id: number) {
+    try {
+      await axios.put(`/api/billing/clients/${id}`, editClientForm, { headers: authHeaders() });
+      toast.success('Client updated');
+      setEditingClientId(null);
+      load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
   async function validatePromo() {
@@ -607,49 +618,78 @@ STRIPE_PUBLISHABLE_KEY=pk_live_...`}</pre>
                 {clients.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-16 text-center text-sm text-slate-400">No clients yet</td></tr>
                 ) : clients.map(c => (
-                  <tr key={c.id} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-8 w-8 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
-                          <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{c.name[0].toUpperCase()}</span>
+                  <Fragment key={c.id}>
+                    <tr className={rowCls}>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-8 w-8 rounded-full bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center flex-shrink-0">
+                            <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">{c.name[0].toUpperCase()}</span>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-slate-900 dark:text-slate-100">{c.name}</div>
+                            <div className="text-xs text-slate-400 dark:text-slate-500">{c.email}</div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-semibold text-slate-900 dark:text-slate-100">{c.name}</div>
-                          <div className="text-xs text-slate-400 dark:text-slate-500">{c.email}</div>
+                      </td>
+                      <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{c.company || '—'}</td>
+                      <td className="table-cell">
+                        <span className="badge-blue">{c.account_count}</span>
+                      </td>
+                      <td className="table-cell">
+                        {c.balance_due > 0
+                          ? <span className="font-semibold text-rose-600 dark:text-rose-400">{fmt(c.balance_due)}</span>
+                          : <span className="text-emerald-600 dark:text-emerald-400 font-semibold">—</span>}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <input
+                            type="password"
+                            placeholder="Portal password"
+                            value={portalPw[c.id] || ''}
+                            onChange={e => setPortalPw(p => ({ ...p, [c.id]: e.target.value }))}
+                            className="input text-xs py-1 px-2 w-28"
+                          />
+                          <button
+                            onClick={() => setPortalPassword(c.id)}
+                            className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
+                            title={`${(c as any).portal_enabled ? 'Update' : 'Enable'} portal access`}>
+                            <Lock size={13} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingClientId(editingClientId === c.id ? null : c.id);
+                              setEditClientForm({ name: c.name, email: c.email, company: c.company || '', phone: '', address: '', notes: '' });
+                            }}
+                            className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30"
+                            title="Edit client">
+                            <Pencil size={13} />
+                          </button>
+                          <button onClick={() => deleteClient(c.id)}
+                            className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                            <XCircle size={13} />
+                          </button>
                         </div>
-                      </div>
-                    </td>
-                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{c.company || '—'}</td>
-                    <td className="table-cell">
-                      <span className="badge-blue">{c.account_count}</span>
-                    </td>
-                    <td className="table-cell">
-                      {c.balance_due > 0
-                        ? <span className="font-semibold text-rose-600 dark:text-rose-400">{fmt(c.balance_due)}</span>
-                        : <span className="text-emerald-600 dark:text-emerald-400 font-semibold">—</span>}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <input
-                          type="password"
-                          placeholder="Portal password"
-                          value={portalPw[c.id] || ''}
-                          onChange={e => setPortalPw(p => ({ ...p, [c.id]: e.target.value }))}
-                          className="input text-xs py-1 px-2 w-28"
-                        />
-                        <button
-                          onClick={() => setPortalPassword(c.id)}
-                          className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
-                          title={`${(c as any).portal_enabled ? 'Update' : 'Enable'} portal access`}>
-                          <Lock size={13} />
-                        </button>
-                        <button onClick={() => deleteClient(c.id)}
-                          className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                          <XCircle size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {editingClientId === c.id && (
+                      <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                        <td colSpan={5} className="px-4 py-4">
+                          <div className="grid grid-cols-3 gap-3 max-w-2xl">
+                            <div><label className="label">Name</label><input className="input text-sm" value={editClientForm.name} onChange={e => setEditClientForm(f => ({ ...f, name: e.target.value }))} /></div>
+                            <div><label className="label">Email</label><input className="input text-sm" value={editClientForm.email} onChange={e => setEditClientForm(f => ({ ...f, email: e.target.value }))} /></div>
+                            <div><label className="label">Company</label><input className="input text-sm" value={editClientForm.company} onChange={e => setEditClientForm(f => ({ ...f, company: e.target.value }))} /></div>
+                            <div><label className="label">Phone</label><input className="input text-sm" value={editClientForm.phone} onChange={e => setEditClientForm(f => ({ ...f, phone: e.target.value }))} /></div>
+                            <div><label className="label">Address</label><input className="input text-sm" value={editClientForm.address} onChange={e => setEditClientForm(f => ({ ...f, address: e.target.value }))} /></div>
+                            <div><label className="label">Notes</label><input className="input text-sm" value={editClientForm.notes} onChange={e => setEditClientForm(f => ({ ...f, notes: e.target.value }))} /></div>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button className="btn-primary text-sm" onClick={() => updateClient(c.id)}>Save</button>
+                            <button className="btn-secondary text-sm" onClick={() => setEditingClientId(null)}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

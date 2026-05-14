@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Plus, Trash2, Play, Tag, CreditCard, X } from 'lucide-react';
+import { useEffect, useState, Fragment } from 'react';
+import { Plus, Trash2, Play, Tag, CreditCard, X, Pencil } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/billing${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -20,6 +20,8 @@ export default function RecurringBilling() {
   const [form, setForm] = useState<any>(blankSchedule);
   const [applyingCredit, setApplyingCredit] = useState<number | null>(null);
   const [applyInvoiceId, setApplyInvoiceId] = useState('');
+  const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
+  const [editScheduleForm, setEditScheduleForm] = useState({ amount: '', cycle: 'monthly', next_run: '', notes: '' });
 
   useEffect(() => {
     api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
@@ -66,6 +68,15 @@ export default function RecurringBilling() {
   async function togglePromo(id: number, active: boolean) {
     await api(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: !active }) });
     api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
+  }
+
+  async function updateSchedule(id: number) {
+    const r = await api(`/recurring/${id}`, { method: 'PUT', body: JSON.stringify(editScheduleForm) });
+    const d = await r.json();
+    if (d.error) { toast.error(d.error); return; }
+    toast.success('Schedule updated');
+    setEditingScheduleId(null);
+    api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
   }
 
   async function applyCredit(creditId: number) {
@@ -168,20 +179,58 @@ export default function RecurringBilling() {
             <tbody>
               {schedules.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-slate-500">No schedules</td></tr>}
               {schedules.map((s: any) => (
-                <tr key={s.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="table-cell font-medium">{s.client_name}</td>
-                  <td className="table-cell">{s.currency} {Number(s.amount).toFixed(2)}</td>
-                  <td className="table-cell capitalize">{s.cycle}</td>
-                  <td className="table-cell text-xs">{s.next_run}</td>
-                  <td className="table-cell text-xs text-slate-500">{s.last_run || '—'}</td>
-                  <td className="table-cell"><span className={`badge-${s.status === 'active' ? 'success' : 'warning'}`}>{s.status}</span></td>
-                  <td className="table-cell">
-                    <div className="flex gap-1">
-                      <button className="btn-icon text-indigo-500" title="Generate invoice now" onClick={() => runNow(s.id)}><Play size={13} /></button>
-                      <button className="btn-icon text-red-500" onClick={() => { api(`/recurring/${s.id}`, { method: 'DELETE' }); setSchedules(ss => ss.filter(x => x.id !== s.id)); }}><Trash2 size={13} /></button>
-                    </div>
-                  </td>
-                </tr>
+                <Fragment key={s.id}>
+                  <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-medium">{s.client_name}</td>
+                    <td className="table-cell">{s.currency} {Number(s.amount).toFixed(2)}</td>
+                    <td className="table-cell capitalize">{s.cycle}</td>
+                    <td className="table-cell text-xs">{s.next_run}</td>
+                    <td className="table-cell text-xs text-slate-500">{s.last_run || '—'}</td>
+                    <td className="table-cell"><span className={`badge-${s.status === 'active' ? 'success' : 'warning'}`}>{s.status}</span></td>
+                    <td className="table-cell">
+                      <div className="flex gap-1">
+                        <button className="btn-icon text-indigo-500" title="Generate invoice now" onClick={() => runNow(s.id)}><Play size={13} /></button>
+                        <button className="btn-icon text-sky-500" title="Edit schedule" onClick={() => {
+                          setEditingScheduleId(editingScheduleId === s.id ? null : s.id);
+                          setEditScheduleForm({ amount: String(s.amount), cycle: s.cycle, next_run: s.next_run || '', notes: s.notes || '' });
+                        }}><Pencil size={13} /></button>
+                        <button className="btn-icon text-red-500" onClick={() => { api(`/recurring/${s.id}`, { method: 'DELETE' }); setSchedules(ss => ss.filter(x => x.id !== s.id)); }}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                  {editingScheduleId === s.id && (
+                    <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                      <td colSpan={7} className="px-4 py-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div>
+                            <label className="label">Amount</label>
+                            <input className="input text-sm w-28" type="number" step="0.01" value={editScheduleForm.amount} onChange={e => setEditScheduleForm(f => ({ ...f, amount: e.target.value }))} />
+                          </div>
+                          <div>
+                            <label className="label">Cycle</label>
+                            <select className="input text-sm" value={editScheduleForm.cycle} onChange={e => setEditScheduleForm(f => ({ ...f, cycle: e.target.value }))}>
+                              <option value="weekly">Weekly</option>
+                              <option value="monthly">Monthly</option>
+                              <option value="yearly">Yearly</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="label">Next Run</label>
+                            <input className="input text-sm" type="date" value={editScheduleForm.next_run} onChange={e => setEditScheduleForm(f => ({ ...f, next_run: e.target.value }))} />
+                          </div>
+                          <div className="flex-1 min-w-36">
+                            <label className="label">Notes</label>
+                            <input className="input text-sm" value={editScheduleForm.notes} onChange={e => setEditScheduleForm(f => ({ ...f, notes: e.target.value }))} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button className="btn-primary text-sm" onClick={() => updateSchedule(s.id)}>Save</button>
+                            <button className="btn-ghost text-sm" onClick={() => setEditingScheduleId(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

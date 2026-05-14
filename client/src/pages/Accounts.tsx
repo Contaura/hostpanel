@@ -1,6 +1,6 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, Fragment } from 'react';
 import axios from 'axios';
-import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen } from 'lucide-react';
+import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Account {
@@ -39,6 +39,9 @@ export default function Accounts() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [usageData, setUsageData] = useState<Record<number, any>>({});
   const [loading, setLoading]   = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+  const [editAccountForm, setEditAccountForm] = useState({ plan_id: '', client_id: '', notes: '', expires_at: '' });
+  const [expiryChecking, setExpiryChecking] = useState(false);
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
     plan_id: '', client_id: '', notes: '', expires_at: '',
@@ -107,6 +110,25 @@ export default function Accounts() {
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  async function updateAccount(id: number) {
+    try {
+      await axios.patch(`/api/accounts/${id}`, editAccountForm);
+      toast.success('Account updated');
+      setEditingAccountId(null);
+      load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function runExpiryCheck() {
+    setExpiryChecking(true);
+    try {
+      const { data } = await axios.get('/api/accounts/check-expiry');
+      toast.success(`Expiry check complete — ${data.suspended ?? 0} account(s) suspended`);
+      load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Expiry check failed'); }
+    setExpiryChecking(false);
+  }
+
   const statusActions: Record<string, { label: string; target: string; icon: any; cls: string }[]> = {
     active:     [{ label: 'Suspend',   target: 'suspended',  icon: Ban,          cls: 'hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30' }],
     suspended:  [{ label: 'Reactivate', target: 'active',   icon: Power,        cls: 'hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30' },
@@ -129,6 +151,12 @@ export default function Accounts() {
         </div>
         <div className="flex gap-2">
           <button onClick={load} className="btn-secondary"><RefreshCw size={14} /></button>
+          <button onClick={runExpiryCheck} disabled={expiryChecking} className="btn-secondary" title="Suspend all accounts past their expiry date">
+            {expiryChecking
+              ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              : <CalendarClock size={14} />}
+            Expiry Check
+          </button>
           <button onClick={() => setShowForm(v => !v)} className="btn-primary">
             <Plus size={14} /> New Account
           </button>
@@ -234,8 +262,8 @@ export default function Accounts() {
                 <p className="text-slate-400 text-sm">No hosting accounts yet</p>
               </td></tr>
             ) : accounts.map(acc => (
-              <>
-                <tr key={acc.id} className={rowCls}>
+              <Fragment key={acc.id}>
+                <tr className={rowCls}>
                   <td className="table-cell">
                     <div className="flex items-center gap-2.5">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${acc.status === 'active' ? 'bg-emerald-400 animate-pulse' : acc.status === 'suspended' ? 'bg-amber-400' : 'bg-slate-400'}`} />
@@ -281,6 +309,12 @@ export default function Accounts() {
                         </button>
                       ))}
                       <button onClick={() => {
+                        setEditingAccountId(editingAccountId === acc.id ? null : acc.id);
+                        setEditAccountForm({ plan_id: String(acc.plan_name ? (plans.find(p => p.name === acc.plan_name)?.id ?? '') : ''), client_id: String(acc.client_name ? (clients.find(c => c.name === acc.client_name)?.id ?? '') : ''), notes: acc.notes || '', expires_at: acc.expires_at || '' });
+                      }} className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit metadata">
+                        <Pencil size={13} />
+                      </button>
+                      <button onClick={() => {
                         const next = expanded === acc.id ? null : acc.id;
                         setExpanded(next);
                         if (next) loadUsage(acc.id);
@@ -307,8 +341,42 @@ export default function Accounts() {
                     </div>
                   </td>
                 </tr>
+                {editingAccountId === acc.id && (
+                  <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                    <td colSpan={6} className="px-5 py-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
+                        <div>
+                          <label className="label">Plan</label>
+                          <select className="input text-sm" value={editAccountForm.plan_id} onChange={e => setEditAccountForm(f => ({ ...f, plan_id: e.target.value }))}>
+                            <option value="">No plan</option>
+                            {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Client</label>
+                          <select className="input text-sm" value={editAccountForm.client_id} onChange={e => setEditAccountForm(f => ({ ...f, client_id: e.target.value }))}>
+                            <option value="">No client</option>
+                            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Expiry Date</label>
+                          <input type="date" className="input text-sm" value={editAccountForm.expires_at} onChange={e => setEditAccountForm(f => ({ ...f, expires_at: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="label">Notes</label>
+                          <input className="input text-sm" value={editAccountForm.notes} onChange={e => setEditAccountForm(f => ({ ...f, notes: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button className="btn-primary text-sm" onClick={() => updateAccount(acc.id)}>Save</button>
+                        <button className="btn-secondary text-sm" onClick={() => setEditingAccountId(null)}>Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {expanded === acc.id && (
-                  <tr key={`${acc.id}-detail`} className="bg-slate-50/60 dark:bg-slate-700/20 border-b border-slate-100 dark:border-slate-700/40">
+                  <tr className="bg-slate-50/60 dark:bg-slate-700/20 border-b border-slate-100 dark:border-slate-700/40">
                     <td colSpan={6} className="px-6 py-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
@@ -341,7 +409,7 @@ export default function Accounts() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
