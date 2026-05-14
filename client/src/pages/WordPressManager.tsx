@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Power, Trash2, Download, Zap, Upload } from 'lucide-react';
+import { RefreshCw, Power, Trash2, Download, Zap, Upload, Search } from 'lucide-react';
 import { useRef } from 'react';
 import { useToast } from '../components/Toast';
 
@@ -22,6 +22,8 @@ export default function WordPressManager() {
   const [srForm, setSrForm] = useState({ search: '', replace: '' });
   const [uploading, setUploading] = useState(false);
   const [uploadOutput, setUploadOutput] = useState('');
+  const [pluginSearch, setPluginSearch] = useState('');
+  const [themeSearch, setThemeSearch] = useState('');
   const pluginZipRef = useRef<HTMLInputElement>(null);
   const themeZipRef = useRef<HTMLInputElement>(null);
 
@@ -51,16 +53,22 @@ export default function WordPressManager() {
   }
 
   async function togglePlugin(slug: string, active: string) {
-    await api(`/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
-    const r = await api(`/${selected}/plugins`).then(r => r.json());
-    setPlugins(Array.isArray(r) ? r : []);
+    setLoading(true);
+    try {
+      await api(`/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
+      const r = await api(`/${selected}/plugins`).then(r => r.json());
+      setPlugins(Array.isArray(r) ? r : []);
+    } finally { setLoading(false); }
   }
 
   async function activateTheme(slug: string) {
-    await api(`/${selected}/themes/${slug}/activate`, { method: 'POST' });
-    const r = await api(`/${selected}/themes`).then(r => r.json());
-    setThemes(Array.isArray(r) ? r : []);
-    toast.success(`Theme ${slug} activated`);
+    setLoading(true);
+    try {
+      await api(`/${selected}/themes/${slug}/activate`, { method: 'POST' });
+      const r = await api(`/${selected}/themes`).then(r => r.json());
+      setThemes(Array.isArray(r) ? r : []);
+      toast.success(`Theme ${slug} activated`);
+    } finally { setLoading(false); }
   }
 
   async function uploadZip(type: 'plugins' | 'themes', file: File) {
@@ -142,64 +150,90 @@ export default function WordPressManager() {
           )}
 
           {tab === 'plugins' && (
-            <div className="card overflow-hidden p-0">
-              <table className="w-full text-sm">
-                <thead><tr>{['Plugin', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                <tbody>
-                  {plugins.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No plugins found</td></tr>}
-                  {plugins.map((p: any) => (
-                    <tr key={p.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="table-cell font-medium">{p.title || p.name}</td>
-                      <td className="table-cell text-xs text-slate-500">{p.version}</td>
-                      <td className="table-cell">
-                        <button onClick={() => togglePlugin(p.name, p.status)} className={`text-xs px-2 py-0.5 rounded-full font-medium ${p.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
-                          {p.status}
-                        </button>
-                      </td>
-                      <td className="table-cell">
-                        {p.update === 'available' && (
-                          <button className="btn-ghost text-xs text-amber-600" onClick={() => run(`/${selected}/plugins/${p.name}/update`, `${p.name} updated`)}>
-                            <Download size={11} className="mr-1" />Update
-                          </button>
-                        )}
-                      </td>
-                      <td className="table-cell">
-                        <button className="btn-icon text-red-500" onClick={() => run(`/${selected}/plugins/${p.name}/delete`, `${p.name} deleted`)}><Trash2 size={13} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search plugins…" value={pluginSearch} onChange={e => setPluginSearch(e.target.value)} />
+                </div>
+              </div>
+              <div className="card overflow-hidden p-0">
+                <table className="w-full text-sm">
+                  <thead><tr>{['Plugin', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(() => {
+                      const q = pluginSearch.trim().toLowerCase();
+                      const visible = q ? plugins.filter((p: any) => [p.title, p.name, p.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : plugins;
+                      if (plugins.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No plugins found</td></tr>;
+                      if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No plugins match "{pluginSearch}"</td></tr>;
+                      return visible.map((p: any) => (
+                        <tr key={p.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="table-cell font-medium">{p.title || p.name}</td>
+                          <td className="table-cell text-xs text-slate-500">{p.version}</td>
+                          <td className="table-cell">
+                            <button onClick={() => togglePlugin(p.name, p.status)} disabled={loading} className={`text-xs px-2 py-0.5 rounded-full font-medium disabled:opacity-50 ${p.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
+                              {p.status}
+                            </button>
+                          </td>
+                          <td className="table-cell">
+                            {p.update === 'available' && (
+                              <button className="btn-ghost text-xs text-amber-600" disabled={loading} onClick={() => run(`/${selected}/plugins/${p.name}/update`, `${p.name} updated`)}>
+                                <Download size={11} className="mr-1" />Update
+                              </button>
+                            )}
+                          </td>
+                          <td className="table-cell">
+                            <button className="btn-icon text-red-500" disabled={loading} onClick={() => run(`/${selected}/plugins/${p.name}/delete`, `${p.name} deleted`)}><Trash2 size={13} /></button>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
           {tab === 'themes' && (
-            <div className="card overflow-hidden p-0">
-              <table className="w-full text-sm">
-                <thead><tr>{['Theme', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                <tbody>
-                  {themes.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No themes found</td></tr>}
-                  {themes.map((t: any) => (
-                    <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="table-cell font-medium">{t.title || t.name}</td>
-                      <td className="table-cell text-xs text-slate-500">{t.version}</td>
-                      <td className="table-cell">
-                        {t.status === 'active'
-                          ? <span className="badge-success text-xs">Active</span>
-                          : <button className="btn-ghost text-xs" onClick={() => activateTheme(t.name)}><Power size={11} className="mr-1" />Activate</button>}
-                      </td>
-                      <td className="table-cell">
-                        {t.update === 'available' && (
-                          <button className="btn-ghost text-xs text-amber-600" onClick={() => run(`/${selected}/themes/${t.name}/update`, `${t.name} updated`)}>
-                            <Download size={11} className="mr-1" />Update
-                          </button>
-                        )}
-                      </td>
-                      <td className="table-cell text-slate-400 text-xs">{t.status !== 'active' ? '—' : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search themes…" value={themeSearch} onChange={e => setThemeSearch(e.target.value)} />
+                </div>
+              </div>
+              <div className="card overflow-hidden p-0">
+                <table className="w-full text-sm">
+                  <thead><tr>{['Theme', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(() => {
+                      const q = themeSearch.trim().toLowerCase();
+                      const visible = q ? themes.filter((t: any) => [t.title, t.name, t.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : themes;
+                      if (themes.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No themes found</td></tr>;
+                      if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No themes match "{themeSearch}"</td></tr>;
+                      return visible.map((t: any) => (
+                        <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="table-cell font-medium">{t.title || t.name}</td>
+                          <td className="table-cell text-xs text-slate-500">{t.version}</td>
+                          <td className="table-cell">
+                            {t.status === 'active'
+                              ? <span className="badge-success text-xs">Active</span>
+                              : <button className="btn-ghost text-xs" disabled={loading} onClick={() => activateTheme(t.name)}><Power size={11} className="mr-1" />Activate</button>}
+                          </td>
+                          <td className="table-cell">
+                            {t.update === 'available' && (
+                              <button className="btn-ghost text-xs text-amber-600" disabled={loading} onClick={() => run(`/${selected}/themes/${t.name}/update`, `${t.name} updated`)}>
+                                <Download size={11} className="mr-1" />Update
+                              </button>
+                            )}
+                          </td>
+                          <td className="table-cell text-slate-400 text-xs">{t.status !== 'active' ? '—' : ''}</td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

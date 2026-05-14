@@ -28,6 +28,7 @@ export default function AppManager() {
   const [stagings, setStagings] = useState<Record<string, any>>({});
   const [stageForm, setStageForm] = useState<Record<string, { port: string; branch: string }>>({});
   const [showStageForm, setShowStageForm] = useState<string | null>(null);
+  const [controlling, setControlling] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -48,8 +49,10 @@ export default function AppManager() {
   }
 
   async function control(name: string, action: 'start' | 'stop' | 'restart') {
+    setControlling(name);
     try { await apost(`/api/apps/${name}/${action}`); success(`App ${action}ed`); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setControlling(null); }
   }
 
   async function remove(name: string) {
@@ -151,9 +154,9 @@ export default function AppManager() {
               </div>
 
               <div className="flex items-center gap-1">
-                {app.status !== 'running' && <button className="btn-ghost text-emerald-600" title="Start" onClick={() => control(app.name, 'start')}><Play size={14} /></button>}
-                {app.status === 'running'  && <button className="btn-ghost text-orange-500" title="Stop"  onClick={() => control(app.name, 'stop')}><Square size={14} /></button>}
-                <button className="btn-ghost text-blue-500" title="Restart" onClick={() => control(app.name, 'restart')}><RotateCcw size={14} /></button>
+                {app.status !== 'running' && <button className="btn-ghost text-emerald-600" title="Start" disabled={controlling === app.name} onClick={() => control(app.name, 'start')}><Play size={14} /></button>}
+                {app.status === 'running'  && <button className="btn-ghost text-orange-500" title="Stop"  disabled={controlling === app.name} onClick={() => control(app.name, 'stop')}><Square size={14} /></button>}
+                <button className="btn-ghost text-blue-500" title="Restart" disabled={controlling === app.name} onClick={() => control(app.name, 'restart')}><RotateCcw size={14} /></button>
                 <button className="btn-ghost" title="Logs" onClick={() => { setExpanded(expanded === app.name ? null : app.name); fetchLogs(app.name); }}>
                   <Terminal size={14} />
                 </button>

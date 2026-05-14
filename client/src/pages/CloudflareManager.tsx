@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, RefreshCw, Cloud, CloudOff, Zap } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Cloud, CloudOff, Zap, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/cloudflare${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -13,6 +13,7 @@ export default function CloudflareManager() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [token, setToken] = useState('');
+  const [dnsSearch, setDnsSearch] = useState('');
 
   useEffect(() => { loadZones(); }, []);
 
@@ -126,29 +127,42 @@ export default function CloudflareManager() {
             </div>
 
             {tab === 'dns' && (
-              <div className="card overflow-hidden p-0">
-                <table className="w-full text-sm">
-                  <thead><tr>{['Type', 'Name', 'Content', 'Proxy', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                  <tbody>
-                    {dns.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No records</td></tr>}
-                    {dns.map((r: any) => (
-                      <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="table-cell"><span className="badge-info text-xs">{r.type}</span></td>
-                        <td className="table-cell text-xs font-mono">{r.name}</td>
-                        <td className="table-cell text-xs text-slate-500 max-w-[200px] truncate">{r.content}</td>
-                        <td className="table-cell">
-                          <button
-                            className={`text-xs px-2 py-0.5 rounded-full ${r.proxied ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}
-                            onClick={() => toggleProxy(selected.cf_zone_id, r.id, r.proxied)}
-                          >
-                            {r.proxied ? '☁ Proxied' : '⬜ DNS only'}
-                          </button>
-                        </td>
-                        <td className="table-cell text-xs text-slate-400">{r.ttl === 1 ? 'Auto' : `${r.ttl}s`}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input className="input pl-8 w-48 text-sm" placeholder="Search DNS records…" value={dnsSearch} onChange={e => setDnsSearch(e.target.value)} />
+                  </div>
+                </div>
+                <div className="card overflow-hidden p-0">
+                  <table className="w-full text-sm">
+                    <thead><tr>{['Type', 'Name', 'Content', 'Proxy', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {(() => {
+                        const q = dnsSearch.trim().toLowerCase();
+                        const visible = q ? dns.filter((r: any) => [r.type, r.name, r.content].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : dns;
+                        if (dns.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No records</td></tr>;
+                        if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No records match "{dnsSearch}"</td></tr>;
+                        return visible.map((r: any) => (
+                          <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="table-cell"><span className="badge-info text-xs">{r.type}</span></td>
+                            <td className="table-cell text-xs font-mono">{r.name}</td>
+                            <td className="table-cell text-xs text-slate-500 max-w-[200px] truncate">{r.content}</td>
+                            <td className="table-cell">
+                              <button
+                                className={`text-xs px-2 py-0.5 rounded-full ${r.proxied ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}
+                                onClick={() => toggleProxy(selected.cf_zone_id, r.id, r.proxied)}
+                              >
+                                {r.proxied ? '☁ Proxied' : '⬜ DNS only'}
+                              </button>
+                            </td>
+                            <td className="table-cell text-xs text-slate-400">{r.ttl === 1 ? 'Auto' : `${r.ttl}s`}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
