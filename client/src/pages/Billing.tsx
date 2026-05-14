@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock, Pencil } from 'lucide-react';
+import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
@@ -76,6 +76,10 @@ export default function Billing() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [editingClientId, setEditingClientId] = useState<number | null>(null);
   const [editClientForm, setEditClientForm] = useState({ name: '', email: '', company: '', phone: '', address: '', notes: '' });
+  const [recordingPaymentId, setRecordingPaymentId] = useState<number | null>(null);
+  const [paymentForm, setPaymentForm] = useState({ amount: '', method: 'manual' });
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [clientSearch, setClientSearch] = useState('');
 
   async function load() {
     try {
@@ -197,13 +201,18 @@ export default function Billing() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
-  async function recordPayment(invoice: Invoice) {
-    const amount = prompt(`Record payment for ${invoice.invoice_number}\nOutstanding: ${fmt(invoice.amount, invoice.currency)}\n\nAmount paid:`);
-    if (!amount) return;
-    const method = prompt('Payment method (manual, bank_transfer, stripe, paypal, crypto):') || 'manual';
+  function openRecordPayment(inv: Invoice) {
+    if (recordingPaymentId === inv.id) { setRecordingPaymentId(null); return; }
+    setRecordingPaymentId(inv.id);
+    setPaymentForm({ amount: String(inv.amount), method: 'manual' });
+  }
+
+  async function submitPayment(inv: Invoice) {
     try {
-      await axios.post('/api/billing/payments', { invoice_id: invoice.id, amount: parseFloat(amount), method });
-      toast.success('Payment recorded'); load();
+      await axios.post('/api/billing/payments', { invoice_id: inv.id, amount: parseFloat(paymentForm.amount), method: paymentForm.method }, { headers: authHeaders() });
+      toast.success('Payment recorded');
+      setRecordingPaymentId(null);
+      load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
@@ -329,7 +338,11 @@ export default function Billing() {
       {/* ── Invoices ── */}
       {tab === 'invoices' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex items-center gap-2 justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search invoices…" value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
+            </div>
             <button onClick={() => setShowInvoiceForm(v => !v)} className="btn-primary">
               <Plus size={14} /> New Invoice
             </button>
@@ -414,59 +427,93 @@ export default function Billing() {
                 <th className="px-4 py-3 w-36" />
               </tr></thead>
               <tbody>
-                {invoices.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">No invoices yet</td></tr>
-                ) : invoices.map(inv => (
-                  <tr key={inv.id} className={rowCls}>
-                    <td className="table-cell font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">{inv.invoice_number}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{inv.client_name || '—'}</td>
-                    <td className="table-cell text-slate-400 dark:text-slate-500 text-xs hidden md:table-cell">{inv.account_domain || '—'}</td>
-                    <td className="table-cell font-semibold text-slate-900 dark:text-slate-100">{fmt(inv.amount, inv.currency)}</td>
-                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{inv.due_date}</td>
-                    <td className="table-cell"><span className={STATUS_STYLE[inv.status] || 'badge-gray'}>{inv.status}</span></td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        {/* PDF download */}
-                        <a href={`/api/billing/invoices/${inv.id}/pdf`} target="_blank" rel="noopener noreferrer"
-                          className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30" title="Download PDF">
-                          <Download size={13} />
-                        </a>
-                        {/* Email invoice */}
-                        <button onClick={() => emailInvoice(inv.id)} disabled={emailingId === inv.id}
-                          className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Email invoice to client">
-                          {emailingId === inv.id ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : <Mail size={13} />}
-                        </button>
-                        {/* Stripe pay */}
-                        {inv.status !== 'paid' && inv.status !== 'cancelled' && stripeConfigured && (
-                          <button onClick={() => payWithStripe(inv)} disabled={payingId === inv.id}
-                            className="btn-icon hover:!text-violet-600 dark:hover:!text-violet-400 hover:!bg-violet-50 dark:hover:!bg-violet-900/30" title="Pay with Stripe">
-                            {payingId === inv.id ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : <CreditCard size={13} />}
-                          </button>
-                        )}
-                        {/* PayPal pay */}
-                        {inv.status !== 'paid' && inv.status !== 'cancelled' && paypalConfigured && (
-                          <button onClick={() => payWithPayPal(inv)} disabled={payingId === inv.id}
-                            className="btn-icon hover:!text-blue-600 hover:!bg-blue-50 dark:hover:!bg-blue-900/30" title="Pay with PayPal">
-                            <ExternalLink size={13} />
-                          </button>
-                        )}
-                        {inv.status !== 'paid' && (
-                          <button onClick={() => recordPayment(inv)}
-                            className="btn-icon hover:!text-emerald-600 dark:hover:!text-emerald-400 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30"
-                            title="Record manual payment"><CheckCircle size={13} /></button>
-                        )}
-                        {inv.status === 'unpaid' && (
-                          <button onClick={() => markStatus(inv.id, 'overdue')}
-                            className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
-                            title="Mark overdue"><Clock size={13} /></button>
-                        )}
-                        <button onClick={() => deleteInvoice(inv.id)}
-                          className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
-                          title="Delete"><XCircle size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {(() => {
+                  const q = invoiceSearch.trim().toLowerCase();
+                  const visible = q ? invoices.filter(inv =>
+                    [inv.invoice_number, inv.client_name, inv.status, inv.account_domain]
+                      .some(v => v?.toLowerCase().includes(q))
+                  ) : invoices;
+                  if (invoices.length === 0) return (
+                    <tr><td colSpan={7} className="px-4 py-16 text-center text-sm text-slate-400">No invoices yet</td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400">No invoices match "{invoiceSearch}"</td></tr>
+                  );
+                  return visible.map(inv => (
+                    <Fragment key={inv.id}>
+                      <tr className={rowCls}>
+                        <td className="table-cell font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">{inv.invoice_number}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{inv.client_name || '—'}</td>
+                        <td className="table-cell text-slate-400 dark:text-slate-500 text-xs hidden md:table-cell">{inv.account_domain || '—'}</td>
+                        <td className="table-cell font-semibold text-slate-900 dark:text-slate-100">{fmt(inv.amount, inv.currency)}</td>
+                        <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{inv.due_date}</td>
+                        <td className="table-cell"><span className={STATUS_STYLE[inv.status] || 'badge-gray'}>{inv.status}</span></td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                            <a href={`/api/billing/invoices/${inv.id}/pdf`} target="_blank" rel="noopener noreferrer"
+                              className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30" title="Download PDF">
+                              <Download size={13} />
+                            </a>
+                            <button onClick={() => emailInvoice(inv.id)} disabled={emailingId === inv.id}
+                              className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Email invoice to client">
+                              {emailingId === inv.id ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : <Mail size={13} />}
+                            </button>
+                            {inv.status !== 'paid' && inv.status !== 'cancelled' && stripeConfigured && (
+                              <button onClick={() => payWithStripe(inv)} disabled={payingId === inv.id}
+                                className="btn-icon hover:!text-violet-600 dark:hover:!text-violet-400 hover:!bg-violet-50 dark:hover:!bg-violet-900/30" title="Pay with Stripe">
+                                {payingId === inv.id ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : <CreditCard size={13} />}
+                              </button>
+                            )}
+                            {inv.status !== 'paid' && inv.status !== 'cancelled' && paypalConfigured && (
+                              <button onClick={() => payWithPayPal(inv)} disabled={payingId === inv.id}
+                                className="btn-icon hover:!text-blue-600 hover:!bg-blue-50 dark:hover:!bg-blue-900/30" title="Pay with PayPal">
+                                <ExternalLink size={13} />
+                              </button>
+                            )}
+                            {inv.status !== 'paid' && (
+                              <button onClick={() => openRecordPayment(inv)}
+                                className={`btn-icon hover:!text-emerald-600 dark:hover:!text-emerald-400 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30 ${recordingPaymentId === inv.id ? '!text-emerald-600 !bg-emerald-50 dark:!bg-emerald-900/30' : ''}`}
+                                title="Record manual payment"><CheckCircle size={13} /></button>
+                            )}
+                            {inv.status === 'unpaid' && (
+                              <button onClick={() => markStatus(inv.id, 'overdue')}
+                                className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
+                                title="Mark overdue"><Clock size={13} /></button>
+                            )}
+                            <button onClick={() => deleteInvoice(inv.id)}
+                              className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
+                              title="Delete"><XCircle size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                      {recordingPaymentId === inv.id && (
+                        <tr className="bg-emerald-50/60 dark:bg-emerald-900/10 border-b border-slate-100 dark:border-slate-700/40">
+                          <td colSpan={7} className="px-4 py-3">
+                            <div className="flex items-end gap-3 flex-wrap">
+                              <div>
+                                <label className="label">Amount</label>
+                                <input type="number" step="0.01" min="0" className="input text-sm w-32"
+                                  value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} />
+                              </div>
+                              <div>
+                                <label className="label">Method</label>
+                                <select className="input text-sm" value={paymentForm.method} onChange={e => setPaymentForm(f => ({ ...f, method: e.target.value }))}>
+                                  <option value="manual">Manual</option>
+                                  <option value="bank_transfer">Bank Transfer</option>
+                                  <option value="stripe">Stripe</option>
+                                  <option value="paypal">PayPal</option>
+                                  <option value="crypto">Crypto</option>
+                                </select>
+                              </div>
+                              <button className="btn-primary text-sm" onClick={() => submitPayment(inv)}>Record</button>
+                              <button className="btn-secondary text-sm" onClick={() => setRecordingPaymentId(null)}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
@@ -559,7 +606,11 @@ STRIPE_PUBLISHABLE_KEY=pk_live_...`}</pre>
       {/* ── Clients ── */}
       {tab === 'clients' && (
         <div className="space-y-4">
-          <div className="flex justify-end">
+          <div className="flex items-center gap-2 justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search clients…" value={clientSearch} onChange={e => setClientSearch(e.target.value)} />
+            </div>
             <button onClick={() => setShowClientForm(v => !v)} className="btn-primary">
               <Plus size={14} /> Add Client
             </button>
@@ -615,9 +666,18 @@ STRIPE_PUBLISHABLE_KEY=pk_live_...`}</pre>
                 <th className="px-4 py-3 w-12" />
               </tr></thead>
               <tbody>
-                {clients.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-16 text-center text-sm text-slate-400">No clients yet</td></tr>
-                ) : clients.map(c => (
+                {(() => {
+                  const q = clientSearch.trim().toLowerCase();
+                  const visible = q ? clients.filter(c =>
+                    [c.name, c.email, c.company].some(v => v?.toLowerCase().includes(q))
+                  ) : clients;
+                  if (clients.length === 0) return (
+                    <tr><td colSpan={5} className="px-4 py-16 text-center text-sm text-slate-400">No clients yet</td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-sm text-slate-400">No clients match "{clientSearch}"</td></tr>
+                  );
+                  return visible.map(c => (
                   <Fragment key={c.id}>
                     <tr className={rowCls}>
                       <td className="table-cell">
@@ -690,7 +750,8 @@ STRIPE_PUBLISHABLE_KEY=pk_live_...`}</pre>
                       </tr>
                     )}
                   </Fragment>
-                ))}
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
