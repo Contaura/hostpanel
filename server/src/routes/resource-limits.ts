@@ -135,4 +135,47 @@ router.delete('/nginx/vhosts/:domain', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Disk quota enforcement (setquota) ───────────────────── */
+
+router.get('/disk-quotas', async (_req: Request, res: Response) => {
+  try {
+    const { stdout } = await execAsync("repquota -a -s 2>/dev/null || echo ''");
+    const lines = stdout.split('\n').filter(l => /^\w/.test(l) && !l.startsWith('Block') && !l.startsWith('Disk'));
+    const quotas = lines.map(l => {
+      const parts = l.trim().split(/\s+/);
+      if (parts.length < 6) return null;
+      return {
+        user: parts[0],
+        block_used: parts[1] || '0',
+        block_soft: parts[2] || '0',
+        block_hard: parts[3] || '0',
+        inode_used: parts[4] || '0',
+        inode_soft: parts[5] || '0',
+        inode_hard: parts[6] || '0',
+      };
+    }).filter(Boolean);
+    res.json(quotas);
+  } catch {
+    res.json([]);
+  }
+});
+
+router.post('/disk-quotas/:username', async (req: Request, res: Response) => {
+  const { username } = req.params;
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  const { block_soft_mb, block_hard_mb } = req.body;
+  if (!block_soft_mb && !block_hard_mb) return res.status(400).json({ error: 'Provide block_soft_mb or block_hard_mb' });
+
+  const soft = Math.round((parseInt(block_soft_mb) || 0) * 1024);
+  const hard = Math.round((parseInt(block_hard_mb) || soft * 1.1) * 1024);
+
+  try {
+    await execAsync(`setquota -u ${username} ${soft} ${hard} 0 0 / 2>&1`);
+    res.json({ success: true, username, block_soft_kb: soft, block_hard_kb: hard });
+  } catch (err: any) {
+    res.status(500).json({ error: err.stderr || err.message });
+  }
+});
+
 export default router;
+

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useToast } from '../components/Toast';
 import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield } from 'lucide-react';
 
-type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas';
+type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam';
 
 interface Forwarder { source: string; dest: string }
 interface Autoresponder { id: number; email: string; subject: string; body: string; start_date: string; end_date: string; enabled: number }
@@ -34,6 +34,11 @@ export default function EmailExtras() {
 
   // Quotas
   const [quotas, setQuotas] = useState<any[]>([]);
+
+  // Per-domain spam
+  const [dsDomain, setDsDomain] = useState('');
+  const [dsRules, setDsRules] = useState<any[]>([]);
+  const [dsForm, setDsForm] = useState({ type: 'whitelist', address: '' });
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
@@ -75,11 +80,18 @@ export default function EmailExtras() {
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
+  async function loadDomainSpam() {
+    if (!dsDomain.trim()) return;
+    try { const r = await api(`/api/email-extras/spam-rules/${dsDomain.trim()}`); setDsRules(r.data); }
+    catch { setDsRules([]); }
+  }
+
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'forwarders', label: 'Forwarders', icon: Forward },
     { id: 'autoresponders', label: 'Autoresponders', icon: Mail },
     { id: 'spam', label: 'Spam Filter', icon: Shield },
     { id: 'quotas', label: 'Disk Quotas', icon: Mail },
+    { id: 'domain-spam', label: 'Per-Domain Rules', icon: Shield },
   ];
 
   return (
@@ -206,6 +218,55 @@ export default function EmailExtras() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab === 'domain-spam' && (
+        <div className="space-y-4">
+          <div className="card p-4 flex gap-2">
+            <input className="input flex-1" placeholder="Domain (e.g. example.com)" value={dsDomain} onChange={e => { setDsDomain(e.target.value); setDsRules([]); }} />
+            <button className="btn-secondary" onClick={loadDomainSpam}>Load Rules</button>
+          </div>
+
+          {dsDomain && (
+            <div className="card p-4 space-y-4">
+              <div className="flex gap-2">
+                <select className="input w-36" value={dsForm.type} onChange={e => setDsForm(f => ({ ...f, type: e.target.value }))}>
+                  <option value="whitelist">Whitelist</option>
+                  <option value="blacklist">Blacklist</option>
+                </select>
+                <input className="input flex-1" placeholder="email@example.com or *@domain.com" value={dsForm.address} onChange={e => setDsForm(f => ({ ...f, address: e.target.value }))} />
+                <button className="btn-primary" onClick={async () => {
+                  await post(`/api/email-extras/spam-rules/${dsDomain}`, dsForm);
+                  setDsForm({ type: 'whitelist', address: '' });
+                  success('Rule added'); loadDomainSpam();
+                }}><Plus size={14} /> Add</button>
+              </div>
+
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="table-header-cell">Type</th>
+                  <th className="table-header-cell">Address</th>
+                  <th className="px-4 py-3 w-12" />
+                </tr></thead>
+                <tbody>
+                  {dsRules.length === 0 && <tr><td colSpan={3} className="table-cell text-center text-slate-400 py-6">No rules — all emails are treated by global spam settings</td></tr>}
+                  {dsRules.map((r: any) => (
+                    <tr key={r.id} className="border-b border-slate-50 dark:border-slate-800">
+                      <td className="table-cell"><span className={`badge-${r.type === 'whitelist' ? 'success' : 'danger'} text-xs`}>{r.type}</span></td>
+                      <td className="table-cell font-mono text-xs">{r.address}</td>
+                      <td className="table-cell">
+                        <button className="btn-icon text-red-500" onClick={async () => {
+                          await del(`/api/email-extras/spam-rules/${dsDomain}/${r.id}`);
+                          success('Rule removed'); loadDomainSpam();
+                        }}><Trash2 size={13} /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

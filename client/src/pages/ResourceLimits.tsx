@@ -6,7 +6,9 @@ const api = (p: string, o?: RequestInit) => fetch(`/api/resource-limits${p}`, { 
 
 export default function ResourceLimits() {
   const toast = useToast();
-  const [tab, setTab] = useState<'cgroups' | 'nginx'>('cgroups');
+  const [tab, setTab] = useState<'cgroups' | 'nginx' | 'quotas'>('cgroups');
+  const [diskQuotas, setDiskQuotas] = useState<any[]>([]);
+  const [quotaForm, setQuotaForm] = useState<Record<string, { soft: string; hard: string }>>({});
   const [accounts, setAccounts] = useState<any[]>([]);
   const [vhosts, setVhosts] = useState<any[]>([]);
   const [limits, setLimits] = useState<Record<string, any>>({});
@@ -46,6 +48,20 @@ export default function ResourceLimits() {
     loadVhosts();
   }
 
+  async function loadDiskQuotas() {
+    const r = await api('/disk-quotas');
+    const d = await r.json();
+    setDiskQuotas(Array.isArray(d) ? d : []);
+  }
+
+  async function setDiskQuota(username: string) {
+    const q = quotaForm[username] || {};
+    const r = await api(`/disk-quotas/${username}`, { method: 'POST', body: JSON.stringify({ block_soft_mb: parseInt(q.soft) || 0, block_hard_mb: parseInt(q.hard) || 0 }) });
+    const d = await r.json();
+    if (d.error) toast.error(d.error);
+    else { toast.success(`Quota set for ${username}`); loadDiskQuotas(); }
+  }
+
   return (
     <div className="space-y-6">
       <h1 className="page-title">Resource Limits</h1>
@@ -53,6 +69,7 @@ export default function ResourceLimits() {
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'cgroups' ? 'tab-item-active' : ''}`} onClick={() => setTab('cgroups')}>cgroup Limits</button>
         <button className={`tab-item ${tab === 'nginx' ? 'tab-item-active' : ''}`} onClick={() => { setTab('nginx'); loadVhosts(); }}>Nginx Vhosts</button>
+        <button className={`tab-item ${tab === 'quotas' ? 'tab-item-active' : ''}`} onClick={() => { setTab('quotas'); loadDiskQuotas(); }}>Disk Quotas</button>
       </div>
 
       {tab === 'cgroups' && (
@@ -136,6 +153,43 @@ export default function ResourceLimits() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+      {tab === 'quotas' && (
+        <div className="space-y-4">
+          <p className="text-xs text-slate-500">Set disk space limits per user via <code>setquota</code>. Requires quota kernel support and the <code>quota</code> package.</p>
+          <div className="card overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead><tr>
+                {['User', 'Used', 'Soft Limit (MB)', 'Hard Limit (MB)', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {diskQuotas.length === 0 && (
+                  <tr><td colSpan={5} className="table-cell text-center text-slate-400 py-8">No quota data. Click an account username below to set quotas.</td></tr>
+                )}
+                {diskQuotas.map((q: any) => (
+                  <tr key={q.user} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-mono font-bold">{q.user}</td>
+                    <td className="table-cell text-xs">{q.block_used}</td>
+                    <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[q.user]?.soft || ''} onChange={e => setQuotaForm(f => ({ ...f, [q.user]: { ...(f[q.user] || {}), soft: e.target.value } }))} /></td>
+                    <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[q.user]?.hard || ''} onChange={e => setQuotaForm(f => ({ ...f, [q.user]: { ...(f[q.user] || {}), hard: e.target.value } }))} /></td>
+                    <td className="table-cell"><button className="btn-primary text-xs" onClick={() => setDiskQuota(q.user)}><Save size={12} /> Set</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="card p-4 space-y-3 max-w-sm">
+            <p className="text-xs font-bold text-slate-700 dark:text-slate-300">Set quota for a specific user</p>
+            {accounts.map((a: any) => (
+              <div key={a.username} className="flex items-center gap-2">
+                <span className="text-sm w-28 truncate font-mono">{a.username}</span>
+                <input type="number" className="input w-20 text-xs" placeholder="Soft MB" value={quotaForm[a.username]?.soft || ''} onChange={e => setQuotaForm(f => ({ ...f, [a.username]: { ...(f[a.username] || {}), soft: e.target.value } }))} />
+                <input type="number" className="input w-20 text-xs" placeholder="Hard MB" value={quotaForm[a.username]?.hard || ''} onChange={e => setQuotaForm(f => ({ ...f, [a.username]: { ...(f[a.username] || {}), hard: e.target.value } }))} />
+                <button className="btn-primary text-xs" onClick={() => setDiskQuota(a.username)}><Save size={12} /></button>
+              </div>
+            ))}
           </div>
         </div>
       )}

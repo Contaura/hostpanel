@@ -54,6 +54,7 @@ import AddonDomains from './pages/AddonDomains';
 import WordPressManager from './pages/WordPressManager';
 import ParkedDomains from './pages/ParkedDomains';
 import NodeApps from './pages/NodeApps';
+import ServerInfo from './pages/ServerInfo';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -146,6 +147,7 @@ function AppRoutes() {
         <Route path="wordpress"      element={<WordPressManager />} />
         <Route path="parked-domains" element={<ParkedDomains />} />
         <Route path="node-apps"      element={<NodeApps />} />
+        <Route path="server-info"    element={<ServerInfo />} />
 
         {/* Admin Config */}
         <Route path="settings"    element={<Settings />} />

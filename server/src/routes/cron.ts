@@ -125,4 +125,65 @@ router.delete('/logs', (_req: AuthRequest, res: Response) => {
   res.json({ success: true });
 });
 
+/* ── Per-account cron management ─────────────────────────── */
+
+const USER_RE = /^[a-z][a-z0-9_]{0,30}$/;
+const CRON_RE = /^(@(reboot|hourly|daily|weekly|monthly)|(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+))$/;
+
+async function getUserCrontab(user: string): Promise<string[]> {
+  try {
+    const { stdout } = await execAsync(`crontab -u ${user} -l 2>/dev/null`);
+    return stdout.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+  } catch { return []; }
+}
+
+router.get('/account/:user', async (req: AuthRequest, res: Response) => {
+  const { user } = req.params;
+  if (!USER_RE.test(user)) return res.status(400).json({ error: 'Invalid username' });
+  const lines = await getUserCrontab(user);
+  const jobs = lines.map((line, i) => {
+    const parts = line.split(/\s+/);
+    const isAt = line.startsWith('@');
+    const schedule = isAt ? parts[0] : parts.slice(0, 5).join(' ');
+    const command = isAt ? parts.slice(1).join(' ') : parts.slice(5).join(' ');
+    return { id: i, schedule, command, raw: line };
+  });
+  res.json(jobs);
+});
+
+router.post('/account/:user', async (req: AuthRequest, res: Response) => {
+  const { user } = req.params;
+  if (!USER_RE.test(user)) return res.status(400).json({ error: 'Invalid username' });
+  const { schedule, command } = req.body;
+  if (!schedule || !command) return res.status(400).json({ error: 'schedule and command required' });
+  if (!CRON_RE.test(schedule.trim())) return res.status(400).json({ error: 'Invalid cron schedule' });
+  try {
+    const lines = await getUserCrontab(user);
+    const newLine = `${schedule.trim()} ${command.trim()}`;
+    lines.push(newLine);
+    const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
+    writeFileSync(tmp, lines.join('\n') + '\n');
+    await execAsync(`crontab -u ${user} ${tmp}`);
+    unlinkSync(tmp);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.delete('/account/:user/:index', async (req: AuthRequest, res: Response) => {
+  const { user } = req.params;
+  const idx = parseInt(req.params.index);
+  if (!USER_RE.test(user)) return res.status(400).json({ error: 'Invalid username' });
+  try {
+    const lines = await getUserCrontab(user);
+    if (idx < 0 || idx >= lines.length) return res.status(404).json({ error: 'Job not found' });
+    lines.splice(idx, 1);
+    const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
+    writeFileSync(tmp, lines.join('\n') + '\n');
+    await execAsync(`crontab -u ${user} ${tmp}`);
+    unlinkSync(tmp);
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+

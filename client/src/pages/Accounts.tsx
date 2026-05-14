@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Account {
@@ -244,6 +244,18 @@ export default function Accounts() {
                       <button onClick={() => setExpanded(expanded === acc.id ? null : acc.id)}
                         className="btn-icon" title="Details">
                         {expanded === acc.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                      </button>
+                      <button
+                        title="Export account (files + DBs)"
+                        className="btn-icon"
+                        onClick={() => {
+                          const token = localStorage.getItem('hp_token') || '';
+                          fetch(`/api/accounts/${acc.id}/export`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+                            .then(r => r.blob())
+                            .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `account_${acc.username}.tar.gz`; a.click(); })
+                            .catch(() => alert('Export failed'));
+                        }}>
+                        <PackageOpen size={13} />
                       </button>
                       <button onClick={() => deleteAccount(acc.id, acc.username)}
                         className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"

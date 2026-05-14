@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload } from 'lucide-react';
+import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server } from 'lucide-react';
 
-type Tab = 'general' | 'smtp' | 'billing' | 'paypal';
+type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const auth = () => ({ Authorization: 'Bearer ' + token() });
@@ -22,6 +22,8 @@ export default function Settings() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [relay, setRelay] = useState({ relayhost: '', sasl_user: '', sasl_pass: '' });
+  const [relayLoaded, setRelayLoaded] = useState(false);
 
   useEffect(() => {
     api('/api/settings/').then(r => { setSettings(r.data); setLoading(false); }).catch(() => setLoading(false));
@@ -63,11 +65,30 @@ export default function Settings() {
     setTesting(false);
   }
 
+  async function loadRelay() {
+    if (relayLoaded) return;
+    try {
+      const r = await fetch('/api/settings/relay', { headers: auth() });
+      const d = await r.json();
+      setRelay(v => ({ ...v, relayhost: d.relayhost || '', sasl_user: d.sasl_user || '' }));
+      setRelayLoaded(true);
+    } catch {}
+  }
+
+  async function saveRelay() {
+    try {
+      await apost('/api/settings/relay', relay);
+      success('Postfix relay settings saved');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+  }
+
   const tabs = [
-    { id: 'general' as Tab, label: 'General',   icon: Building  },
-    { id: 'smtp'    as Tab, label: 'SMTP Email', icon: Mail      },
-    { id: 'billing' as Tab, label: 'Billing',    icon: CreditCard},
-    { id: 'paypal'  as Tab, label: 'PayPal',     icon: CreditCard},
+    { id: 'general'  as Tab, label: 'General',      icon: Building  },
+    { id: 'smtp'     as Tab, label: 'SMTP Email',    icon: Mail      },
+    { id: 'relay'    as Tab, label: 'Mail Relay',    icon: Server    },
+    { id: 'billing'  as Tab, label: 'Billing',       icon: CreditCard},
+    { id: 'paypal'   as Tab, label: 'PayPal',        icon: CreditCard},
+    { id: 'security' as Tab, label: 'Security',      icon: Shield    },
   ];
 
   if (loading) return <div className="p-6 text-slate-400">Loading…</div>;
@@ -81,7 +102,7 @@ export default function Settings() {
 
       <div className="tab-bar">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} className={tab === t.id ? 'tab-item-active' : 'tab-item'}>
+          <button key={t.id} onClick={() => { setTab(t.id); if (t.id === 'relay') loadRelay(); }} className={tab === t.id ? 'tab-item-active' : 'tab-item'}>
             <t.icon size={14} /> {t.label}
           </button>
         ))}
@@ -157,6 +178,47 @@ export default function Settings() {
             <div><label className="label">Default Tax Rate (%)</label><input type="number" step="0.01" min="0" max="100" className="input" value={settings.tax_rate || ''} onChange={e => set('tax_rate', e.target.value)} /></div>
           </div>
           <button className="btn-primary" onClick={save}><Save size={14} /> Save Billing Settings</button>
+        </div>
+      )}
+
+      {/* Mail Relay */}
+      {tab === 'relay' && (
+        <div className="card p-5 space-y-4 max-w-xl">
+          <h3 className="font-semibold text-sm flex items-center gap-2"><Server size={15} /> Postfix Outbound Relay (Smarthost)</h3>
+          <p className="text-xs text-slate-500">Configure Postfix to relay outgoing mail through an external SMTP provider (SendGrid, Mailgun, etc.).</p>
+          <div>
+            <label className="label">Relay Host</label>
+            <input className="input font-mono" placeholder="[smtp.sendgrid.net]:587" value={relay.relayhost} onChange={e => setRelay(v => ({ ...v, relayhost: e.target.value }))} />
+            <p className="text-xs text-slate-400 mt-1">Format: [hostname]:port</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="label">SASL Username</label><input className="input" placeholder="apikey" value={relay.sasl_user} onChange={e => setRelay(v => ({ ...v, sasl_user: e.target.value }))} /></div>
+            <div><label className="label">SASL Password</label><input type="password" className="input" placeholder="(API key or password)" value={relay.sasl_pass} onChange={e => setRelay(v => ({ ...v, sasl_pass: e.target.value }))} /></div>
+          </div>
+          <button className="btn-primary" onClick={saveRelay}><Save size={14} /> Save Relay Config</button>
+        </div>
+      )}
+
+      {/* Security */}
+      {tab === 'security' && (
+        <div className="card p-5 space-y-4 max-w-xl">
+          <h3 className="font-semibold text-sm flex items-center gap-2"><Shield size={15} /> Admin Security</h3>
+          <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+            <div>
+              <p className="text-sm font-medium">Require 2FA for All Admins</p>
+              <p className="text-xs text-slate-500 mt-1">Forces all admin users to enroll in two-factor authentication</p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" className="sr-only peer"
+                checked={settings.panel_2fa_required === '1'}
+                onChange={async e => {
+                  set('panel_2fa_required', e.target.checked ? '1' : '0');
+                  await aput('/api/settings/', { panel_2fa_required: e.target.checked ? '1' : '0' });
+                  success(e.target.checked ? '2FA enforcement enabled' : '2FA enforcement disabled');
+                }} />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+            </label>
+          </div>
         </div>
       )}
 

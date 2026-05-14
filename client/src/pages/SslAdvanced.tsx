@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Lock, CheckCircle, XCircle } from 'lucide-react';
+import { Lock, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/ssl-advanced${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
 
 export default function SslAdvanced() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test'>('ciphers');
+  const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew'>('ciphers');
   const [ciphers, setCiphers] = useState<any>(null);
   const [ciphersLoaded, setCiphersLoaded] = useState(false);
   const [preset, setPreset] = useState('intermediate');
@@ -14,6 +14,10 @@ export default function SslAdvanced() {
   const [wildcardOutput, setWildcardOutput] = useState('');
   const [testDomain, setTestDomain] = useState('');
   const [testResult, setTestResult] = useState<any>(null);
+  const [certs, setCerts] = useState<any[]>([]);
+  const [certsLoaded, setCertsLoaded] = useState(false);
+  const [renewOutput, setRenewOutput] = useState('');
+  const [renewing, setRenewing] = useState<string | null>(null);
 
   async function loadCiphers() {
     if (ciphersLoaded) return;
@@ -46,7 +50,36 @@ export default function SslAdvanced() {
     setTestResult(d);
   }
 
+  async function loadCerts() {
+    if (certsLoaded) return;
+    const r = await api('/renew-status');
+    const d = await r.json();
+    setCerts(Array.isArray(d) ? d : []);
+    setCertsLoaded(true);
+  }
+
+  async function renewCert(name: string) {
+    setRenewing(name);
+    setRenewOutput('Renewing…');
+    const r = await api(`/renew/${encodeURIComponent(name)}`, { method: 'POST' });
+    const d = await r.json();
+    setRenewOutput(d.output || d.error || 'Done');
+    setRenewing(null);
+    setCertsLoaded(false);
+  }
+
+  async function renewAll() {
+    setRenewing('all');
+    setRenewOutput('Running certbot renew…');
+    const r = await api('/renew-all', { method: 'POST' });
+    const d = await r.json();
+    setRenewOutput(d.output || d.error || 'Done');
+    setRenewing(null);
+    setCertsLoaded(false);
+  }
+
   if (tab === 'ciphers' && !ciphersLoaded) loadCiphers();
+  if (tab === 'renew' && !certsLoaded) loadCerts();
 
   return (
     <div className="space-y-6">
@@ -56,6 +89,7 @@ export default function SslAdvanced() {
         <button className={`tab-item ${tab === 'ciphers' ? 'tab-item-active' : ''}`} onClick={() => setTab('ciphers')}>Cipher Config</button>
         <button className={`tab-item ${tab === 'wildcard' ? 'tab-item-active' : ''}`} onClick={() => setTab('wildcard')}>Wildcard SSL</button>
         <button className={`tab-item ${tab === 'test' ? 'tab-item-active' : ''}`} onClick={() => setTab('test')}>Test Certificate</button>
+        <button className={`tab-item ${tab === 'renew' ? 'tab-item-active' : ''}`} onClick={() => setTab('renew')}>Auto-Renew Status</button>
       </div>
 
       {tab === 'ciphers' && (
@@ -137,6 +171,46 @@ export default function SslAdvanced() {
                 ))}
               </div>
             </div>
+          )}
+        </div>
+      )}
+      {tab === 'renew' && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-slate-600 dark:text-slate-400">Manage Let's Encrypt certificate renewals. Certbot auto-renews within 30 days of expiry.</p>
+            <button className="btn-secondary" onClick={renewAll} disabled={renewing !== null}>
+              <RefreshCw size={14} className={renewing === 'all' ? 'animate-spin' : ''} /> Renew All
+            </button>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead><tr>
+                {['Name', 'Domains', 'Expires', 'Days Left', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {certs.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-400">No certificates found. Run certbot to issue certificates first.</td></tr>}
+                {certs.map(c => (
+                  <tr key={c.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-mono text-xs">{c.name}</td>
+                    <td className="table-cell text-xs">{c.domains}</td>
+                    <td className="table-cell text-xs">{c.expiry}</td>
+                    <td className="table-cell">
+                      {c.days_left !== null ? (
+                        <span className={`badge-${c.days_left > 30 ? 'success' : c.days_left > 7 ? 'warning' : 'danger'}`}>{c.days_left}d</span>
+                      ) : '—'}
+                    </td>
+                    <td className="table-cell">
+                      <button className="btn-secondary text-xs" onClick={() => renewCert(c.name)} disabled={renewing !== null}>
+                        <RefreshCw size={12} className={renewing === c.name ? 'animate-spin' : ''} /> Force Renew
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {renewOutput && (
+            <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-48 overflow-y-auto whitespace-pre-wrap">{renewOutput}</pre>
           )}
         </div>
       )}

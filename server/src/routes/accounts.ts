@@ -191,4 +191,53 @@ router.get('/:id/usage', async (req: AuthRequest, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Full account export / migration ────────────────────── */
+
+router.post('/:id/export', async (req: AuthRequest, res: Response) => {
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
+  if (!account) return res.status(404).json({ error: 'Account not found' });
+
+  const BACKUP_DIR = process.env.BACKUP_DIR || '/var/backups/hostpanel';
+  const { execSync } = await import('child_process');
+  try {
+    const { mkdirSync: mkdir, existsSync: exists } = await import('fs');
+    if (!exists(BACKUP_DIR)) mkdir(BACKUP_DIR, { recursive: true });
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const archiveName = `account_${account.username}_${ts}.tar.gz`;
+    const archivePath = path.join(BACKUP_DIR, archiveName);
+    const tmpDir = `/tmp/hp_export_${account.username}_${Date.now()}`;
+
+    // Collect files
+    const webDir = path.join(WEBROOT, account.username);
+    await execAsync(`mkdir -p "${tmpDir}/files" "${tmpDir}/databases"`);
+    if (exists(webDir)) {
+      await execAsync(`tar -czf "${tmpDir}/files/files.tar.gz" -C "${path.dirname(webDir)}" "${account.username}" 2>/dev/null || true`, { timeout: 300000 });
+    }
+
+    // Dump all databases owned by this account user
+    const user = process.env.DB_ROOT_USER || 'root';
+    const pass = process.env.DB_ROOT_PASS || '';
+    const passArg = pass ? `-p${pass}` : '';
+    try {
+      const { stdout: dbs } = await execAsync(`mysql -u${user} ${passArg} -e "SHOW DATABASES LIKE '${account.username}%'" -N 2>/dev/null`);
+      for (const dbName of dbs.split('\n').filter(Boolean)) {
+        if (/^[a-zA-Z0-9_]+$/.test(dbName)) {
+          await execAsync(`mysqldump -u${user} ${passArg} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000 });
+        }
+      }
+    } catch {}
+
+    // Create manifest
+    const manifest = { username: account.username, domain: account.domain, exported_at: new Date().toISOString() };
+    await execAsync(`echo '${JSON.stringify(manifest)}' > "${tmpDir}/manifest.json"`);
+
+    // Bundle everything
+    await execAsync(`tar -czf "${archivePath}" -C "${tmpDir}" . && rm -rf "${tmpDir}"`, { timeout: 300000 });
+
+    res.download(archivePath, archiveName);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+

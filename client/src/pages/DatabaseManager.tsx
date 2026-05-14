@@ -15,7 +15,9 @@ export default function DatabaseManager() {
   const toast = useToast();
   const [databases, setDatabases] = useState<DB[]>([]);
   const [users, setUsers] = useState<DBUser[]>([]);
-  const [tab, setTab] = useState<'databases' | 'users'>('databases');
+  const [tab, setTab] = useState<'databases' | 'users' | 'slow-query'>('databases');
+  const [slowLog, setSlowLog] = useState<any>(null);
+  const [slowLoading, setSlowLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [dbForm, setDbForm] = useState({ name: '' });
   const [userForm, setUserForm] = useState({ username: '', password: '', database: '', host: 'localhost' });
@@ -108,6 +110,15 @@ export default function DatabaseManager() {
     openPrivEditor(privTarget);
   }
 
+  async function loadSlowLog() {
+    setSlowLoading(true);
+    try {
+      const { data } = await axios.get('/api/databases/slow-query-log');
+      setSlowLog(data);
+    } catch (e: any) { toast.error('Failed to load slow query log'); }
+    finally { setSlowLoading(false); }
+  }
+
   async function importDb(file: File) {
     if (!importTarget) { toast.error('Select a database first'); return; }
     setImporting(importTarget);
@@ -135,10 +146,10 @@ export default function DatabaseManager() {
       </div>
 
       <div className="tab-bar">
-        {(['databases', 'users'] as const).map(t => (
-          <button key={t} onClick={() => { setTab(t); setShowForm(false); }}
+        {(['databases', 'users', 'slow-query'] as const).map(t => (
+          <button key={t} onClick={() => { setTab(t); setShowForm(false); if (t === 'slow-query') loadSlowLog(); }}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>
-            {t === 'databases' ? `Databases (${databases.length})` : `Users (${users.length})`}
+            {t === 'databases' ? `Databases (${databases.length})` : t === 'users' ? `Users (${users.length})` : 'Slow Query Log'}
           </button>
         ))}
       </div>
@@ -276,6 +287,44 @@ export default function DatabaseManager() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {tab === 'slow-query' && (
+        <div className="space-y-4">
+          {slowLoading && <p className="text-slate-400 text-sm">Loading slow query log…</p>}
+          {slowLog && (
+            <>
+              <div className="card p-4 flex items-center gap-6 flex-wrap">
+                <div>
+                  <p className="text-xs text-slate-500">Slow Query Log</p>
+                  <span className={`badge-${slowLog.enabled ? 'success' : 'danger'} mt-1`}>{slowLog.enabled ? 'Enabled' : 'Disabled'}</span>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Long Query Time</p>
+                  <p className="text-sm font-mono font-bold">{slowLog.long_query_time}s</p>
+                </div>
+                <div className="flex-1">
+                  <p className="text-xs text-slate-500">Log File</p>
+                  <p className="text-sm font-mono text-slate-600 dark:text-slate-400">{slowLog.log_file || 'not configured'}</p>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <button className={slowLog.enabled ? 'btn-danger' : 'btn-primary'} onClick={async () => {
+                    await axios.put('/api/databases/slow-query-log', { enabled: !slowLog.enabled, long_query_time: slowLog.long_query_time });
+                    toast.success(slowLog.enabled ? 'Slow query log disabled' : 'Slow query log enabled');
+                    loadSlowLog();
+                  }}>{slowLog.enabled ? 'Disable' : 'Enable'}</button>
+                </div>
+              </div>
+              <div className="card bg-slate-950 p-4 max-h-[50vh] overflow-y-auto">
+                {slowLog.lines.length === 0 ? (
+                  <p className="text-slate-500 text-xs">No slow query entries found.</p>
+                ) : slowLog.lines.map((line: string, i: number) => (
+                  <div key={i} className="text-xs font-mono text-slate-300 py-0.5 border-b border-slate-800/50 last:border-0">{line}</div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 

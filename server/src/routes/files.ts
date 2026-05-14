@@ -179,6 +179,19 @@ router.post('/extract', async (req: AuthRequest, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+router.post('/move', async (req: AuthRequest, res: Response) => {
+  try {
+    const { from, to } = req.body;
+    if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+    const resolvedFrom = safePath(from);
+    const resolvedTo = safePath(to);
+    await fs.rename(resolvedFrom, resolvedTo);
+    res.json({ message: 'Moved' });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.post('/chmod', async (req: AuthRequest, res: Response) => {
   const { path: p, mode, recursive } = req.body;
   if (!p || !mode) return res.status(400).json({ error: 'path and mode required' });

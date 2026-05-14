@@ -141,4 +141,54 @@ router.get('/quotas', async (_req: Request, res: Response) => {
   } catch (err: any) { res.json([]); }
 });
 
+/* ── Per-domain spam rules (blacklist / whitelist) ───────── */
+
+db.exec(`CREATE TABLE IF NOT EXISTS domain_spam_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('whitelist','blacklist')),
+  address TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+
+const DOMAIN_SA_DIR = process.env.SA_DOMAIN_DIR || '/etc/mail/spamassassin/domains';
+
+function writeDomainRules(domain: string) {
+  const rules = db.prepare("SELECT * FROM domain_spam_rules WHERE domain = ? ORDER BY type").all(domain) as any[];
+  const lines = ['# Managed by HostPanel'];
+  for (const r of rules) {
+    lines.push(`${r.type}_from ${r.address}`);
+  }
+  const dir = DOMAIN_SA_DIR;
+  try {
+    const { mkdirSync, writeFileSync } = require('fs');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(`${dir}/${domain}.cf`, lines.join('\n') + '\n');
+  } catch {}
+}
+
+router.get('/spam-rules/:domain', (req: Request, res: Response) => {
+  const rules = db.prepare("SELECT * FROM domain_spam_rules WHERE domain = ? ORDER BY type, address").all(req.params.domain);
+  res.json(rules);
+});
+
+router.post('/spam-rules/:domain', (req: Request, res: Response) => {
+  const { domain } = req.params;
+  const { type, address } = req.body;
+  if (!['whitelist', 'blacklist'].includes(type) || !address) {
+    return res.status(400).json({ error: 'type (whitelist|blacklist) and address required' });
+  }
+  db.prepare("INSERT INTO domain_spam_rules (domain, type, address) VALUES (?, ?, ?)").run(domain, type, address);
+  writeDomainRules(domain);
+  res.json({ success: true });
+});
+
+router.delete('/spam-rules/:domain/:id', (req: Request, res: Response) => {
+  const { domain, id } = req.params;
+  db.prepare("DELETE FROM domain_spam_rules WHERE id = ? AND domain = ?").run(parseInt(id), domain);
+  writeDomainRules(domain);
+  res.json({ success: true });
+});
+
 export default router;
+

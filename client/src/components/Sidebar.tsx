@@ -7,7 +7,7 @@ import {
   Mail, MailPlus, MailSearch, ListOrdered, MailOpen, PlusSquare, BrainCircuit, ServerCog,
   Key, ShieldCheck, Lock, Shield, ShieldAlert, ClipboardList,
   Clock, Code2, Activity, FileText, Upload, PackageOpen, TerminalSquare,
-  Server, Package, Receipt,
+  Server, Package, Receipt, Info,
   Settings, Users, KeyRound, Bell, Cpu, ExternalLink,
   Zap, Cloud, GitBranch, Layers, RefreshCw, UserCheck, Tag,
 } from 'lucide-react';
@@ -101,6 +101,7 @@ const sections: Section[] = [
       { to: '/monitor',         icon: Bell,           label: 'System Monitor' },
       { to: '/wordpress',       icon: BrainCircuit,   label: 'WordPress Manager' },
       { to: '/node-apps',       icon: ServerCog,      label: 'Node.js / Python' },
+      { to: '/server-info',     icon: Info,           label: 'Server Info' },
     ],
   },
   {

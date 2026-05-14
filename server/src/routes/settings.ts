@@ -2,8 +2,13 @@ import { Router, Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import multer from 'multer';
 import path from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import db from '../db';
+
+const execAsync = promisify(exec);
+const MAIN_CF = process.env.POSTFIX_MAIN_CF || '/etc/postfix/main.cf';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
 const logoStorage = multer.diskStorage({
@@ -92,4 +97,49 @@ router.get('/logo', (_req: Request, res: Response) => {
   res.sendFile(logoPath);
 });
 
+/* ── Postfix SMTP relay (outbound relayhost) ─────────────── */
+
+router.get('/relay', async (_req: Request, res: Response) => {
+  try {
+    if (!existsSync(MAIN_CF)) return res.json({ relayhost: '', sasl_user: '' });
+    const conf = readFileSync(MAIN_CF, 'utf8');
+    const relayhost   = conf.match(/^relayhost\s*=\s*(.+)/m)?.[1]?.trim() || '';
+    const sasl_user   = conf.match(/^smtp_sasl_password_maps\s*=\s*(.+)/m)?.[1]?.trim() || '';
+    const sasl_on     = conf.includes('smtp_sasl_auth_enable = yes');
+    res.json({ relayhost, sasl_enabled: sasl_on, sasl_user });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/relay', async (req: Request, res: Response) => {
+  const { relayhost, sasl_user, sasl_pass } = req.body;
+  if (!relayhost) return res.status(400).json({ error: 'relayhost required' });
+  try {
+    let conf = existsSync(MAIN_CF) ? readFileSync(MAIN_CF, 'utf8') : '';
+
+    const setParam = (key: string, val: string) => {
+      const re = new RegExp(`^#?${key}\\s*=.*`, 'm');
+      if (re.test(conf)) conf = conf.replace(re, `${key} = ${val}`);
+      else conf += `\n${key} = ${val}`;
+    };
+
+    setParam('relayhost', relayhost);
+
+    if (sasl_user && sasl_pass) {
+      setParam('smtp_sasl_auth_enable', 'yes');
+      setParam('smtp_sasl_password_maps', 'hash:/etc/postfix/sasl_passwd');
+      setParam('smtp_sasl_security_options', 'noanonymous');
+      setParam('smtp_tls_security_level', 'encrypt');
+      writeFileSync('/etc/postfix/sasl_passwd', `${relayhost} ${sasl_user}:${sasl_pass}\n`);
+      await execAsync('postmap /etc/postfix/sasl_passwd 2>/dev/null').catch(() => {});
+    } else {
+      setParam('smtp_sasl_auth_enable', 'no');
+    }
+
+    writeFileSync(MAIN_CF, conf);
+    await execAsync('systemctl reload postfix 2>/dev/null || true');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+

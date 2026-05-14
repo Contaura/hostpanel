@@ -92,4 +92,40 @@ router.get('/test/:domain', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Certificate auto-renew status ───────────────────────── */
+
+router.get('/renew-status', async (_req: Request, res: Response) => {
+  try {
+    const { stdout } = await execAsync('certbot certificates 2>&1', { timeout: 30000 });
+    const certs: any[] = [];
+    const certBlocks = stdout.split(/\n\s*-+\s*\n/);
+    for (const block of certBlocks) {
+      const name    = block.match(/Certificate Name:\s*(.+)/)?.[1]?.trim();
+      const domains = block.match(/Domains:\s*(.+)/)?.[1]?.trim();
+      const expiry  = block.match(/Expiry Date:\s*(.+)/)?.[1]?.trim();
+      const valid   = block.match(/\(VALID:/)?.[0] ? true : false;
+      const days    = block.match(/VALID: (\d+)/)?.[1];
+      if (name) certs.push({ name, domains, expiry, valid, days_left: days ? parseInt(days) : null });
+    }
+    res.json(certs);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/renew/:name', async (req: Request, res: Response) => {
+  const { name } = req.params;
+  if (!name || /[^a-zA-Z0-9._-]/.test(name)) return res.status(400).json({ error: 'Invalid cert name' });
+  try {
+    const { stdout, stderr } = await execAsync(`certbot renew --cert-name "${name}" --force-renewal 2>&1`, { timeout: 120000 });
+    res.json({ output: stdout + stderr });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.post('/renew-all', async (_req: Request, res: Response) => {
+  try {
+    const { stdout, stderr } = await execAsync('certbot renew 2>&1', { timeout: 300000 });
+    res.json({ output: stdout + stderr });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+

@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readdirSync, statSync, existsSync, mkdirSync, unlinkSync } from 'fs';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
+import db from '../db';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -118,4 +119,61 @@ router.delete('/:name', (req: AuthRequest, res: Response) => {
   }
 });
 
+
+/* ── Remote / S3 backup config ───────────────────────────── */
+
+router.get('/remote-config', (_req: AuthRequest, res: Response) => {
+  const rows = db.prepare('SELECT key, value FROM settings WHERE key LIKE ?').all('backup_%') as { key: string; value: string }[];
+  const cfg: Record<string, string> = {};
+  for (const r of rows) cfg[r.key.replace('backup_', '')] = r.value;
+  res.json(cfg);
+});
+
+router.put('/remote-config', (req: AuthRequest, res: Response) => {
+  const allowed = ['provider', 'bucket', 'region', 'access_key', 'secret_key', 'path_prefix'];
+  const upsert = db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at");
+  for (const [k, v] of Object.entries(req.body)) {
+    if (!allowed.includes(k)) continue;
+    upsert.run(`backup_${k}`, String(v));
+  }
+  res.json({ success: true });
+});
+
+router.post('/push-remote/:name', async (req: AuthRequest, res: Response) => {
+  const name = safeFileName(req.params.name);
+  const file = path.join(getBackupDir(), name);
+  if (!existsSync(file)) return res.status(404).json({ error: 'Backup not found' });
+
+  const get = (k: string) => {
+    const r = db.prepare('SELECT value FROM settings WHERE key = ?').get(`backup_${k}`) as any;
+    return r?.value || '';
+  };
+
+  const provider = get('provider');
+  const bucket   = get('bucket');
+  const region   = get('region') || 'us-east-1';
+  const accessKey = get('access_key');
+  const secretKey = get('secret_key');
+  const prefix   = get('path_prefix') || 'hostpanel-backups';
+
+  if (!bucket) return res.status(400).json({ error: 'Remote backup not configured. Set bucket first.' });
+
+  try {
+    let cmd = '';
+    if (provider === 's3' || !provider) {
+      const env = accessKey ? `AWS_ACCESS_KEY_ID=${accessKey} AWS_SECRET_ACCESS_KEY=${secretKey} AWS_DEFAULT_REGION=${region} ` : '';
+      cmd = `${env}aws s3 cp "${file}" "s3://${bucket}/${prefix}/${name}" 2>&1`;
+    } else if (provider === 'b2') {
+      cmd = `B2_APPLICATION_KEY_ID=${accessKey} B2_APPLICATION_KEY=${secretKey} b2 upload-file ${bucket} "${file}" "${prefix}/${name}" 2>&1`;
+    } else {
+      cmd = `rclone copy "${file}" "${provider}:${bucket}/${prefix}" 2>&1`;
+    }
+    const { stdout } = await execAsync(cmd, { timeout: 300000 });
+    res.json({ success: true, output: stdout });
+  } catch (err: any) {
+    res.status(500).json({ error: err.stderr || err.message });
+  }
+});
+
 export default router;
+

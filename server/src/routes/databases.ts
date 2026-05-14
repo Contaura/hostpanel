@@ -245,4 +245,53 @@ router.delete('/users/:user/grants', async (req: AuthRequest, res: Response) => 
   finally { await conn?.end(); }
 });
 
+/* ── Slow query log viewer ───────────────────────────────── */
+
+const SLOW_LOG_PATHS = ['/var/log/mysql/mysql-slow.log', '/var/log/mysql-slow.log', '/var/lib/mysql/slow.log'];
+
+router.get('/slow-query-log', async (_req: AuthRequest, res: Response) => {
+  let conn;
+  try {
+    conn = await getConn();
+    const [vars] = await conn.query<mysql.RowDataPacket[]>(
+      "SHOW GLOBAL VARIABLES WHERE Variable_name IN ('slow_query_log','slow_query_log_file','long_query_time')"
+    );
+    const varsMap: Record<string, string> = {};
+    for (const v of vars) varsMap[v.Variable_name] = v.Value;
+
+    let logPath = varsMap['slow_query_log_file'] || '';
+    if (!logPath) {
+      for (const p of SLOW_LOG_PATHS) {
+        try { await import('fs').then(f => f.promises.access(p)); logPath = p; break; } catch {}
+      }
+    }
+
+    let lines: string[] = [];
+    if (logPath) {
+      try {
+        const { stdout } = await execAsync(`tail -200 "${logPath}" 2>/dev/null`);
+        lines = stdout.split('\n').filter(Boolean);
+      } catch {}
+    }
+
+    res.json({ enabled: varsMap['slow_query_log'] === 'ON', long_query_time: varsMap['long_query_time'], log_file: logPath, lines });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
+});
+
+router.put('/slow-query-log', async (req: AuthRequest, res: Response) => {
+  const { enabled, long_query_time } = req.body;
+  let conn;
+  try {
+    conn = await getConn();
+    await conn.query(`SET GLOBAL slow_query_log = ?`, [enabled ? 'ON' : 'OFF']);
+    if (long_query_time !== undefined) {
+      await conn.query(`SET GLOBAL long_query_time = ?`, [parseFloat(long_query_time) || 1]);
+    }
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
+});
+
 export default router;
+

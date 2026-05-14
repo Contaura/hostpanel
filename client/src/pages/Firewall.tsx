@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface FirewallStatus {
@@ -28,11 +28,13 @@ const KNOWN_PORTS = [
 
 export default function Firewall() {
   const toast = useToast();
-  const [tab, setTab] = useState<'ports' | 'ips'>('ports');
+  const [tab, setTab] = useState<'ports' | 'ips' | 'geo'>('ports');
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [portForm, setPortForm] = useState({ port: '', protocol: 'tcp' });
   const [ipForm, setIpForm] = useState({ ip: '' });
   const [loading, setLoading] = useState(false);
+  const [geoBlocks, setGeoBlocks] = useState<string[]>([]);
+  const [geoCode, setGeoCode] = useState('');
 
   async function load() {
     try {
@@ -40,7 +42,15 @@ export default function Firewall() {
       setStatus(data);
     } catch (err: any) { toast.error('Failed to load firewall status'); }
   }
-  useEffect(() => { load(); }, []);
+
+  async function loadGeo() {
+    try {
+      const { data } = await axios.get<string[]>('/api/firewall/geo-blocks');
+      setGeoBlocks(data);
+    } catch {}
+  }
+
+  useEffect(() => { load(); loadGeo(); }, []);
 
   async function addPort(e: FormEvent) {
     e.preventDefault(); setLoading(true);
@@ -107,8 +117,8 @@ export default function Firewall() {
       )}
 
       <div className="tab-bar">
-        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban]] as const).map(([t, label, Icon]) => (
-          <button key={t} onClick={() => setTab(t)}
+        {([['ports', 'Open Ports', Layers], ['ips', 'IP Blocker', Ban], ['geo', 'Geo Blocking', MapPin]] as const).map(([t, label, Icon]) => (
+          <button key={t} onClick={() => setTab(t as any)}
             className={tab === t ? 'tab-item-active' : 'tab-item'}>
             <Icon size={13} /> {label}
           </button>
@@ -238,6 +248,62 @@ export default function Firewall() {
                         title="Unblock">
                         <Trash2 size={13} />
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {tab === 'geo' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-3 max-w-sm">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Block Country</h2>
+            <p className="text-xs text-slate-500">Downloads country IP ranges from ipdeny.com and blocks them via firewalld ipset.</p>
+            <div>
+              <label className="label">Country Code (ISO 3166-1 alpha-2)</label>
+              <input className="input font-mono uppercase" placeholder="CN, RU, KP…" maxLength={2}
+                value={geoCode} onChange={e => setGeoCode(e.target.value.toUpperCase())} />
+            </div>
+            <button
+              disabled={loading || geoCode.length !== 2}
+              className="btn-danger"
+              onClick={async () => {
+                setLoading(true);
+                try {
+                  await axios.post('/api/firewall/geo-blocks', { country_code: geoCode });
+                  toast.success(`Country ${geoCode} blocked`); setGeoCode(''); loadGeo();
+                } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+                setLoading(false);
+              }}
+            ><MapPin size={14} /> Block Country</button>
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Country Code</th>
+                <th className="px-4 py-3 w-12" />
+              </tr></thead>
+              <tbody>
+                {geoBlocks.length === 0 ? (
+                  <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No countries blocked</td></tr>
+                ) : geoBlocks.map(code => (
+                  <tr key={code} className={rowCls}>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
+                          <MapPin size={13} className="text-rose-600 dark:text-rose-400" />
+                        </div>
+                        <span className="font-mono font-bold text-slate-900 dark:text-slate-100">{code}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <button onClick={async () => {
+                        await axios.delete(`/api/firewall/geo-blocks/${code}`);
+                        toast.success(`${code} unblocked`); loadGeo();
+                      }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ))}

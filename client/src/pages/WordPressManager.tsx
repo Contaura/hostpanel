@@ -13,12 +13,17 @@ export default function WordPressManager() {
   const [info, setInfo] = useState<any>(null);
   const [plugins, setPlugins] = useState<any[]>([]);
   const [themes, setThemes] = useState<any[]>([]);
-  const [tab, setTab] = useState<'overview' | 'plugins' | 'themes' | 'tools'>('overview');
+  const [tab, setTab] = useState<'overview' | 'plugins' | 'themes' | 'tools' | 'auto-update'>('overview');
+  const [autoUpdates, setAutoUpdates] = useState<any[]>([]);
+  const [autoUpdateForm, setAutoUpdateForm] = useState({ update_core: true, update_plugins: true, update_themes: true, schedule: 'weekly' });
   const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
   const [srForm, setSrForm] = useState({ search: '', replace: '' });
 
-  useEffect(() => { api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : [])); }, []);
+  useEffect(() => {
+    api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []));
+    api('/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : []));
+  }, []);
 
   async function selectSite(domain: string) {
     setSelected(domain); setOutput(''); setInfo(null); setPlugins([]); setThemes([]);
@@ -79,9 +84,9 @@ export default function WordPressManager() {
       {selected && info && (
         <>
           <div className="tab-bar">
-            {(['overview', 'plugins', 'themes', 'tools'] as const).map(t => (
+            {(['overview', 'plugins', 'themes', 'tools', 'auto-update'] as const).map(t => (
               <button key={t} className={`tab-item ${tab === t ? 'tab-item-active' : ''}`} onClick={() => setTab(t)}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'auto-update' ? 'Auto-Update' : t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
             ))}
           </div>
@@ -187,6 +192,63 @@ export default function WordPressManager() {
               </div>
               <button className="btn-primary" onClick={searchReplace} disabled={loading}>Run Search-Replace</button>
               {output && <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{output}</pre>}
+            </div>
+          )}
+
+          {tab === 'auto-update' && (
+            <div className="space-y-4">
+              <div className="card p-5 space-y-4 max-w-md">
+                <p className="text-sm font-bold">Configure Auto-Update for {selected}</p>
+                <div className="space-y-2">
+                  {([['update_core', 'Update Core'], ['update_plugins', 'Update Plugins'], ['update_themes', 'Update Themes']] as const).map(([k, label]) => (
+                    <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input type="checkbox" checked={autoUpdateForm[k]} onChange={e => setAutoUpdateForm(f => ({ ...f, [k]: e.target.checked }))} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <label className="label">Schedule</label>
+                  <select className="input" value={autoUpdateForm.schedule} onChange={e => setAutoUpdateForm(f => ({ ...f, schedule: e.target.value }))}>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-primary" onClick={async () => {
+                    await api(`/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
+                    const d = await api('/auto-updates').then(r => r.json());
+                    setAutoUpdates(Array.isArray(d) ? d : []);
+                    toast.success('Auto-update schedule saved');
+                  }}>Save Schedule</button>
+                  <button className="btn-secondary text-red-500" onClick={async () => {
+                    await api(`/auto-updates/${selected}`, { method: 'DELETE' });
+                    const d = await api('/auto-updates').then(r => r.json());
+                    setAutoUpdates(Array.isArray(d) ? d : []);
+                    toast.success('Auto-update removed');
+                  }}>Remove</button>
+                </div>
+              </div>
+
+              <div className="card overflow-hidden p-0">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide px-4 py-3 border-b border-slate-100 dark:border-slate-700">All Scheduled Auto-Updates</p>
+                <table className="w-full text-sm">
+                  <thead><tr>{['Domain', 'Core', 'Plugins', 'Themes', 'Schedule'].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {autoUpdates.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-400">No auto-updates configured</td></tr>}
+                    {autoUpdates.map((u: any) => (
+                      <tr key={u.domain} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="table-cell font-medium">{u.domain}</td>
+                        <td className="table-cell">{u.update_core ? '✓' : '—'}</td>
+                        <td className="table-cell">{u.update_plugins ? '✓' : '—'}</td>
+                        <td className="table-cell">{u.update_themes ? '✓' : '—'}</td>
+                        <td className="table-cell"><span className="badge-blue text-xs">{u.schedule}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </>

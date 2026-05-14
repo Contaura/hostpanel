@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Folder, File, Upload, FolderPlus, Trash2, Edit3,
   Download, ChevronRight, Home, RefreshCw, X, Save, AlertCircle, Lock,
-  Archive, PackageOpen,
+  Archive, PackageOpen, Scissors, Clipboard, PenLine,
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
@@ -36,6 +36,9 @@ export default function FileManager() {
   const [compressFormat, setCompressFormat] = useState<'tar.gz' | 'zip'>('tar.gz');
   const [compressName, setCompressName] = useState('');
   const [showCompress, setShowCompress] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameTo, setRenameTo] = useState('');
+  const [clipboard, setClipboard] = useState<{ items: string[]; srcPath: string } | null>(null);
 
   async function loadDir(path: string) {
     setLoading(true); setError('');
@@ -124,6 +127,36 @@ export default function FileManager() {
     } catch (e: any) { toast.error(e.response?.data?.error || 'Extract failed'); }
   }
 
+  async function renameItem() {
+    if (!renameTarget || !renameTo.trim()) { toast.error('Enter a new name'); return; }
+    try {
+      await axios.post('/api/files/rename', { from: `${currentPath}/${renameTarget}`, to: `${currentPath}/${renameTo.trim()}` });
+      toast.success('Renamed');
+      setRenameTarget(null); setRenameTo(''); loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Rename failed'); }
+  }
+
+  function cutSelected() {
+    if (!selected.size) { toast.error('Select files first'); return; }
+    setClipboard({ items: Array.from(selected), srcPath: currentPath });
+    setSelected(new Set());
+    toast.success(`${selected.size} item(s) cut`);
+  }
+
+  async function pasteItems() {
+    if (!clipboard) return;
+    try {
+      await Promise.all(clipboard.items.map(name =>
+        axios.post('/api/files/move', {
+          from: `${clipboard.srcPath}/${name}`,
+          to: `${currentPath}/${name}`,
+        })
+      ));
+      toast.success(`${clipboard.items.length} item(s) moved`);
+      setClipboard(null); loadDir(currentPath);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Move failed'); }
+  }
+
   async function applyChmod() {
     if (!chmodTarget || !/^[0-7]{3,4}$/.test(chmodMode)) { toast.error('Invalid permission mode'); return; }
     try {
@@ -172,8 +205,18 @@ export default function FileManager() {
             <FolderPlus size={14} /> New folder
           </button>
           {selected.size > 0 && (
-            <button onClick={() => setShowCompress(true)} className="btn-secondary">
-              <Archive size={14} /> Compress {selected.size} file{selected.size !== 1 ? 's' : ''}
+            <>
+              <button onClick={() => setShowCompress(true)} className="btn-secondary">
+                <Archive size={14} /> Compress ({selected.size})
+              </button>
+              <button onClick={cutSelected} className="btn-secondary">
+                <Scissors size={14} /> Cut ({selected.size})
+              </button>
+            </>
+          )}
+          {clipboard && (
+            <button onClick={pasteItems} className="btn-secondary text-amber-600 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-700">
+              <Clipboard size={14} /> Paste ({clipboard.items.length})
             </button>
           )}
           <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="btn-primary">
@@ -286,6 +329,7 @@ export default function FileManager() {
                         )}
                       </>
                     )}
+                    <button onClick={() => { setRenameTarget(item.name); setRenameTo(item.name); }} className="btn-icon" title="Rename"><PenLine size={13} /></button>
                     <button onClick={() => { setChmodTarget(item); setChmodMode('755'); setChmodRecursive(false); }} className="btn-icon" title="Permissions"><Lock size={13} /></button>
                     <button onClick={() => deleteItem(item)}
                       className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 transition-all">
@@ -298,6 +342,24 @@ export default function FileManager() {
           </tbody>
         </table>
       </div>
+
+      {/* Rename dialog */}
+      {renameTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setRenameTarget(null)}>
+          <div className="card p-5 w-80 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-sm">Rename</h3>
+            <div>
+              <label className="label">New Name</label>
+              <input className="input font-mono" value={renameTo} onChange={e => setRenameTo(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && renameItem()} autoFocus />
+            </div>
+            <div className="flex gap-2">
+              <button className="btn-primary" onClick={renameItem}>Rename</button>
+              <button className="btn-ghost" onClick={() => setRenameTarget(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Compress dialog */}
       {showCompress && (

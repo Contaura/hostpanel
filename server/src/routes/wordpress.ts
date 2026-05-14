@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import db from '../db';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -143,4 +144,39 @@ router.post('/:domain/search-replace', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Auto-update scheduler ───────────────────────────────────── */
+
+// Ensure table exists
+db.exec(`CREATE TABLE IF NOT EXISTS wp_auto_updates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL UNIQUE,
+  update_core INTEGER DEFAULT 1,
+  update_plugins INTEGER DEFAULT 1,
+  update_themes INTEGER DEFAULT 1,
+  schedule TEXT DEFAULT 'weekly',
+  created_at TEXT DEFAULT (datetime('now'))
+)`);
+
+router.get('/auto-updates', (_req: Request, res: Response) => {
+  res.json(db.prepare('SELECT * FROM wp_auto_updates').all());
+});
+
+router.put('/auto-updates/:domain', (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const { update_core = 1, update_plugins = 1, update_themes = 1, schedule = 'weekly' } = req.body;
+  db.prepare(`
+    INSERT INTO wp_auto_updates (domain, update_core, update_plugins, update_themes, schedule)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(domain) DO UPDATE SET update_core=excluded.update_core, update_plugins=excluded.update_plugins, update_themes=excluded.update_themes, schedule=excluded.schedule
+  `).run(domain, update_core ? 1 : 0, update_plugins ? 1 : 0, update_themes ? 1 : 0, schedule);
+  res.json({ success: true });
+});
+
+router.delete('/auto-updates/:domain', (req: Request, res: Response) => {
+  db.prepare('DELETE FROM wp_auto_updates WHERE domain = ?').run(req.params.domain);
+  res.json({ success: true });
+});
+
 export default router;
+

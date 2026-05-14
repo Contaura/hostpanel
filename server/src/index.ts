@@ -53,6 +53,7 @@ import addonDomainsRoutes    from './routes/addon-domains';
 import wordpressRoutes       from './routes/wordpress';
 import parkedDomainsRoutes   from './routes/parked-domains';
 import nodeAppsRoutes        from './routes/node-apps';
+import serverInfoRoutes      from './routes/server-info';
 import { authenticateToken } from './middleware/auth';
 import { setupTerminal } from './terminal';
 
@@ -158,6 +159,7 @@ app.use('/api/addon-domains',  authenticateToken, addonDomainsRoutes);
 app.use('/api/wordpress',      authenticateToken, wordpressRoutes);
 app.use('/api/parked-domains', authenticateToken, parkedDomainsRoutes);
 app.use('/api/node-apps',      authenticateToken, nodeAppsRoutes);
+app.use('/api/server-info',    authenticateToken, serverInfoRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

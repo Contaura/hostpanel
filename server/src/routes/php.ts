@@ -90,4 +90,46 @@ router.post('/settings', async (req: AuthRequest, res: Response) => {
   }
 });
 
+/* ── Per-domain .user.ini editor ─────────────────────────── */
+
+const WEBROOT = process.env.WEBROOT || '/var/www';
+const USER_INI_KEYS = ['memory_limit', 'max_execution_time', 'upload_max_filesize', 'post_max_size', 'max_input_vars', 'display_errors', 'default_timezone'];
+
+function iniPath(domain: string) {
+  // sanitize
+  const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '');
+  return `${WEBROOT}/${safe}/public_html/.user.ini`;
+}
+
+router.get('/user-ini/:domain', async (req: AuthRequest, res: Response) => {
+  const p = iniPath(req.params.domain);
+  try {
+    const { readFileSync, existsSync } = await import('fs');
+    if (!existsSync(p)) return res.json({});
+    const raw = readFileSync(p, 'utf8');
+    const settings: Record<string, string> = {};
+    for (const line of raw.split('\n')) {
+      const m = line.match(/^\s*([a-zA-Z_.]+)\s*=\s*(.+)/);
+      if (m) settings[m[1].trim()] = m[2].trim();
+    }
+    res.json(settings);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.put('/user-ini/:domain', async (req: AuthRequest, res: Response) => {
+  const p = iniPath(req.params.domain);
+  const settings: Record<string, string> = req.body || {};
+  try {
+    const { mkdirSync, writeFileSync } = await import('fs');
+    const { dirname } = await import('path');
+    mkdirSync(dirname(p), { recursive: true });
+    const lines = USER_INI_KEYS
+      .filter(k => settings[k] !== undefined && settings[k] !== '')
+      .map(k => `${k} = ${String(settings[k]).replace(/[^\w\s.EMGKB\-+]/gi, '')}`);
+    writeFileSync(p, lines.join('\n') + '\n');
+    res.json({ success: true });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 export default router;
+

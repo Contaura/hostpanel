@@ -25,7 +25,7 @@ const SETTING_LABELS: Record<string, { label: string; hint: string; type: 'text'
 
 export default function PHPManager() {
   const toast = useToast();
-  const [tab, setTab] = useState<'info' | 'settings' | 'extensions'>('info');
+  const [tab, setTab] = useState<'info' | 'settings' | 'extensions' | 'domain-ini'>('info');
   const [info, setInfo] = useState<PHPInfo | null>(null);
   const [settings, setSettings] = useState<Settings>({});
   const [editSettings, setEditSettings] = useState<Settings>({});
@@ -58,6 +58,29 @@ export default function PHPManager() {
 
   const filteredExts = info?.extensions.filter(e => e.toLowerCase().includes(extSearch.toLowerCase())) ?? [];
 
+  const [domainIniDomain, setDomainIniDomain] = useState('');
+  const [domainIniSettings, setDomainIniSettings] = useState<Record<string, string>>({});
+  const [domainIniLoaded, setDomainIniLoaded] = useState(false);
+  const [domainIniSaving, setDomainIniSaving] = useState(false);
+
+  async function loadDomainIni() {
+    if (!domainIniDomain.trim()) return toast.error('Enter a domain');
+    try {
+      const { data } = await axios.get(`/api/php/user-ini/${domainIniDomain.trim()}`);
+      setDomainIniSettings(data || {});
+      setDomainIniLoaded(true);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load'); }
+  }
+
+  async function saveDomainIni() {
+    setDomainIniSaving(true);
+    try {
+      await axios.put(`/api/php/user-ini/${domainIniDomain.trim()}`, domainIniSettings);
+      toast.success('.user.ini saved');
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to save'); }
+    setDomainIniSaving(false);
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -78,8 +101,8 @@ export default function PHPManager() {
       )}
 
       <div className="tab-bar">
-        {([['info', 'Overview', Code2], ['settings', 'Settings', Settings], ['extensions', 'Extensions', Package]] as const).map(([t, label, Icon]) => (
-          <button key={t} onClick={() => setTab(t)} className={tab === t ? 'tab-item-active' : 'tab-item'}>
+        {([['info', 'Overview', Code2], ['settings', 'Settings', Settings], ['extensions', 'Extensions', Package], ['domain-ini', 'Per-Domain PHP', Code2]] as const).map(([t, label, Icon]) => (
+          <button key={t} onClick={() => setTab(t as any)} className={tab === t ? 'tab-item-active' : 'tab-item'}>
             <Icon size={13} /> {label}
           </button>
         ))}
@@ -152,6 +175,42 @@ export default function PHPManager() {
               <div className="col-span-3 text-sm text-slate-400 text-center py-4">No extensions found</div>
             )}
           </div>
+        </div>
+      )}
+      {tab === 'domain-ini' && (
+        <div className="card p-6 space-y-4 max-w-xl">
+          <p className="text-sm text-slate-600 dark:text-slate-400">Override PHP settings per-domain via <code className="font-mono text-xs bg-slate-100 dark:bg-slate-800 px-1 rounded">.user.ini</code> in the domain's public_html folder.</p>
+          <div className="flex gap-2">
+            <input className="input flex-1" placeholder="example.com" value={domainIniDomain}
+              onChange={e => { setDomainIniDomain(e.target.value); setDomainIniLoaded(false); }} />
+            <button className="btn-secondary" onClick={loadDomainIni}>Load</button>
+          </div>
+          {domainIniLoaded && (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                {Object.entries(SETTING_LABELS).map(([key, { label, hint, type }]) => (
+                  <div key={key}>
+                    <label className="label">{label}</label>
+                    {type === 'select' ? (
+                      <select className="input" value={domainIniSettings[key] || ''}
+                        onChange={e => setDomainIniSettings(s => ({ ...s, [key]: e.target.value }))}>
+                        <option value="">— use global —</option>
+                        <option value="On">On</option>
+                        <option value="Off">Off</option>
+                      </select>
+                    ) : (
+                      <input className="input font-mono" placeholder={hint}
+                        value={domainIniSettings[key] || ''}
+                        onChange={e => setDomainIniSettings(s => ({ ...s, [key]: e.target.value }))} />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button onClick={saveDomainIni} disabled={domainIniSaving} className="btn-primary">
+                <Save size={14} /> {domainIniSaving ? 'Saving…' : 'Save .user.ini'}
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
