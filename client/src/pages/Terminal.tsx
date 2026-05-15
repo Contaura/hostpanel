@@ -68,9 +68,18 @@ export default function TerminalPage() {
     fitRef.current  = fitAddon;
 
     // --- WebSocket ---
+    // Pass the JWT via the Sec-WebSocket-Protocol header (browsers expose this
+    // through the optional 2nd arg to `new WebSocket`). Putting the token in
+    // the URL query string would leak it into Apache/proxy access logs and
+    // the browser's history — Sec-WebSocket-Protocol is request-only and not
+    // logged by default. We tag the value with `hp-token.<jwt>` so the server
+    // can find it without colliding with any real subprotocol negotiation.
     const token = localStorage.getItem('hp_token') ?? '';
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/terminal?token=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(
+      `${proto}//${window.location.host}/api/terminal`,
+      [`hp-token.${token}`]
+    );
     wsRef.current = ws;
     ws.binaryType = 'arraybuffer';
 

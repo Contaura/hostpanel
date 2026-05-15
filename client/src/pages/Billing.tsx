@@ -4,6 +4,7 @@ import axios from 'axios';
 import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
+import { safeHttpUrl } from '../lib/safeUrl';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() });
@@ -126,9 +127,11 @@ export default function Billing() {
     setPayingId(invoice.id);
     try {
       const { data } = await axios.post('/api/stripe/checkout', { invoice_id: invoice.id }, { headers: authHeaders() });
-      window.location.href = data.url;
+      const safe = safeHttpUrl(data.url);
+      if (!safe) throw new Error('Stripe returned an unexpected redirect URL');
+      window.location.href = safe;
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to start Stripe checkout');
+      toast.error(err.response?.data?.error || err.message || 'Failed to start Stripe checkout');
       setPayingId(null);
     }
   }
@@ -137,9 +140,11 @@ export default function Billing() {
     setPayingId(invoice.id);
     try {
       const { data } = await axios.post('/api/paypal/checkout', { invoice_id: invoice.id }, { headers: authHeaders() });
-      window.location.href = data.url;
+      const safe = safeHttpUrl(data.url);
+      if (!safe) throw new Error('PayPal returned an unexpected redirect URL');
+      window.location.href = safe;
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'PayPal not configured. Add credentials in Settings.');
+      toast.error(err.response?.data?.error || err.message || 'PayPal not configured. Add credentials in Settings.');
       setPayingId(null);
     }
   }

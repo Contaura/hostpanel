@@ -4,14 +4,34 @@ import * as pty from 'node-pty';
 import jwt from 'jsonwebtoken';
 
 export function setupTerminal(httpServer: HttpServer): void {
-  const wss = new WebSocketServer({ server: httpServer, path: '/api/terminal' });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    path: '/api/terminal',
+    // Browsers refuse the connection unless the server echoes a chosen
+    // subprotocol back. The token-carrying entry is `hp-token.<jwt>`; we
+    // accept it (and any other client-offered protocol) so the handshake
+    // succeeds. The actual auth check happens in the connection handler.
+    handleProtocols: (protocols) => {
+      const arr = Array.isArray(protocols) ? protocols : Array.from(protocols as Iterable<string>);
+      const tokenEntry = arr.find(p => p.startsWith('hp-token.'));
+      return tokenEntry || arr[0] || false;
+    },
+  });
 
   wss.on('connection', (ws: WebSocket, req) => {
     const JWT_SECRET = process.env.JWT_SECRET || 'hostpanel-secret-change-in-production';
 
-    // Authenticate via token in query string (WebSocket can't send headers from browser)
+    // Pull the JWT from the Sec-WebSocket-Protocol header (the only request-
+    // time header a browser can attach to `new WebSocket`). The client wraps
+    // the token as `hp-token.<jwt>` so we can distinguish it from any other
+    // subprotocol entry. Legacy clients that still send ?token=… in the URL
+    // query string fall back to the URL path during the rollout window.
+    const protoHdr = (req.headers['sec-websocket-protocol'] as string | undefined) || '';
+    const protoEntries = protoHdr.split(',').map(s => s.trim()).filter(Boolean);
+    const protoToken = protoEntries.find(p => p.startsWith('hp-token.'))?.slice('hp-token.'.length);
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-    const token = url.searchParams.get('token');
+    const queryToken = url.searchParams.get('token');
+    const token = protoToken || queryToken;
 
     if (!token) {
       ws.close(4001, 'Unauthorized: no token');

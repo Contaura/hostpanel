@@ -3,6 +3,7 @@ import { Plus, Trash2, ExternalLink, Users, ChevronDown, ChevronUp, Search } fro
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
 import { fetchApi } from '../lib/api';
+import { safeHttpUrl } from '../lib/safeUrl';
 
 export default function MailRouting() {
   const toast = useToast();
@@ -275,7 +276,7 @@ export default function MailRouting() {
           {webmail?.installed && (
             <>
               <p className="text-xs text-slate-500">Path: <code className="font-mono">{webmail.path}</code></p>
-              <a href={webmail.url || '/webmail'} target="_blank" rel="noopener noreferrer" className="btn-primary inline-flex">
+              <a href={safeHttpUrl(webmail.url) || '/webmail'} target="_blank" rel="noopener noreferrer" className="btn-primary inline-flex">
                 <ExternalLink size={14} className="mr-1" />Open Roundcube
               </a>
             </>

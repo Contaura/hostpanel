@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, QrCode, Lock } from 'lucide-react';
 import { useConfirm } from '../context/ConfirmContext';
+import { safeHttpUrl } from '../lib/safeUrl';
 
 interface Invoice { id: number; invoice_number: string; amount: number; currency: string; status: string; due_date: string; paid_date: string; created_at: string; account_domain: string; notes: string }
 
@@ -96,8 +97,10 @@ export default function ClientPortal() {
     setPayingId(invoice.id);
     try {
       const r = await axios.post('/api/stripe/checkout', { invoice_id: invoice.id });
-      window.location.href = r.data.url;
-    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Payment failed' }); }
+      const safe = safeHttpUrl(r.data.url);
+      if (!safe) throw new Error('Stripe returned an unexpected redirect URL');
+      window.location.href = safe;
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || e.message || 'Payment failed' }); }
     setPayingId(null);
   }
 
@@ -105,8 +108,10 @@ export default function ClientPortal() {
     setPayingId(invoice.id);
     try {
       const r = await axios.post('/api/paypal/checkout', { invoice_id: invoice.id });
-      window.location.href = r.data.url;
-    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'PayPal not configured' }); }
+      const safe = safeHttpUrl(r.data.url);
+      if (!safe) throw new Error('PayPal returned an unexpected redirect URL');
+      window.location.href = safe;
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || e.message || 'PayPal not configured' }); }
     setPayingId(null);
   }
 

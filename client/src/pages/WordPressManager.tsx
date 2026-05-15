@@ -3,6 +3,7 @@ import { RefreshCw, Power, Trash2, Download, Zap, Upload, Search } from 'lucide-
 import { useRef } from 'react';
 import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
+import { safeHttpUrl } from '../lib/safeUrl';
 
 export default function WordPressManager() {
   const toast = useToast();
@@ -146,7 +147,12 @@ export default function WordPressManager() {
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
                   <p className="text-xs text-slate-500">Site URL</p>
-                  <a href={info.url} target="_blank" rel="noopener noreferrer" className="text-indigo-500 text-sm font-mono truncate block mt-0.5">{info.url}</a>
+                  {(() => {
+                    const safe = safeHttpUrl(info.url);
+                    return safe
+                      ? <a href={safe} target="_blank" rel="noopener noreferrer" className="text-indigo-500 text-sm font-mono truncate block mt-0.5">{info.url}</a>
+                      : <span className="text-slate-400 text-sm font-mono truncate block mt-0.5">{info.url || '—'}</span>;
+                  })()}
                 </div>
                 <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-3">
                   <p className="text-xs text-slate-500">Plugins / Themes</p>
