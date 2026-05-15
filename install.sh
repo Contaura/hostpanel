@@ -47,6 +47,13 @@ if [[ ! -x /usr/local/bin/wp ]]; then
   chmod +x /usr/local/bin/wp
 fi
 
+# pm2 — used by /api/apps/* and /api/node-apps/* to run user Node and Python
+# apps under a process manager. Install globally via npm so it lands on
+# /usr/local/bin/pm2 and systemd's default PATH picks it up.
+if ! command -v pm2 &>/dev/null; then
+  npm install -g pm2 2>&1 | tail -3
+fi
+
 systemctl enable --now httpd mariadb postfix dovecot named vsftpd php-fpm
 
 # ── 3/9  MariaDB ─────────────────────────────────────────────────────────────

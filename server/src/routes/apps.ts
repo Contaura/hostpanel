@@ -6,6 +6,18 @@ import path from 'path';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
 
+// Every mutating endpoint here shells out to pm2 via execFile. If pm2 isn't
+// installed (fresh box that hasn't run the install.sh npm step yet) the
+// spawn fails with bare ENOENT, which used to surface as a 500 with "spawn
+// pm2 ENOENT" in the response. Pre-check pm2's presence and return a clean
+// 503 instead. `pm2 jlist` in the read path stays as-is because it's
+// wrapped in a try/catch that returns [] when pm2 is missing.
+function pm2NotInstalled(res: Response): boolean {
+  if (existsSync('/usr/local/bin/pm2') || existsSync('/usr/bin/pm2')) return false;
+  res.status(503).json({ error: 'pm2 is not installed on this server. Install it with `npm install -g pm2` to use this feature.' });
+  return true;
+}
+
 const router = Router();
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -109,6 +121,7 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
 /* ── Control (start / stop / restart) ───────────────────── */
 
 router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
+  if (pm2NotInstalled(res)) return;
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
   try {
@@ -130,6 +143,7 @@ router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
 
 router.post('/:name/stop', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (pm2NotInstalled(res)) return;
   try {
     await execFileAsync('pm2', ['stop', req.params.name]);
     db.prepare("UPDATE managed_apps SET status='stopped' WHERE name=?").run(req.params.name);
@@ -139,6 +153,7 @@ router.post('/:name/stop', adminOnly, async (req: Request, res: Response) => {
 
 router.post('/:name/restart', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (pm2NotInstalled(res)) return;
   try {
     await execFileAsync('pm2', ['restart', req.params.name]);
     res.json({ success: true });
@@ -147,6 +162,7 @@ router.post('/:name/restart', adminOnly, async (req: Request, res: Response) => 
 
 router.post('/:name/logs', async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (pm2NotInstalled(res)) return;
   try {
     const { stdout } = await execFileAsync('pm2', ['logs', req.params.name, '--lines', '100', '--nostream']);
     res.json({ logs: stdout });

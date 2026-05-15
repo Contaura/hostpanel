@@ -398,7 +398,11 @@ router.delete('/remote-access/:user/:host', async (req: AuthRequest, res: Respon
   let conn;
   try {
     conn = await getConn();
-    await conn.query(`DROP USER IF EXISTS ?@?`, [user, decodeURIComponent(host)]);
+    // Express has already URL-decoded req.params.host once. The previous
+    // decodeURIComponent here was a *second* decode, which threw "URI
+    // malformed" on any host with a literal `%` (e.g. the SQL wildcard
+    // "10.0.0.%" — the standard MySQL host pattern). Use the param as-is.
+    await conn.query(`DROP USER IF EXISTS ?@?`, [user, host]);
     await conn.query('FLUSH PRIVILEGES');
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
