@@ -181,6 +181,9 @@ cat >/etc/httpd/conf.d/hostpanel-panel.conf <<VHOST
 </VirtualHost>
 VHOST
 
+# Allow Apache to proxy to local network ports (blocked by SELinux on RHEL/AlmaLinux by default)
+setsebool -P httpd_can_network_connect 1
+
 systemctl reload httpd
 
 # Optional TLS via Let's Encrypt — only applicable when PANEL_HOST is a real domain name
