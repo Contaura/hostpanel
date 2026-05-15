@@ -41,6 +41,7 @@ export default function Plans() {
   const [editing, setEditing] = useState<Plan | null>(null);
   const [form, setForm] = useState({ ...EMPTY_PLAN });
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   async function load() {
     try { const { data } = await axios.get<Plan[]>('/api/billing/plans'); setPlans(data); }
@@ -75,8 +76,10 @@ export default function Plans() {
 
   async function deletePlan(id: number) {
     if (!confirm('Delete this plan? Existing accounts using it will be unaffected.')) return;
+    setDeleting(id);
     try { await axios.delete(`/api/billing/plans/${id}`); toast.success('Plan deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   const field = (key: keyof typeof form, label: string, type: string = 'text', placeholder = '') => (
@@ -171,7 +174,7 @@ export default function Plans() {
                 className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30">
                 <Edit3 size={13} />
               </button>
-              <button onClick={() => deletePlan(plan.id)}
+              <button onClick={() => deletePlan(plan.id)} disabled={deleting === plan.id}
                 className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                 <Trash2 size={13} />
               </button>

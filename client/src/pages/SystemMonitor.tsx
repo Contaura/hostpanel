@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { useToast } from '../components/Toast';
-import { Bell, Package, AlertTriangle, CheckCircle, Plus, Trash2, RefreshCw, Download, BarChart2 } from 'lucide-react';
+import { Bell, Package, AlertTriangle, CheckCircle, Plus, Trash2, RefreshCw, Download, BarChart2, Search } from 'lucide-react';
 
 type Tab = 'alerts' | 'packages' | 'graphs';
 
@@ -36,6 +36,10 @@ export default function SystemMonitor() {
 
   // Graphs
   const [history, setHistory] = useState<any[]>([]);
+
+  // Search
+  const [pkgSearch, setPkgSearch] = useState('');
+  const [ruleSearch, setRuleSearch] = useState('');
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
@@ -153,7 +157,13 @@ export default function SystemMonitor() {
 
           {/* Rules */}
           <div className="card p-4 space-y-3">
-            <h3 className="font-semibold text-sm">Alert Rules</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm">Alert Rules</h3>
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-40 text-sm" placeholder="Filter rules…" value={ruleSearch} onChange={e => setRuleSearch(e.target.value)} />
+              </div>
+            </div>
             <div className="flex gap-3">
               <select className="input w-32" value={newRule.metric} onChange={e => setNewRule(p => ({ ...p, metric: e.target.value }))}>
                 {Object.entries(METRIC_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -163,21 +173,26 @@ export default function SystemMonitor() {
               <button className="btn-primary" onClick={addRule}><Plus size={14} /> Add</button>
             </div>
 
-            {rules.map(rule => (
-              <div key={rule.id} className="flex items-center gap-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
-                <span className="badge-info w-20 text-center">{METRIC_LABELS[rule.metric]}</span>
-                <span className="text-sm">≥ {rule.threshold}%</span>
-                {rule.notify_email && <span className="text-xs text-slate-500">{rule.notify_email}</span>}
-                <div className="ml-auto flex items-center gap-2">
-                  <label className="flex items-center gap-1 text-xs cursor-pointer">
-                    <input type="checkbox" checked={!!rule.enabled} onChange={() => toggleRule(rule)} />
-                    <span>{rule.enabled ? 'On' : 'Off'}</span>
-                  </label>
-                  <button className="btn-icon text-red-500" onClick={() => deleteRule(rule.id)}><Trash2 size={13} /></button>
+            {(() => {
+              const q = ruleSearch.trim().toLowerCase();
+              const visible = q ? rules.filter(r => [METRIC_LABELS[r.metric], r.notify_email].some(v => String(v ?? '').toLowerCase().includes(q))) : rules;
+              if (rules.length === 0) return <p className="text-sm text-slate-400">No alert rules configured</p>;
+              if (visible.length === 0) return <p className="text-sm text-slate-400">No rules match "{ruleSearch}"</p>;
+              return visible.map(rule => (
+                <div key={rule.id} className="flex items-center gap-3 py-2 border-b border-slate-100 dark:border-slate-800 last:border-0">
+                  <span className="badge-info w-20 text-center">{METRIC_LABELS[rule.metric]}</span>
+                  <span className="text-sm">≥ {rule.threshold}%</span>
+                  {rule.notify_email && <span className="text-xs text-slate-500">{rule.notify_email}</span>}
+                  <div className="ml-auto flex items-center gap-2">
+                    <label className="flex items-center gap-1 text-xs cursor-pointer">
+                      <input type="checkbox" checked={!!rule.enabled} onChange={() => toggleRule(rule)} />
+                      <span>{rule.enabled ? 'On' : 'Off'}</span>
+                    </label>
+                    <button className="btn-icon text-red-500" onClick={() => deleteRule(rule.id)}><Trash2 size={13} /></button>
+                  </div>
                 </div>
-              </div>
-            ))}
-            {rules.length === 0 && <p className="text-sm text-slate-400">No alert rules configured</p>}
+              ));
+            })()}
           </div>
         </div>
       )}
@@ -197,22 +212,35 @@ export default function SystemMonitor() {
             </div>
           </div>
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell w-8"><input type="checkbox" onChange={e => setSelected(e.target.checked ? new Set(updates.map(u => u.package)) : new Set())} /></th><th className="table-header-cell">Package</th><th className="table-header-cell">Version</th><th className="table-header-cell">Repository</th></tr></thead>
-              <tbody>
-                {pkgLoading && <tr><td colSpan={4} className="table-cell text-center py-8 text-slate-400">Checking for updates…</td></tr>}
-                {!pkgLoading && updates.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">System is up to date</td></tr>}
-                {updates.map(u => (
-                  <tr key={u.package} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell"><input type="checkbox" checked={selected.has(u.package)} onChange={e => setSelected(s => { const n = new Set(s); e.target.checked ? n.add(u.package) : n.delete(u.package); return n; })} /></td>
-                    <td className="table-cell font-mono text-xs">{u.package}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{u.version}</td>
-                    <td className="table-cell text-slate-500">{u.repo}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search packages…" value={pkgSearch} onChange={e => setPkgSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell w-8"><input type="checkbox" onChange={e => setSelected(e.target.checked ? new Set(updates.map(u => u.package)) : new Set())} /></th><th className="table-header-cell">Package</th><th className="table-header-cell">Version</th><th className="table-header-cell">Repository</th></tr></thead>
+                <tbody>
+                  {pkgLoading && <tr><td colSpan={4} className="table-cell text-center py-8 text-slate-400">Checking for updates…</td></tr>}
+                  {!pkgLoading && (() => {
+                    const q = pkgSearch.trim().toLowerCase();
+                    const visible = q ? updates.filter(u => [u.package, u.version, u.repo].some(v => v.toLowerCase().includes(q))) : updates;
+                    if (updates.length === 0) return <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">System is up to date</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No packages match "{pkgSearch}"</td></tr>;
+                    return visible.map(u => (
+                      <tr key={u.package} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell"><input type="checkbox" checked={selected.has(u.package)} onChange={e => setSelected(s => { const n = new Set(s); e.target.checked ? n.add(u.package) : n.delete(u.package); return n; })} /></td>
+                        <td className="table-cell font-mono text-xs">{u.package}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{u.version}</td>
+                        <td className="table-cell text-slate-500">{u.repo}</td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {updateLog && (

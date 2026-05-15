@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Code2, Settings, Package, Save, Sliders, Trash2 } from 'lucide-react';
+import { Code2, Settings, Package, Save, Sliders, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface PHPInfo {
@@ -194,8 +194,11 @@ export default function PHPManager() {
 
       {tab === 'extensions' && (
         <div className="card p-5 space-y-4 max-w-2xl">
-          <input className="input" placeholder="Search extensions…"
-            value={extSearch} onChange={e => setExtSearch(e.target.value)} />
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8" placeholder="Search extensions…"
+              value={extSearch} onChange={e => setExtSearch(e.target.value)} />
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {filteredExts.map(ext => (
               <div key={ext} className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 text-sm">

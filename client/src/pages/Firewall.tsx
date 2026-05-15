@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi, Play, Square, RotateCcw, Server } from 'lucide-react';
+import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi, Play, Square, RotateCcw, Server, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface FirewallStatus {
@@ -39,6 +39,9 @@ export default function Firewall() {
   const [ipv6Form, setIpv6Form] = useState('');
   const [svcStatuses, setSvcStatuses] = useState<{ name: string; status: string }[]>([]);
   const [svcLoading, setSvcLoading] = useState<string | null>(null);
+  const [ipSearch, setIpSearch] = useState('');
+  const [ipv6Search, setIpv6Search] = useState('');
+  const [geoSearch, setGeoSearch] = useState('');
 
   async function load() {
     try {
@@ -248,39 +251,54 @@ export default function Firewall() {
             </button>
           </form>
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                <th className="table-header-cell">Blocked IP / CIDR</th>
-                <th className="px-4 py-3 w-12" />
-              </tr></thead>
-              <tbody>
-                {(status?.blockedIPs.length ?? 0) === 0 ? (
-                  <tr><td colSpan={2} className="px-4 py-16 text-center">
-                    <ShieldCheck className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                    <p className="text-slate-400 text-sm">No IPs blocked</p>
-                  </td></tr>
-                ) : status!.blockedIPs.map(ip => (
-                  <tr key={ip} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
-                          <Ban size={13} className="text-rose-600 dark:text-rose-400" />
-                        </div>
-                        <span className="font-mono text-slate-900 dark:text-slate-100">{ip}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <button onClick={() => unblockIP(ip)}
-                        className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-emerald-600 dark:hover:!text-emerald-400 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30"
-                        title="Unblock">
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search IPs…" value={ipSearch} onChange={e => setIpSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  <th className="table-header-cell">Blocked IP / CIDR</th>
+                  <th className="px-4 py-3 w-12" />
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const blocked = status?.blockedIPs ?? [];
+                    const q = ipSearch.trim().toLowerCase();
+                    const visible = q ? blocked.filter(ip => ip.toLowerCase().includes(q)) : blocked;
+                    if (blocked.length === 0) return (
+                      <tr><td colSpan={2} className="px-4 py-16 text-center">
+                        <ShieldCheck className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                        <p className="text-slate-400 text-sm">No IPs blocked</p>
+                      </td></tr>
+                    );
+                    if (visible.length === 0) return <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-slate-400">No IPs match "{ipSearch}"</td></tr>;
+                    return visible.map(ip => (
+                      <tr key={ip} className={rowCls}>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
+                              <Ban size={13} className="text-rose-600 dark:text-rose-400" />
+                            </div>
+                            <span className="font-mono text-slate-900 dark:text-slate-100">{ip}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <button onClick={() => unblockIP(ip)}
+                            className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-emerald-600 dark:hover:!text-emerald-400 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30"
+                            title="Unblock">
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -309,35 +327,47 @@ export default function Firewall() {
             ><Wifi size={14} /> Block IPv6</button>
           </div>
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                <th className="table-header-cell">Blocked IPv6</th>
-                <th className="px-4 py-3 w-12" />
-              </tr></thead>
-              <tbody>
-                {ipv6Blocks.length === 0 ? (
-                  <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No IPv6 addresses blocked</td></tr>
-                ) : ipv6Blocks.map(addr => (
-                  <tr key={addr} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
-                          <Wifi size={13} className="text-rose-600 dark:text-rose-400" />
-                        </div>
-                        <span className="font-mono text-slate-900 dark:text-slate-100">{addr}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <button onClick={async () => {
-                        await axios.delete(`/api/firewall/ipv6-blocks/${encodeURIComponent(addr)}`);
-                        toast.success(`${addr} unblocked`); loadIpv6();
-                      }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search addresses…" value={ipv6Search} onChange={e => setIpv6Search(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  <th className="table-header-cell">Blocked IPv6</th>
+                  <th className="px-4 py-3 w-12" />
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = ipv6Search.trim().toLowerCase();
+                    const visible = q ? ipv6Blocks.filter(a => a.toLowerCase().includes(q)) : ipv6Blocks;
+                    if (ipv6Blocks.length === 0) return <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No IPv6 addresses blocked</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-slate-400">No addresses match "{ipv6Search}"</td></tr>;
+                    return visible.map(addr => (
+                      <tr key={addr} className={rowCls}>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
+                              <Wifi size={13} className="text-rose-600 dark:text-rose-400" />
+                            </div>
+                            <span className="font-mono text-slate-900 dark:text-slate-100">{addr}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <button onClick={async () => {
+                            await axios.delete(`/api/firewall/ipv6-blocks/${encodeURIComponent(addr)}`);
+                            toast.success(`${addr} unblocked`); loadIpv6();
+                          }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -423,35 +453,47 @@ export default function Firewall() {
             ><MapPin size={14} /> Block Country</button>
           </div>
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                <th className="table-header-cell">Country Code</th>
-                <th className="px-4 py-3 w-12" />
-              </tr></thead>
-              <tbody>
-                {geoBlocks.length === 0 ? (
-                  <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No countries blocked</td></tr>
-                ) : geoBlocks.map(code => (
-                  <tr key={code} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
-                          <MapPin size={13} className="text-rose-600 dark:text-rose-400" />
-                        </div>
-                        <span className="font-mono font-bold text-slate-900 dark:text-slate-100">{code}</span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-3">
-                      <button onClick={async () => {
-                        await axios.delete(`/api/firewall/geo-blocks/${code}`);
-                        toast.success(`${code} unblocked`); loadGeo();
-                      }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-40 text-sm" placeholder="Filter codes…" value={geoSearch} onChange={e => setGeoSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  <th className="table-header-cell">Country Code</th>
+                  <th className="px-4 py-3 w-12" />
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = geoSearch.trim().toLowerCase();
+                    const visible = q ? geoBlocks.filter(c => c.toLowerCase().includes(q)) : geoBlocks;
+                    if (geoBlocks.length === 0) return <tr><td colSpan={2} className="px-4 py-16 text-center text-slate-400 text-sm">No countries blocked</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={2} className="px-4 py-6 text-center text-sm text-slate-400">No codes match "{geoSearch}"</td></tr>;
+                    return visible.map(code => (
+                      <tr key={code} className={rowCls}>
+                        <td className="table-cell">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-7 w-7 rounded-lg bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center flex-shrink-0">
+                              <MapPin size={13} className="text-rose-600 dark:text-rose-400" />
+                            </div>
+                            <span className="font-mono font-bold text-slate-900 dark:text-slate-100">{code}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3">
+                          <button onClick={async () => {
+                            await axios.delete(`/api/firewall/geo-blocks/${code}`);
+                            toast.success(`${code} unblocked`); loadGeo();
+                          }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
