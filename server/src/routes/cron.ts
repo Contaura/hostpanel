@@ -7,7 +7,12 @@ import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
 import db from '../db';
-import { AuthRequest } from '../middleware/auth';
+import { AuthRequest, requireRole } from '../middleware/auth';
+
+// Cron routes are direct shell-exec primitives — POST /add and POST /run let
+// the caller run arbitrary commands as the panel uid (typically root). Keep
+// them off reseller/readonly tokens.
+const adminOnly = requireRole('superadmin', 'admin');
 
 function sendCronFailureEmail(command: string, exitCode: number, output: string) {
   const email = (db.prepare("SELECT value FROM settings WHERE key='cron_failure_email'").get() as any)?.value;
@@ -87,7 +92,7 @@ router.get('/list', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-router.post('/add', async (req: AuthRequest, res: Response) => {
+router.post('/add', adminOnly, async (req: AuthRequest, res: Response) => {
   const { minute = '*', hour = '*', day = '*', month = '*', weekday = '*', command } = req.body;
   if (!command?.trim()) return res.status(400).json({ error: 'Command is required' });
   for (const [name, val] of [['minute', minute], ['hour', hour], ['day', day], ['month', month], ['weekday', weekday]]) {
@@ -103,7 +108,7 @@ router.post('/add', async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.delete('/:id', async (req: AuthRequest, res: Response) => {
+router.delete('/:id', adminOnly, async (req: AuthRequest, res: Response) => {
   const id = parseInt(req.params.id);
   try {
     const raw = await readCrontab();
@@ -120,7 +125,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // Run a cron job on-demand and log output
-router.post('/run', async (req: AuthRequest, res: Response) => {
+router.post('/run', adminOnly, async (req: AuthRequest, res: Response) => {
   const { command } = req.body;
   if (!command?.trim()) return res.status(400).json({ error: 'command required' });
   try {
@@ -141,7 +146,7 @@ router.get('/logs', (_req: AuthRequest, res: Response) => {
   res.json(db.prepare('SELECT * FROM cron_logs ORDER BY ran_at DESC LIMIT 200').all());
 });
 
-router.delete('/logs', (_req: AuthRequest, res: Response) => {
+router.delete('/logs', adminOnly, (_req: AuthRequest, res: Response) => {
   db.prepare('DELETE FROM cron_logs').run();
   res.json({ success: true });
 });
@@ -153,7 +158,7 @@ router.get('/failure-email', (_req: AuthRequest, res: Response) => {
   res.json({ email: val });
 });
 
-router.post('/failure-email', (req: AuthRequest, res: Response) => {
+router.post('/failure-email', adminOnly, (req: AuthRequest, res: Response) => {
   const { email } = req.body;
   db.prepare("INSERT INTO settings (key, value) VALUES ('cron_failure_email', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(email || '');
   res.json({ success: true });
@@ -185,7 +190,7 @@ router.get('/account/:user', async (req: AuthRequest, res: Response) => {
   res.json(jobs);
 });
 
-router.post('/account/:user', async (req: AuthRequest, res: Response) => {
+router.post('/account/:user', adminOnly, async (req: AuthRequest, res: Response) => {
   const { user } = req.params;
   if (!USER_RE.test(user)) return res.status(400).json({ error: 'Invalid username' });
   const { schedule, command } = req.body;
@@ -203,7 +208,7 @@ router.post('/account/:user', async (req: AuthRequest, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/account/:user/:index', async (req: AuthRequest, res: Response) => {
+router.delete('/account/:user/:index', adminOnly, async (req: AuthRequest, res: Response) => {
   const { user } = req.params;
   const idx = parseInt(req.params.index);
   if (!USER_RE.test(user)) return res.status(400).json({ error: 'Invalid username' });

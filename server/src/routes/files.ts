@@ -31,7 +31,10 @@ const upload = multer({
         cb(e, '');
       }
     },
-    filename: (_req, file, cb) => cb(null, file.originalname),
+    // multer doesn't sanitize the filename it gets handed. Strip any directory
+    // components from originalname so an upload named ../../etc/passwd writes
+    // as etc-passwd inside the validated destination instead of escaping it.
+    filename: (_req, file, cb) => cb(null, path.basename(file.originalname || 'upload').replace(/^\.+/, '_').slice(0, 255) || 'upload'),
   }),
   limits: { fileSize: 500 * 1024 * 1024 },
 });

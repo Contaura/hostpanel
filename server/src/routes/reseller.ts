@@ -2,12 +2,18 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import db from '../db';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 
+// Only superadmin/admin can manage reseller accounts. Without this, a
+// reseller-role token could create siblings, raise its own allocations via
+// PUT /:id, or delete other resellers' admin_users rows.
+const adminOnly = requireRole('superadmin', 'admin');
+
 /* ── List resellers ──────────────────────────────────────── */
 
-router.get('/', (_req: Request, res: Response) => {
+router.get('/', adminOnly, (_req: Request, res: Response) => {
   const rows = db.prepare(`
     SELECT r.*, u.username, u.email, u.role,
            COUNT(DISTINCT a.id) as account_count,
@@ -26,7 +32,7 @@ router.get('/', (_req: Request, res: Response) => {
 
 /* ── Create reseller account ─────────────────────────────── */
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', adminOnly, async (req: Request, res: Response) => {
   const { username, email, password, company, alloc_disk, alloc_bandwidth, alloc_accounts, alloc_emails, alloc_dbs } = req.body;
   if (!username || !email || !password) return res.status(400).json({ error: 'username, email, password required' });
   if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
@@ -47,7 +53,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 /* ── Update reseller allocations ─────────────────────────── */
 
-router.put('/:id', (req: Request, res: Response) => {
+router.put('/:id', adminOnly, (req: Request, res: Response) => {
   const { company, alloc_disk, alloc_bandwidth, alloc_accounts, alloc_emails, alloc_dbs } = req.body;
   db.prepare('UPDATE resellers SET company=?, alloc_disk=?, alloc_bandwidth=?, alloc_accounts=?, alloc_emails=?, alloc_dbs=? WHERE id=?')
     .run(company, alloc_disk, alloc_bandwidth, alloc_accounts, alloc_emails, alloc_dbs, req.params.id);
@@ -56,7 +62,7 @@ router.put('/:id', (req: Request, res: Response) => {
 
 /* ── Delete reseller ─────────────────────────────────────── */
 
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', adminOnly, (req: Request, res: Response) => {
   const reseller = db.prepare('SELECT * FROM resellers WHERE id = ?').get(req.params.id) as any;
   if (!reseller) return res.status(404).json({ error: 'Not found' });
   db.prepare('DELETE FROM admin_users WHERE id = ?').run(reseller.admin_user_id);
@@ -66,7 +72,7 @@ router.delete('/:id', (req: Request, res: Response) => {
 
 /* ── Reseller WHM summary with real usage ────────────────── */
 
-router.get('/:id/summary', async (req: Request, res: Response) => {
+router.get('/:id/summary', adminOnly, async (req: Request, res: Response) => {
   const reseller = db.prepare('SELECT r.*, u.username FROM resellers r LEFT JOIN admin_users u ON r.admin_user_id = u.id WHERE r.id = ?').get(req.params.id) as any;
   if (!reseller) return res.status(404).json({ error: 'Not found' });
 

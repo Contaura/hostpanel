@@ -125,7 +125,11 @@ router.get('/relay', async (_req: Request, res: Response) => {
 router.put('/relay', async (req: Request, res: Response) => {
   const { relayhost, sasl_user, sasl_pass } = req.body;
   if (!relayhost) return res.status(400).json({ error: 'relayhost required' });
+  // CRLF in any of these lets the caller inject arbitrary postfix config
+  // lines into main.cf or extra credential lines into sasl_passwd.
   if (/[\r\n]/.test(relayhost)) return res.status(400).json({ error: 'Invalid relayhost' });
+  if (sasl_user && /[\r\n]/.test(String(sasl_user))) return res.status(400).json({ error: 'Invalid sasl_user' });
+  if (sasl_pass && /[\r\n]/.test(String(sasl_pass))) return res.status(400).json({ error: 'Invalid sasl_pass' });
   try {
     let conf = existsSync(MAIN_CF) ? readFileSync(MAIN_CF, 'utf8') : '';
 

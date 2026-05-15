@@ -39,7 +39,12 @@ router.get('/list', async (req: AuthRequest, res: Response) => {
 
 router.delete('/:pid', async (req: AuthRequest, res: Response) => {
   const pid = parseInt(req.params.pid, 10);
-  if (!pid || pid < 2) return res.status(400).json({ error: 'Invalid PID' });
+  // Reject low PIDs — init (1), kthreadd (2), and most kernel threads /
+  // critical system daemons live well below 100. Killing them from the panel
+  // is almost always a mistake; let an operator drop to the terminal for
+  // those rare cases.
+  if (!Number.isFinite(pid) || pid < 100) return res.status(400).json({ error: 'Invalid PID (must be ≥ 100)' });
+  if (pid === process.pid) return res.status(400).json({ error: 'Refusing to kill the HostPanel server process' });
   try {
     await execAsync(`kill -15 ${pid} 2>/dev/null || kill -9 ${pid}`);
     res.json({ success: true });
