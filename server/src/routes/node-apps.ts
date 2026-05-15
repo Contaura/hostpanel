@@ -48,6 +48,7 @@ router.post('/node', async (req: AuthRequest, res: Response) => {
 });
 
 router.post('/node/:id/action', async (req: AuthRequest, res: Response) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Invalid app id' });
   const { action } = req.body; // start | stop | restart | delete
   const allowed = ['start', 'stop', 'restart', 'delete'];
   if (!allowed.includes(action)) return res.status(400).json({ error: 'Invalid action' });

@@ -71,9 +71,12 @@ router.get('/fail2ban', async (_req: Request, res: Response) => {
   } catch { res.json({ installed: false, jails: [] }); }
 });
 
+const JAIL_RE = /^[a-zA-Z0-9_-]+$/;
+
 router.post('/fail2ban/unban', async (req: Request, res: Response) => {
   const { jail, ip } = req.body;
   if (!jail || !ip) return res.status(400).json({ error: 'jail and ip required' });
+  if (!JAIL_RE.test(jail)) return res.status(400).json({ error: 'Invalid jail name' });
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
   try {
     await execAsync(`fail2ban-client set ${jail} unbanip ${ip}`);
@@ -84,6 +87,7 @@ router.post('/fail2ban/unban', async (req: Request, res: Response) => {
 router.post('/fail2ban/ban', async (req: Request, res: Response) => {
   const { jail, ip } = req.body;
   if (!jail || !ip) return res.status(400).json({ error: 'jail and ip required' });
+  if (!JAIL_RE.test(jail)) return res.status(400).json({ error: 'Invalid jail name' });
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
   try {
     await execAsync(`fail2ban-client set ${jail} banip ${ip}`);
@@ -92,6 +96,7 @@ router.post('/fail2ban/ban', async (req: Request, res: Response) => {
 });
 
 router.post('/fail2ban/:jail/toggle', async (req: Request, res: Response) => {
+  if (!JAIL_RE.test(req.params.jail)) return res.status(400).json({ error: 'Invalid jail name' });
   const { action } = req.body; // 'start' | 'stop'
   try {
     await execAsync(`fail2ban-client ${action === 'stop' ? 'stop' : 'start'} ${req.params.jail}`);
