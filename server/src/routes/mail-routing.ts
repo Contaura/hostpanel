@@ -124,7 +124,7 @@ router.get('/webmail', async (_req: Request, res: Response) => {
   const installed: string[] = [];
   try {
     const { stdout } = await execAsync(
-      '(rpm -q roundcubemail 2>/dev/null || test -d /usr/share/roundcubemail) && echo found || true'
+      '(rpm -q roundcubemail >/dev/null 2>&1 || test -d /usr/share/roundcubemail) && echo found || true'
     ).catch(() => ({ stdout: '' }));
     if (stdout.trim() === 'found') installed.push('Roundcube');
   } catch (_) {}

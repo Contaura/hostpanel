@@ -47,7 +47,7 @@ export default function BackupManager() {
       const [bRes, dRes, dbRes] = await Promise.all([
         axios.get<Backup[]>('/api/backup/list'),
         axios.get<string[]>('/api/domains/domains').catch(() => ({ data: [] })),
-        axios.get<{ name: string }[]>('/api/databases/list').catch(() => ({ data: [] })),
+        axios.get<{ name: string }[]>('/api/databases/databases').catch(() => ({ data: [] })),
       ]);
       setBackups(bRes.data);
       setDomains(dRes.data);

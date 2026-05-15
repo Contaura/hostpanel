@@ -76,6 +76,10 @@ if (process.env.NODE_ENV === 'production') {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// The Node process sits behind Apache on the loopback interface (see install.sh).
+// Trust X-Forwarded-* only from loopback so express-rate-limit keys on the real client IP.
+app.set('trust proxy', 'loopback');
+
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
 
 // IP whitelist — blocks non-listed IPs when any entries exist
@@ -196,6 +200,8 @@ app.use('/api/mail-tools',        authenticateToken, mailToolsRoutes);
 app.use('/api/security-scanner',  authenticateToken, securityScannerRoutes);
 
 if (process.env.NODE_ENV === 'production') {
+  // Unmatched /api/* requests must return JSON 404, not the SPA HTML.
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found' }));
   app.use(express.static(path.join(__dirname, '../../client/dist')));
   app.get('*', (_req, res) => {
     res.sendFile(path.join(__dirname, '../../client/dist/index.html'));

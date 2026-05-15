@@ -91,15 +91,16 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS admin_users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT NOT NULL UNIQUE,
-    email         TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'admin',
-    totp_secret   TEXT DEFAULT NULL,
-    totp_enabled  INTEGER NOT NULL DEFAULT 0,
-    last_login    TEXT,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    username          TEXT NOT NULL UNIQUE,
+    email             TEXT NOT NULL UNIQUE,
+    password_hash     TEXT NOT NULL,
+    role              TEXT NOT NULL DEFAULT 'admin',
+    totp_secret       TEXT DEFAULT NULL,
+    totp_enabled      INTEGER NOT NULL DEFAULT 0,
+    totp_backup_codes TEXT DEFAULT NULL,
+    last_login        TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS api_tokens (
@@ -157,12 +158,14 @@ db.exec(`
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     account_id  INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
     client_id   INTEGER REFERENCES clients(id)  ON DELETE CASCADE,
+    plan_id     INTEGER REFERENCES plans(id)   ON DELETE SET NULL,
     amount      REAL    NOT NULL,
     currency    TEXT    NOT NULL DEFAULT 'USD',
-    interval    TEXT    NOT NULL DEFAULT 'monthly',
-    next_due    TEXT    NOT NULL,
+    cycle       TEXT    NOT NULL DEFAULT 'monthly',
+    next_run    TEXT,
     last_run    TEXT,
-    enabled     INTEGER NOT NULL DEFAULT 1,
+    status      TEXT    NOT NULL DEFAULT 'active',
+    notes       TEXT    DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -290,6 +293,14 @@ tryAlter("ALTER TABLE invoices ADD COLUMN tax_rate REAL NOT NULL DEFAULT 0");
 tryAlter("ALTER TABLE invoices ADD COLUMN tax_amount REAL NOT NULL DEFAULT 0");
 tryAlter("ALTER TABLE invoices ADD COLUMN discount REAL NOT NULL DEFAULT 0");
 tryAlter("ALTER TABLE invoices ADD COLUMN items TEXT NOT NULL DEFAULT '[]'");
+tryAlter("ALTER TABLE admin_users ADD COLUMN totp_backup_codes TEXT DEFAULT NULL");
+// recurring_schedules grew new columns since its initial schema; the route handlers
+// reference plan_id/cycle/next_run/status/notes — add them on existing installs.
+tryAlter("ALTER TABLE recurring_schedules ADD COLUMN plan_id INTEGER REFERENCES plans(id) ON DELETE SET NULL");
+tryAlter("ALTER TABLE recurring_schedules ADD COLUMN cycle TEXT NOT NULL DEFAULT 'monthly'");
+tryAlter("ALTER TABLE recurring_schedules ADD COLUMN next_run TEXT");
+tryAlter("ALTER TABLE recurring_schedules ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+tryAlter("ALTER TABLE recurring_schedules ADD COLUMN notes TEXT DEFAULT ''");
 
 // Seed default plans if empty
 const planCount = (db.prepare('SELECT COUNT(*) as n FROM plans').get() as { n: number }).n;

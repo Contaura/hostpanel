@@ -174,6 +174,9 @@ cat >/etc/httpd/conf.d/hostpanel-panel.conf <<VHOST
   ProxyPass        /ws  ws://127.0.0.1:3001/ws
   ProxyPassReverse /ws  ws://127.0.0.1:3001/ws
 
+  # Roundcube webmail — keep this path on Apache, do not proxy to Node
+  ProxyPass        /roundcube !
+
   # All other traffic forwarded to Node
   ProxyPreserveHost On
   ProxyPass        / http://127.0.0.1:3001/
@@ -192,6 +195,8 @@ Alias /roundcube /usr/share/roundcubemail
     Require all granted
 </Directory>
 RCUBE
+  # Roundcube needs PHP — make sure PHP-FPM is running so Apache can fcgi to it.
+  systemctl enable --now php-fpm
   echo "  Roundcube webmail configured at /roundcube"
 fi
 
