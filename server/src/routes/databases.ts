@@ -148,12 +148,11 @@ router.get('/databases/:name/export', async (req: AuthRequest, res: Response) =>
   const { name } = req.params;
   if (!/^[a-zA-Z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Invalid database name' });
   const user = DB_ROOT_USER;
-  const passArg = DB_ROOT_PASS ? `-p${DB_ROOT_PASS}` : '';
   res.setHeader('Content-Type', 'application/sql');
   res.setHeader('Content-Disposition', `attachment; filename="${name}-${Date.now()}.sql"`);
-  const child = require('child_process').spawn('mysqldump', [
-    `-u${user}`, ...(DB_ROOT_PASS ? [`-p${DB_ROOT_PASS}`] : []), name,
-  ]);
+  const child = require('child_process').spawn('mysqldump', [`-u${user}`, name], {
+    env: { ...process.env, ...(DB_ROOT_PASS ? { MYSQL_PWD: DB_ROOT_PASS } : {}) },
+  });
   child.stdout.pipe(res);
   child.stderr.on('data', (d: Buffer) => console.error('mysqldump stderr:', d.toString()));
   child.on('error', (err: Error) => { if (!res.headersSent) res.status(500).json({ error: err.message }); });
@@ -167,9 +166,9 @@ router.post('/databases/:name/import', sqlUpload.single('file'), async (req: Aut
   if (!req.file) return res.status(400).json({ error: 'No SQL file uploaded' });
   const tmpPath = req.file.path;
   const user = DB_ROOT_USER;
-  const passArg = DB_ROOT_PASS ? `-p${DB_ROOT_PASS}` : '';
+  const dbEnv = { ...process.env, ...(DB_ROOT_PASS ? { MYSQL_PWD: DB_ROOT_PASS } : {}) };
   try {
-    await execAsync(`mysql -u${user} ${passArg} ${name} < "${tmpPath}"`, { timeout: 300000 });
+    await execAsync(`mysql -u${user} ${name} < "${tmpPath}"`, { timeout: 300000, env: dbEnv });
     res.json({ success: true, message: `Imported into ${name}` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

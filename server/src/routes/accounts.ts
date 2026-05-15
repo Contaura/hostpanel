@@ -218,12 +218,12 @@ router.post('/:id/export', async (req: AuthRequest, res: Response) => {
     // Dump all databases owned by this account user
     const user = process.env.DB_ROOT_USER || 'root';
     const pass = process.env.DB_ROOT_PASS || '';
-    const passArg = pass ? `-p${pass}` : '';
+    const dbEnv = { ...process.env, ...(pass ? { MYSQL_PWD: pass } : {}) };
     try {
-      const { stdout: dbs } = await execAsync(`mysql -u${user} ${passArg} -e "SHOW DATABASES LIKE '${account.username}%'" -N 2>/dev/null`);
+      const { stdout: dbs } = await execAsync(`mysql -u${user} -e "SHOW DATABASES LIKE '${account.username}%'" -N 2>/dev/null`, { env: dbEnv });
       for (const dbName of dbs.split('\n').filter(Boolean)) {
         if (/^[a-zA-Z0-9_]+$/.test(dbName)) {
-          await execAsync(`mysqldump -u${user} ${passArg} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000 });
+          await execAsync(`mysqldump -u${user} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000, env: dbEnv });
         }
       }
     } catch {}
