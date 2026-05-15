@@ -26,6 +26,7 @@ export default function DomainManager() {
   const [dnsForm, setDnsForm] = useState({ domain: '', name: '', type: 'A', value: '', ttl: '3600' });
   const [dnsRecords, setDnsRecords] = useState<DNSRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [sslOutput, setSslOutput] = useState('');
   const [editingDns, setEditingDns] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<DNSRecord>({ name: '', type: 'A', value: '', ttl: '3600' });
@@ -38,8 +39,10 @@ export default function DomainManager() {
   const [deletingDns, setDeletingDns] = useState<number | null>(null);
 
   async function loadDomains() {
-    const { data } = await axios.get<string[]>('/api/domains/domains');
-    setDomains(data);
+    try {
+      const { data } = await axios.get<string[]>('/api/domains/domains');
+      setDomains(data);
+    } catch { /* ignore */ } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Domains — HostPanel';
@@ -126,6 +129,8 @@ export default function DomainManager() {
     try { await axios.put(`/api/domains/dns/${dnsForm.domain}/${index}`, editForm); toast.success('Record updated'); setEditingDns(null); loadDNS(dnsForm.domain); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

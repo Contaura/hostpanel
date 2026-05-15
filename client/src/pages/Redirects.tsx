@@ -23,6 +23,7 @@ export default function Redirects() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ domain: '', from: '/', to: '', type: '301' as '301' | '302' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
 
@@ -34,7 +35,7 @@ export default function Redirects() {
       ]);
       setRedirects(rRes.data);
       setDomains(dRes.data);
-    } catch { setRedirects([]); }
+    } catch { setRedirects([]); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Redirects — HostPanel';
@@ -61,6 +62,8 @@ export default function Redirects() {
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setDeleting(null); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

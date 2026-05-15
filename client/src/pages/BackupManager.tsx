@@ -28,6 +28,7 @@ export default function BackupManager() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ type: 'files', target: '' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [domains, setDomains] = useState<string[]>([]);
   const [databases, setDatabases] = useState<string[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -51,7 +52,7 @@ export default function BackupManager() {
       setBackups(bRes.data);
       setDomains(dRes.data);
       setDatabases(dbRes.data.map((d: any) => d.name));
-    } catch { setBackups([]); }
+    } catch { setBackups([]); } finally { setPageLoading(false); }
   }
 
   async function loadSchedules() {
@@ -141,6 +142,7 @@ export default function BackupManager() {
   const isDB = form.type === 'database';
   const targets = isDB ? databases : domains;
 
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

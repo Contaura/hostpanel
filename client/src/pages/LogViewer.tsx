@@ -20,6 +20,7 @@ export default function LogViewer() {
   const [search, setSearch] = useState('');
   const [lines, setLines] = useState(200);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [path, setPath] = useState('');
   const [mode, setMode] = useState<'system' | 'domain'>('system');
   const [domainList, setDomainList] = useState<string[]>([]);
@@ -47,7 +48,7 @@ export default function LogViewer() {
     try {
       const { data } = await axios.get<LogEntry[]>('/api/logs/list');
       setLogs(data);
-    } catch {}
+    } catch {} finally { setPageLoading(false); }
   }
 
   async function fetchLog(key = selected, numLines = lines) {
@@ -93,6 +94,8 @@ export default function LogViewer() {
   useEffect(() => { if (mode === 'domain' && selectedDomain) fetchDomainLog(); }, [selectedDomain, domainLogType]);
 
   const currentLog = logs.find(l => l.key === selected);
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

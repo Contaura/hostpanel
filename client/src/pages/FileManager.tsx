@@ -25,6 +25,7 @@ export default function FileManager() {
   const [currentPath, setCurrentPath] = useState('/');
   const [items, setItems] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<{ path: string; content: string } | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
@@ -49,7 +50,7 @@ export default function FileManager() {
       setCurrentPath(data.path); setItems(data.items);
     } catch (e: any) {
       setError(e.response?.data?.error || 'Failed to load directory');
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setPageLoading(false); }
   }
 
   useEffect(() => {
@@ -210,6 +211,8 @@ export default function FileManager() {
       </div>
     );
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-4">

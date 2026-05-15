@@ -21,6 +21,7 @@ export default function Subdomains() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subdomain: '', domain: '', docRoot: '' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -32,7 +33,7 @@ export default function Subdomains() {
       ]);
       setSubs(subsRes.data);
       setDomains(domsRes.data);
-    } catch { setSubs([]); }
+    } catch { setSubs([]); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Subdomains — HostPanel';
@@ -61,6 +62,8 @@ export default function Subdomains() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setDeleting(null); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

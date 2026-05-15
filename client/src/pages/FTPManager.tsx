@@ -19,14 +19,17 @@ export default function FTPManager() {
   const [form, setForm] = useState({ username: '', password: '', directory: '', max_rate: '' });
   const [newPass, setNewPass] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [limitsTarget, setLimitsTarget] = useState<string | null>(null);
   const [limitsForm, setLimitsForm] = useState<FTPLimits>({ max_rate: '' });
   const [search, setSearch] = useState('');
 
   async function load() {
-    const { data } = await axios.get<FTPUser[]>('/api/ftp/users');
-    setUsers(data);
+    try {
+      const { data } = await axios.get<FTPUser[]>('/api/ftp/users');
+      setUsers(data);
+    } catch { /* ignore */ } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'FTP Accounts — HostPanel';
@@ -67,6 +70,8 @@ export default function FTPManager() {
       toast.success('Password updated'); setNewPass(''); setPassTarget(null);
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

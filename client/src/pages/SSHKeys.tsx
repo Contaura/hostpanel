@@ -24,6 +24,7 @@ export default function SSHKeys() {
   const [showForm, setShowForm] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
 
   // Per-account state
   const [acctUsername, setAcctUsername] = useState('');
@@ -40,7 +41,7 @@ export default function SSHKeys() {
     try {
       const { data } = await axios.get<SSHKey[]>('/api/sshkeys/list');
       setKeys(data);
-    } catch { setKeys([]); }
+    } catch { setKeys([]); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'SSH Keys — HostPanel';
@@ -102,6 +103,8 @@ export default function SSHKeys() {
     'ssh-rsa': 'badge-blue', 'ssh-ed25519': 'badge-green',
     'ecdsa-sha2-nistp256': 'badge-yellow', 'ssh-dss': 'badge-gray',
   };
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

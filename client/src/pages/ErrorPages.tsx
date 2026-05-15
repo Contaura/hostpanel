@@ -17,6 +17,7 @@ export default function ErrorPages() {
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => {
     document.title = 'Error Pages — HostPanel';
@@ -27,7 +28,7 @@ export default function ErrorPages() {
     axios.get<string[]>('/api/domains/domains').then(r => {
       setDomains(r.data);
       if (r.data.length) setDomain(r.data[0]);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setPageLoading(false));
   }, []);
 
   async function loadPage() {
@@ -50,6 +51,8 @@ export default function ErrorPages() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to save'); }
     finally { setSaving(false); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

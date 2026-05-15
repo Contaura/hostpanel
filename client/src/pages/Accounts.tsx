@@ -41,6 +41,7 @@ export default function Accounts() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [usageData, setUsageData] = useState<Record<number, any>>({});
   const [loading, setLoading]   = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   const [editAccountForm, setEditAccountForm] = useState({ plan_id: '', client_id: '', notes: '', expires_at: '' });
   const [expiryChecking, setExpiryChecking] = useState(false);
@@ -61,7 +62,7 @@ export default function Accounts() {
       setAccounts(aRes.data);
       setPlans(pRes.data);
       setClients(cRes.data);
-    } catch { toast.error('Failed to load accounts'); }
+    } catch { toast.error('Failed to load accounts'); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Hosting Accounts — HostPanel';
@@ -159,6 +160,7 @@ export default function Accounts() {
     terminated: accounts.filter(a => a.status === 'terminated').length,
   };
 
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">

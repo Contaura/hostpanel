@@ -24,6 +24,7 @@ export default function DatabaseManager() {
   const [dbForm, setDbForm] = useState({ name: '' });
   const [userForm, setUserForm] = useState({ username: '', password: '', database: '', host: 'localhost' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [importing, setImporting] = useState<string | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const [importTarget, setImportTarget] = useState('');
@@ -52,11 +53,13 @@ export default function DatabaseManager() {
   }, []);
 
   async function load() {
-    const [dbs, us] = await Promise.all([
-      axios.get<DB[]>('/api/databases/databases'),
-      axios.get<DBUser[]>('/api/databases/users'),
-    ]);
-    setDatabases(dbs.data); setUsers(us.data);
+    try {
+      const [dbs, us] = await Promise.all([
+        axios.get<DB[]>('/api/databases/databases'),
+        axios.get<DBUser[]>('/api/databases/users'),
+      ]);
+      setDatabases(dbs.data); setUsers(us.data);
+    } catch { /* ignore */ } finally { setPageLoading(false); }
   }
   useEffect(() => { load(); }, []);
 
@@ -178,6 +181,8 @@ export default function DatabaseManager() {
     } catch (e: any) { toast.error(e.response?.data?.error || 'Import failed'); }
     setImporting(null);
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

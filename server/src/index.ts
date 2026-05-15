@@ -57,7 +57,7 @@ import nodeAppsRoutes        from './routes/node-apps';
 import serverInfoRoutes      from './routes/server-info';
 import mailToolsRoutes       from './routes/mail-tools';
 import securityScannerRoutes from './routes/security-scanner';
-import { authenticateToken } from './middleware/auth';
+import { authenticateToken, readonlyGuard } from './middleware/auth';
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
 
@@ -91,6 +91,9 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Block all write operations for readonly-role tokens before any route handler runs
+app.use('/api/', readonlyGuard);
 
 // Auth
 app.use('/api/auth', authRoutes);

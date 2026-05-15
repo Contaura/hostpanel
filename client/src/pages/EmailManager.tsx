@@ -17,18 +17,21 @@ export default function EmailManager() {
   const [form, setForm] = useState({ email: '', password: '', quota: '' });
   const [fwdForm, setFwdForm] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [deletingAcct, setDeletingAcct] = useState<string | null>(null);
   const [deletingFwd, setDeletingFwd] = useState<string | null>(null);
   const [accountSearch, setAccountSearch] = useState('');
   const [forwarderSearch, setForwarderSearch] = useState('');
 
   async function load() {
-    const [acc, fwd] = await Promise.all([
-      axios.get<Account[]>('/api/email/accounts'),
-      axios.get<Forwarder[]>('/api/email/forwarders'),
-    ]);
-    setAccounts(acc.data);
-    setForwarders(fwd.data);
+    try {
+      const [acc, fwd] = await Promise.all([
+        axios.get<Account[]>('/api/email/accounts'),
+        axios.get<Forwarder[]>('/api/email/forwarders'),
+      ]);
+      setAccounts(acc.data);
+      setForwarders(fwd.data);
+    } catch { /* ignore */ } finally { setPageLoading(false); }
   }
 
   useEffect(() => {
@@ -79,6 +82,8 @@ export default function EmailManager() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Delete failed'); }
     finally { setDeletingFwd(null); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

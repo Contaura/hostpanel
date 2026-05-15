@@ -19,6 +19,7 @@ export default function HtpasswdManager() {
   const [showProtect, setShowProtect] = useState(false);
   const [showAddUser, setShowAddUser] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [unprotecting, setUnprotecting] = useState<string | null>(null);
   const [protectForm, setProtectForm] = useState({ directory: '', username: '', password: '', realm: 'Protected Area' });
   const [search, setSearch] = useState('');
@@ -26,7 +27,7 @@ export default function HtpasswdManager() {
 
   async function load() {
     try { const { data } = await axios.get<Protected[]>('/api/htpasswd/list'); setDirs(data); }
-    catch { setDirs([]); }
+    catch { setDirs([]); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Password Protection — HostPanel';
@@ -65,6 +66,8 @@ export default function HtpasswdManager() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setUnprotecting(null); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

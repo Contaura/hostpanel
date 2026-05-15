@@ -71,6 +71,7 @@ export default function Billing() {
   const [clientForm, setClientForm] = useState({ name: '', email: '', phone: '', company: '', address: '', city: '', country: '', notes: '' });
   const [invoiceForm, setInvoiceForm] = useState({ client_id: '', subtotal: '', tax_rate: '', discount: '', due_date: '', notes: '', currency: 'USD' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [logoUploading, setLogoUploading] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const [promoCode, setPromoCode] = useState('');
@@ -97,7 +98,7 @@ export default function Billing() {
       setClients(cRes.data);
       setStripeConfigured(stripeRes.data.configured);
       setPaypalConfigured(ppRes.data.configured);
-    } catch { toast.error('Failed to load billing data'); }
+    } catch { toast.error('Failed to load billing data'); } finally { setPageLoading(false); }
   }
 
   useEffect(() => {
@@ -270,6 +271,7 @@ export default function Billing() {
     </div>
   );
 
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
