@@ -30,7 +30,7 @@ dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
                curl tar gzip openssl make gcc-c++ python3
 
-systemctl enable --now httpd mariadb postfix named vsftpd
+systemctl enable --now httpd mariadb postfix dovecot named vsftpd
 
 # ── 3/9  MariaDB ─────────────────────────────────────────────────────────────
 echo "[3/9] Configuring MariaDB..."
