@@ -122,6 +122,7 @@ router.get('/relay', async (_req: Request, res: Response) => {
 router.put('/relay', async (req: Request, res: Response) => {
   const { relayhost, sasl_user, sasl_pass } = req.body;
   if (!relayhost) return res.status(400).json({ error: 'relayhost required' });
+  if (/[\r\n]/.test(relayhost)) return res.status(400).json({ error: 'Invalid relayhost' });
   try {
     let conf = existsSync(MAIN_CF) ? readFileSync(MAIN_CF, 'utf8') : '';
 

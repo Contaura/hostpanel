@@ -21,9 +21,13 @@ router.get('/', (_req: AuthRequest, res: Response) => {
   res.json(db.prepare('SELECT * FROM parked_domains ORDER BY created_at DESC').all());
 });
 
+const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}[a-zA-Z0-9]$/;
+
 router.post('/', async (req: AuthRequest, res: Response) => {
   const { domain, primary_domain } = req.body;
   if (!domain || !primary_domain) return res.status(400).json({ error: 'domain and primary_domain required' });
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!DOMAIN_RE.test(primary_domain)) return res.status(400).json({ error: 'Invalid primary_domain' });
 
   const conf = path.join(VHOST_DIR, `parked-${domain}.conf`);
   writeFileSync(conf, `<VirtualHost *:80>

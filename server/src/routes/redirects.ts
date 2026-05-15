@@ -51,13 +51,17 @@ router.get('/list', async (_req: AuthRequest, res: Response) => {
   res.json(await readRedirects());
 });
 
+const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}[a-zA-Z0-9]$/;
+const FROM_RE   = /^\/[^\r\n\s]*$/;
+const TO_RE     = /^https?:\/\/[^\r\n\s]+$/;
+
 router.post('/add', async (req: AuthRequest, res: Response) => {
   const { domain, from, to, type = '301' } = req.body;
   if (!domain || !from || !to) return res.status(400).json({ error: 'domain, from, and to are required' });
   if (!['301', '302'].includes(type)) return res.status(400).json({ error: 'type must be 301 or 302' });
-  if (from.includes('|') || to.includes('|') || domain.includes('|')) {
-    return res.status(400).json({ error: 'Pipe character not allowed' });
-  }
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!FROM_RE.test(from))     return res.status(400).json({ error: 'from must be an absolute path starting with /' });
+  if (!TO_RE.test(to))         return res.status(400).json({ error: 'to must be an http/https URL' });
   try {
     const redirects = await readRedirects();
     redirects.push({ id: redirects.length, domain, from, to, type });

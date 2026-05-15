@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -13,6 +13,18 @@ const VMAIL_DIR = process.env.VMAIL_DIR || '/etc/postfix/virtual';
 const PASSWD_FILE = process.env.MAIL_PASSWD || '/etc/dovecot/users';
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function doveadmHashStdin(password: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('doveadm', ['pw', '-s', 'SHA512-CRYPT']);
+    let out = '';
+    proc.stdout.on('data', (d: Buffer) => { out += d.toString(); });
+    proc.stdin.write(password + '\n' + password + '\n');
+    proc.stdin.end();
+    proc.on('close', code => (code === 0 ? resolve(out.trim()) : reject(new Error(`doveadm exited ${code}`))));
+    proc.on('error', reject);
+  });
+}
 
 async function getAccounts(): Promise<{ email: string; domain: string; quota: string }[]> {
   try {
@@ -51,9 +63,8 @@ router.post('/accounts', async (req: AuthRequest, res: Response) => {
   try {
     // Create system user entry in Dovecot passwd-file
     const quotaRule = quota ? `userdb_quota_rule=*:bytes=${quota}` : '';
-    const cmd = `doveadm pw -s SHA512-CRYPT -p '${password.replace(/'/g, "'\\''")}'`;
-    const { stdout: hash } = await execAsync(cmd);
-    const entry = `${email}:${hash.trim()}:5000:5000::${VMAIL_DIR}/${domain}/${user}::${quotaRule}`;
+    const hash = await doveadmHashStdin(password);
+    const entry = `${email}:${hash}:5000:5000::${VMAIL_DIR}/${domain}/${user}::${quotaRule}`;
     await fs.appendFile(PASSWD_FILE, entry + '\n');
 
     // Add to virtual mailbox

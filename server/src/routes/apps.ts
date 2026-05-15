@@ -36,12 +36,24 @@ router.get('/', async (_req: Request, res: Response) => {
 
 /* ── Create / deploy app ─────────────────────────────────── */
 
+const DOMAIN_RE   = /^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}[a-zA-Z0-9]$/;
+const SAFE_PATH_RE = /^\/[a-zA-Z0-9_./ -]+$/;
+
+function isSafePath(p: string): boolean {
+  return SAFE_PATH_RE.test(p) && !/["$`\\!]/.test(p);
+}
+
 router.post('/', async (req: Request, res: Response) => {
   const { name, type, domain, port, start_script, working_dir, env_vars } = req.body;
   if (!name || !domain || !port || !start_script || !working_dir) {
     return res.status(400).json({ error: 'name, domain, port, start_script, working_dir are required' });
   }
   if (!/^[a-zA-Z0-9_-]+$/.test(name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const portNum = parseInt(port, 10);
+  if (isNaN(portNum) || portNum < 1 || portNum > 65535) return res.status(400).json({ error: 'Invalid port' });
+  if (!isSafePath(start_script)) return res.status(400).json({ error: 'Invalid start_script path' });
+  if (!isSafePath(working_dir))  return res.status(400).json({ error: 'Invalid working_dir path' });
   if (!existsSync(working_dir)) {
     try { mkdirSync(working_dir, { recursive: true }); } catch (_) {}
   }
@@ -50,15 +62,15 @@ router.post('/', async (req: Request, res: Response) => {
     const r = db.prepare(`
       INSERT INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
       VALUES (?, ?, ?, ?, ?, ?, 'stopped', ?)
-    `).run(name, type || 'nodejs', domain, port, start_script, working_dir, JSON.stringify(env_vars || {}));
+    `).run(name, type || 'nodejs', domain, portNum, start_script, working_dir, JSON.stringify(env_vars || {}));
 
     // Create Apache reverse proxy vhost
     const vhostConf = `
 <VirtualHost *:80>
   ServerName ${domain}
   ProxyPreserveHost On
-  ProxyPass / http://127.0.0.1:${port}/
-  ProxyPassReverse / http://127.0.0.1:${port}/
+  ProxyPass / http://127.0.0.1:${portNum}/
+  ProxyPassReverse / http://127.0.0.1:${portNum}/
 </VirtualHost>
 `.trim();
     writeFileSync(path.join(VHOST_DIR, `app_${name}.conf`), vhostConf);
