@@ -50,7 +50,7 @@ export default function Accounts() {
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
     plan_id: '', client_id: '', notes: '', expires_at: '',
-    new_client_name: '', new_client_email: '',
+    new_client_name: '', new_client_email: '', new_client_portal_pass: '',
   });
 
   async function load() {
@@ -83,10 +83,13 @@ export default function Accounts() {
           email: form.new_client_email,
         });
         client_id = String(data.id);
+        if (form.new_client_portal_pass) {
+          await axios.post(`/api/billing/clients/${client_id}/portal-password`, { password: form.new_client_portal_pass });
+        }
       }
       await axios.post('/api/accounts', { ...form, client_id });
       toast.success(`Account ${form.username} created`);
-      setForm({ username: '', domain: '', password: '', plan_id: '', client_id: '', notes: '', expires_at: '', new_client_name: '', new_client_email: '' });
+      setForm({ username: '', domain: '', password: '', plan_id: '', client_id: '', notes: '', expires_at: '', new_client_name: '', new_client_email: '', new_client_portal_pass: '' });
       setShowForm(false); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to create account'); }
     finally { setLoading(false); }
@@ -267,6 +270,12 @@ export default function Accounts() {
                 <input type="email" className="input" placeholder="client@example.com"
                   value={form.new_client_email} onChange={e => setForm({ ...form, new_client_email: e.target.value })}
                   required />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Portal Password <span className="text-slate-400 font-normal">(optional — enables client portal login)</span></label>
+                <input type="password" className="input" placeholder="min 8 chars"
+                  value={form.new_client_portal_pass} onChange={e => setForm({ ...form, new_client_portal_pass: e.target.value })}
+                  minLength={8} />
               </div>
             </div>
           )}
