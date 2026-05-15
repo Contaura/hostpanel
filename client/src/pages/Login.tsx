@@ -149,7 +149,7 @@ export default function Login() {
         </div>
 
         <p className="relative text-xs text-indigo-600" style={anim('fade-up', '0.5s', '0.9s')}>
-          HostPanel v1.0.0 — Open Source
+          HostPanel
         </p>
       </div>
 
@@ -313,13 +313,6 @@ export default function Login() {
             </div>
           </form>
 
-          {/* Bottom hint */}
-          <p
-            className="text-center text-xs text-slate-600 mt-8"
-            style={anim('fade-up', '0.5s', '0.75s')}
-          >
-            Default credentials: <span className="text-slate-500">admin / admin</span>
-          </p>
         </div>
       </div>
     </div>
