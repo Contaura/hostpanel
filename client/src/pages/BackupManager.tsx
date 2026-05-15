@@ -35,6 +35,9 @@ export default function BackupManager() {
   const [pushingRemote, setPushingRemote] = useState<string | null>(null);
   const [backupSearch, setBackupSearch] = useState('');
   const [scheduleSearch, setScheduleSearch] = useState('');
+  const [deletingBackup, setDeletingBackup] = useState<string | null>(null);
+  const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
+  const [deletingSchedule, setDeletingSchedule] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -63,8 +66,11 @@ export default function BackupManager() {
   }
 
   async function deleteSchedule(id: number) {
-    await axios.delete(`/api/backup/schedules/${id}`);
-    toast.success('Schedule removed'); loadSchedules();
+    setDeletingSchedule(id);
+    try {
+      await axios.delete(`/api/backup/schedules/${id}`);
+      toast.success('Schedule removed'); loadSchedules();
+    } finally { setDeletingSchedule(null); }
   }
 
   async function loadRemoteConfig() {
@@ -97,11 +103,13 @@ export default function BackupManager() {
 
   async function deleteBackup(name: string) {
     if (!confirm(`Delete backup "${name}"?`)) return;
+    setDeletingBackup(name);
     try {
       await axios.delete(`/api/backup/${encodeURIComponent(name)}`);
       toast.success('Backup deleted');
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingBackup(null); }
   }
 
   async function pushToRemote(name: string) {
@@ -115,10 +123,12 @@ export default function BackupManager() {
 
   async function restoreBackup(name: string) {
     if (!confirm(`Restore "${name}"?\n\nThis will overwrite existing files or database contents. Proceed?`)) return;
+    setRestoringBackup(name);
     try {
       await axios.post(`/api/backup/restore/${encodeURIComponent(name)}`);
       toast.success(`"${name}" restored successfully`);
     } catch (err: any) { toast.error(err.response?.data?.error || 'Restore failed'); }
+    finally { setRestoringBackup(null); }
   }
 
   const isDB = form.type === 'database';
@@ -255,7 +265,7 @@ export default function BackupManager() {
                         <td className="table-cell font-mono text-xs">{s.schedule}</td>
                         <td className="table-cell text-xs text-slate-400">{s.last_run ? new Date(s.last_run).toLocaleString() : 'Never'}</td>
                         <td className="px-3 py-3">
-                          <button onClick={() => deleteSchedule(s.id)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400">
+                          <button onClick={() => deleteSchedule(s.id)} disabled={deletingSchedule === s.id} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400">
                             <Trash2 size={13} />
                           </button>
                         </td>
@@ -368,12 +378,12 @@ export default function BackupManager() {
                               ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg>
                               : <Cloud size={13} />}
                           </button>
-                          <button onClick={() => restoreBackup(b.name)}
+                          <button onClick={() => restoreBackup(b.name)} disabled={restoringBackup === b.name}
                             className="btn-icon hover:!text-amber-600 dark:hover:!text-amber-400 hover:!bg-amber-50 dark:hover:!bg-amber-900/30"
                             title="Restore">
                             <RotateCcw size={13} />
                           </button>
-                          <button onClick={() => deleteBackup(b.name)}
+                          <button onClick={() => deleteBackup(b.name)} disabled={deletingBackup === b.name}
                             className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                             <Trash2 size={13} />
                           </button>

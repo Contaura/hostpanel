@@ -14,6 +14,7 @@ export default function CloudflareManager() {
   const [adding, setAdding] = useState(false);
   const [token, setToken] = useState('');
   const [dnsSearch, setDnsSearch] = useState('');
+  const [deletingZone, setDeletingZone] = useState<number | null>(null);
 
   useEffect(() => { loadZones(); }, []);
 
@@ -64,9 +65,12 @@ export default function CloudflareManager() {
 
   async function deleteZone(id: number) {
     if (!confirm('Remove this zone from HostPanel?')) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    setSelected(null);
-    loadZones();
+    setDeletingZone(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      setSelected(null);
+      loadZones();
+    } finally { setDeletingZone(null); }
   }
 
   return (
@@ -109,7 +113,7 @@ export default function CloudflareManager() {
                   <button className="btn-icon" title="Purge cache" onClick={e => { e.stopPropagation(); purge(z.cf_zone_id); }}>
                     <Zap size={13} />
                   </button>
-                  <button className="btn-icon text-red-500" onClick={e => { e.stopPropagation(); deleteZone(z.id); }}>
+                  <button className="btn-icon text-red-500" disabled={deletingZone === z.id} onClick={e => { e.stopPropagation(); deleteZone(z.id); }}>
                     <Trash2 size={13} />
                   </button>
                 </div>

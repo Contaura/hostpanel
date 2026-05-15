@@ -36,6 +36,9 @@ export default function ApiTokens() {
   const [editWhForm, setEditWhForm] = useState({ name: '', url: '', secret: '', events: [] as string[], enabled: true });
   const [tokenSearch, setTokenSearch] = useState('');
   const [webhookSearch, setWebhookSearch] = useState('');
+  const [revoking, setRevoking] = useState<number | null>(null);
+  const [deletingWh, setDeletingWh] = useState<number | null>(null);
+  const [testingWh, setTestingWh] = useState<number | null>(null);
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
@@ -54,13 +57,17 @@ export default function ApiTokens() {
 
   async function deleteWebhook(id: number) {
     if (!confirm('Delete this webhook?')) return;
+    setDeletingWh(id);
     try { await adel(`/api/api-tokens/webhooks/${id}`); success('Webhook deleted'); loadWebhooks(); }
     catch { error('Failed'); }
+    finally { setDeletingWh(null); }
   }
 
   async function testWebhook(id: number) {
+    setTestingWh(id);
     try { await apost(`/api/api-tokens/webhooks/${id}/test`, {}); success('Test delivery sent'); }
     catch { error('Failed'); }
+    finally { setTestingWh(null); }
   }
 
   async function loadDeliveries(id: number) {
@@ -92,8 +99,10 @@ export default function ApiTokens() {
 
   async function revoke(id: number, name: string) {
     if (!confirm(`Revoke token "${name}"? This cannot be undone.`)) return;
+    setRevoking(id);
     try { await adel(`/api/api-tokens/${id}`); success('Token revoked'); load(); }
     catch { error('Failed'); }
+    finally { setRevoking(null); }
   }
 
   function copy(text: string) { navigator.clipboard.writeText(text); success('Copied to clipboard'); }
@@ -185,7 +194,7 @@ export default function ApiTokens() {
                     <td className="table-cell"><span className={PERM_BADGE[t.permissions] || 'badge-info'}>{t.permissions}</span></td>
                     <td className="table-cell text-slate-400 text-xs"><div className="flex items-center gap-1"><Clock size={11} /> {t.last_used?.slice(0, 16) || 'Never'}</div></td>
                     <td className="table-cell text-slate-400 text-xs">{t.expires_at || '—'}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => revoke(t.id, t.name)}><Trash2 size={13} /></button></td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" disabled={revoking === t.id} onClick={() => revoke(t.id, t.name)}><Trash2 size={13} /></button></td>
                   </tr>
                 ));
               })()}
@@ -260,9 +269,9 @@ export default function ApiTokens() {
                             setEditingWhId(wh.id);
                             setEditWhForm({ name: wh.name, url: wh.url, secret: '', events: wh.events ? wh.events.split(',') : [], enabled: !!wh.active });
                           }}><Pencil size={13} /></button>
-                          <button className="btn-icon text-indigo-500" title="Test" onClick={() => testWebhook(wh.id)}><Send size={13} /></button>
+                          <button className="btn-icon text-indigo-500" title="Test" disabled={testingWh === wh.id} onClick={() => testWebhook(wh.id)}><Send size={13} /></button>
                           <button className="btn-icon text-slate-500" title="Delivery history" onClick={() => loadDeliveries(wh.id)}><History size={13} /></button>
-                          <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteWebhook(wh.id)}><Trash2 size={13} /></button>
+                          <button className="btn-icon text-red-500" title="Delete" disabled={deletingWh === wh.id} onClick={() => deleteWebhook(wh.id)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>

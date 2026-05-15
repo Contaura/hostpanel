@@ -32,6 +32,8 @@ export default function DomainManager() {
   const [dnssecLoading, setDnssecLoading] = useState('');
   const [domainSearch, setDomainSearch] = useState('');
   const [dnsSearch, setDnsSearch] = useState('');
+  const [deletingDomain, setDeletingDomain] = useState<string | null>(null);
+  const [deletingDns, setDeletingDns] = useState<number | null>(null);
 
   async function loadDomains() {
     const { data } = await axios.get<string[]>('/api/domains/domains');
@@ -56,8 +58,10 @@ export default function DomainManager() {
 
   async function deleteDomain(domain: string) {
     if (!confirm(`Remove domain ${domain}?`)) return;
+    setDeletingDomain(domain);
     try { await axios.delete(`/api/domains/domains/${domain}`); toast.success(`${domain} removed`); loadDomains(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingDomain(null); }
   }
 
   async function issueSSL(e: FormEvent) {
@@ -82,8 +86,10 @@ export default function DomainManager() {
 
   async function deleteDNSRecord(index: number) {
     if (!dnsForm.domain) return;
+    setDeletingDns(index);
     try { await axios.delete(`/api/domains/dns/${dnsForm.domain}/${index}`); toast.success('Record deleted'); loadDNS(dnsForm.domain); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingDns(null); }
   }
 
   async function loadDnssecStatus(domain: string) {
@@ -192,7 +198,7 @@ export default function DomainManager() {
                         /var/www/{d}/public_html
                       </td>
                       <td className="px-3 py-3">
-                        <button onClick={() => deleteDomain(d)}
+                        <button onClick={() => deleteDomain(d)} disabled={deletingDomain === d}
                           className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                           <Trash2 size={13} />
                         </button>
@@ -406,7 +412,7 @@ export default function DomainManager() {
                       <td className="px-3 py-3">
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100">
                           <button className="btn-icon text-indigo-500" onClick={() => { setEditingDns(i); setEditForm({ ...r }); }}><Edit2 size={12} /></button>
-                          <button className="btn-icon hover:!text-rose-600" onClick={() => deleteDNSRecord(i)}><Trash2 size={12} /></button>
+                          <button className="btn-icon hover:!text-rose-600" disabled={deletingDns === i} onClick={() => deleteDNSRecord(i)}><Trash2 size={12} /></button>
                         </div>
                       </td>
                     </tr>

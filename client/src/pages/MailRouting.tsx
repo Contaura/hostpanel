@@ -22,6 +22,9 @@ export default function MailRouting() {
   const [memberSubmitting, setMemberSubmitting] = useState(false);
   const [ruleSearch, setRuleSearch] = useState('');
   const [listSearch, setListSearch] = useState('');
+  const [deletingRule, setDeletingRule] = useState<string | null>(null);
+  const [deletingList, setDeletingList] = useState<number | null>(null);
+  const [removingMember, setRemovingMember] = useState<number | null>(null);
 
   useEffect(() => { loadRules(); loadLists(); loadWebmail(); }, []);
 
@@ -49,8 +52,11 @@ export default function MailRouting() {
   }
 
   async function deleteRule(domain: string) {
-    await api(`/${domain}`, { method: 'DELETE' });
-    loadRules();
+    setDeletingRule(domain);
+    try {
+      await api(`/${domain}`, { method: 'DELETE' });
+      loadRules();
+    } finally { setDeletingRule(null); }
   }
 
   async function addList() {
@@ -68,8 +74,11 @@ export default function MailRouting() {
 
   async function deleteList(id: number) {
     if (!confirm('Delete this mailing list?')) return;
-    await api(`/lists/${id}`, { method: 'DELETE' });
-    loadLists();
+    setDeletingList(id);
+    try {
+      await api(`/lists/${id}`, { method: 'DELETE' });
+      loadLists();
+    } finally { setDeletingList(null); }
   }
 
   async function loadMembers(id: number) {
@@ -97,8 +106,11 @@ export default function MailRouting() {
   }
 
   async function removeMember(listId: number, memberId: number) {
-    await api(`/lists/${listId}/members/${memberId}`, { method: 'DELETE' });
-    setListMembers(p => ({ ...p, [listId]: (p[listId] || []).filter(m => m.id !== memberId) }));
+    setRemovingMember(memberId);
+    try {
+      await api(`/lists/${listId}/members/${memberId}`, { method: 'DELETE' });
+      setListMembers(p => ({ ...p, [listId]: (p[listId] || []).filter(m => m.id !== memberId) }));
+    } finally { setRemovingMember(null); }
   }
 
   return (
@@ -147,7 +159,7 @@ export default function MailRouting() {
                       <tr key={r.domain} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                         <td className="table-cell font-mono text-sm">{r.domain}</td>
                         <td className="table-cell text-slate-500 font-mono text-xs">{r.transport}</td>
-                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteRule(r.domain)}><Trash2 size={13} /></button></td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deletingRule === r.domain} onClick={() => deleteRule(r.domain)}><Trash2 size={13} /></button></td>
                       </tr>
                     ));
                   })()}
@@ -202,7 +214,7 @@ export default function MailRouting() {
                               <button className="btn-icon text-indigo-500 flex items-center gap-0.5" title="Members" onClick={() => loadMembers(l.id)}>
                                 <Users size={13} />{expandedList === l.id ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
                               </button>
-                              <button className="btn-icon text-red-500" onClick={() => deleteList(l.id)}><Trash2 size={13} /></button>
+                              <button className="btn-icon text-red-500" disabled={deletingList === l.id} onClick={() => deleteList(l.id)}><Trash2 size={13} /></button>
                             </div>
                           </td>
                         </tr>
@@ -221,7 +233,7 @@ export default function MailRouting() {
                                   <div key={m.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-800 rounded px-3 py-1.5">
                                     <span className="font-mono">{m.address}</span>
                                     {m.name && <span className="text-slate-400">{m.name}</span>}
-                                    <button className="btn-icon text-red-500" onClick={() => removeMember(l.id, m.id)}><Trash2 size={11} /></button>
+                                    <button className="btn-icon text-red-500" disabled={removingMember === m.id} onClick={() => removeMember(l.id, m.id)}><Trash2 size={11} /></button>
                                   </div>
                                 ))}
                               </div>

@@ -35,6 +35,9 @@ export default function DatabaseManager() {
   const [raLoading, setRaLoading] = useState(false);
   const [dbSearch, setDbSearch] = useState('');
   const [userSearch, setUserSearch] = useState('');
+  const [deletingDb, setDeletingDb] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
+  const [revokingAccess, setRevokingAccess] = useState<string | null>(null);
 
   useEffect(() => {
     axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
@@ -61,8 +64,10 @@ export default function DatabaseManager() {
 
   async function deleteDb(name: string) {
     if (!confirm(`Drop database "${name}"? All data will be permanently deleted.`)) return;
+    setDeletingDb(name);
     try { await axios.delete(`/api/databases/databases/${name}`); toast.success(`Database "${name}" dropped`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingDb(null); }
   }
 
   async function createUser(e: FormEvent) {
@@ -77,8 +82,10 @@ export default function DatabaseManager() {
 
   async function deleteUser(user: string, host: string) {
     if (!confirm(`Delete user "${user}"?`)) return;
+    setDeletingUser(user);
     try { await axios.delete(`/api/databases/users/${user}`, { params: { host } }); toast.success(`User "${user}" deleted`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingUser(null); }
   }
 
   function exportDb(name: string) {
@@ -134,10 +141,12 @@ export default function DatabaseManager() {
 
   async function revokeRemoteAccess(user: string, host: string) {
     if (!confirm(`Revoke remote access for ${user}@${host}?`)) return;
+    setRevokingAccess(`${user}@${host}`);
     try {
       await axios.delete(`/api/databases/remote-access/${user}/${encodeURIComponent(host)}`);
       toast.success('Remote access revoked'); loadRemoteAccess();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setRevokingAccess(null); }
   }
 
   async function loadSlowLog() {
@@ -285,7 +294,7 @@ export default function DatabaseManager() {
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                             <button onClick={() => exportDb(db.name)} className="btn-icon text-blue-500" title="Export"><Download size={13} /></button>
                             <button onClick={() => { setImportTarget(db.name); importRef.current?.click(); }} className="btn-icon text-amber-500" title="Import" disabled={importing === db.name}><Upload size={13} /></button>
-                            <button onClick={() => deleteDb(db.name)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                            <button onClick={() => deleteDb(db.name)} disabled={deletingDb === db.name} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
                           </div>
                         </td>
                       </tr>
@@ -340,7 +349,7 @@ export default function DatabaseManager() {
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                           <button onClick={() => openPrivEditor(u)} className="btn-icon text-indigo-500" title="Manage Privileges"><Shield size={13} /></button>
-                          <button onClick={() => deleteUser(u.user, u.host)} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
+                          <button onClick={() => deleteUser(u.user, u.host)} disabled={deletingUser === u.user} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -434,7 +443,7 @@ export default function DatabaseManager() {
                     <td className="table-cell font-mono font-medium">{ra.user}</td>
                     <td className="table-cell font-mono text-slate-500">{ra.host}</td>
                     <td className="px-3 py-3">
-                      <button className="btn-icon hover:!text-rose-600 opacity-0 group-hover:opacity-100" onClick={() => revokeRemoteAccess(ra.user, ra.host)}><Trash2 size={13} /></button>
+                      <button className="btn-icon hover:!text-rose-600 opacity-0 group-hover:opacity-100" disabled={revokingAccess === `${ra.user}@${ra.host}`} onClick={() => revokeRemoteAccess(ra.user, ra.host)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ))}

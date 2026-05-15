@@ -42,6 +42,7 @@ export default function Accounts() {
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   const [editAccountForm, setEditAccountForm] = useState({ plan_id: '', client_id: '', notes: '', expires_at: '' });
   const [expiryChecking, setExpiryChecking] = useState(false);
+  const [actioning, setActioning] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
@@ -74,20 +75,26 @@ export default function Accounts() {
   }
 
   async function setStatus(id: number, status: string) {
+    setActioning(id);
     try {
       await axios.patch(`/api/accounts/${id}/status`, { status });
       toast.success(`Account ${status}`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   async function suspendAccount(id: number) {
+    setActioning(id);
     try { await axios.post(`/api/accounts/${id}/suspend`); toast.success('Account suspended'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   async function unsuspendAccount(id: number) {
+    setActioning(id);
     try { await axios.post(`/api/accounts/${id}/unsuspend`); toast.success('Account unsuspended'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   function expiryBadge(expires_at: string | null) {
@@ -107,8 +114,10 @@ export default function Accounts() {
 
   async function deleteAccount(id: number, username: string) {
     if (!confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
+    setActioning(id);
     try { await axios.delete(`/api/accounts/${id}`); toast.success('Account deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   async function updateAccount(id: number) {
@@ -313,17 +322,17 @@ export default function Accounts() {
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                       {acc.status === 'active' && (
-                        <button onClick={() => suspendAccount(acc.id)} className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30" title="Suspend (disables vhost)">
+                        <button onClick={() => suspendAccount(acc.id)} disabled={actioning === acc.id} className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30" title="Suspend (disables vhost)">
                           <Ban size={13} />
                         </button>
                       )}
                       {acc.status === 'suspended' && (
-                        <button onClick={() => unsuspendAccount(acc.id)} className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30" title="Unsuspend (re-enables vhost)">
+                        <button onClick={() => unsuspendAccount(acc.id)} disabled={actioning === acc.id} className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30" title="Unsuspend (re-enables vhost)">
                           <Power size={13} />
                         </button>
                       )}
                       {(statusActions[acc.status] ?? []).filter(a => a.target === 'terminated').map(a => (
-                        <button key={a.target} onClick={() => setStatus(acc.id, a.target)}
+                        <button key={a.target} onClick={() => setStatus(acc.id, a.target)} disabled={actioning === acc.id}
                           className={`btn-icon ${a.cls}`} title={a.label}>
                           <a.icon size={13} />
                         </button>
@@ -353,7 +362,7 @@ export default function Accounts() {
                         }}>
                         <PackageOpen size={13} />
                       </button>
-                      <button onClick={() => deleteAccount(acc.id, acc.username)}
+                      <button onClick={() => deleteAccount(acc.id, acc.username)} disabled={actioning === acc.id}
                         className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                         title="Delete">
                         <Trash2 size={13} />

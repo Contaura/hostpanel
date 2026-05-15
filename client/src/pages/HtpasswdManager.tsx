@@ -17,6 +17,7 @@ export default function HtpasswdManager() {
   const [showProtect, setShowProtect] = useState(false);
   const [showAddUser, setShowAddUser] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unprotecting, setUnprotecting] = useState<string | null>(null);
   const [protectForm, setProtectForm] = useState({ directory: '', username: '', password: '', realm: 'Protected Area' });
   const [search, setSearch] = useState('');
   const [userForm, setUserForm] = useState({ username: '', password: '' });
@@ -50,10 +51,12 @@ export default function HtpasswdManager() {
 
   async function unprotect(directory: string) {
     if (!confirm(`Remove password protection from ${directory}?`)) return;
+    setUnprotecting(directory);
     try {
       await axios.delete('/api/htpasswd/unprotect', { data: { directory } });
       toast.success('Protection removed'); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setUnprotecting(null); }
   }
 
   return (
@@ -150,7 +153,7 @@ export default function HtpasswdManager() {
                             title="Add user">
                             <UserPlus size={13} />
                           </button>
-                          <button onClick={() => unprotect(d.directory)}
+                          <button onClick={() => unprotect(d.directory)} disabled={unprotecting === d.directory}
                             className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                             title="Remove protection">
                             <Trash2 size={13} />

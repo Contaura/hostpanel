@@ -15,6 +15,8 @@ export default function EmailManager() {
   const [form, setForm] = useState({ email: '', password: '', quota: '' });
   const [fwdForm, setFwdForm] = useState({ from: '', to: '' });
   const [loading, setLoading] = useState(false);
+  const [deletingAcct, setDeletingAcct] = useState<string | null>(null);
+  const [deletingFwd, setDeletingFwd] = useState<string | null>(null);
   const [accountSearch, setAccountSearch] = useState('');
   const [forwarderSearch, setForwarderSearch] = useState('');
 
@@ -42,10 +44,12 @@ export default function EmailManager() {
 
   async function deleteAccount(email: string) {
     if (!confirm(`Delete mailbox ${email}?`)) return;
+    setDeletingAcct(email);
     try {
       await axios.delete(`/api/email/accounts/${encodeURIComponent(email)}`);
       toast.success(`Mailbox ${email} deleted`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Delete failed'); }
+    finally { setDeletingAcct(null); }
   }
 
   async function createForwarder(e: FormEvent) {
@@ -61,10 +65,12 @@ export default function EmailManager() {
 
   async function deleteForwarder(from: string) {
     if (!confirm(`Delete forwarder ${from}?`)) return;
+    setDeletingFwd(from);
     try {
       await axios.delete(`/api/email/forwarders/${encodeURIComponent(from)}`);
       toast.success('Forwarder deleted'); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Delete failed'); }
+    finally { setDeletingFwd(null); }
   }
 
   return (
@@ -185,7 +191,7 @@ export default function EmailManager() {
                         <span className="badge badge-gray">{acc.quota}</span>
                       </td>
                       <td className="px-3 py-3">
-                        <button onClick={() => deleteAccount(acc.email)}
+                        <button onClick={() => deleteAccount(acc.email)} disabled={deletingAcct === acc.email}
                           className="btn-icon opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50">
                           <Trash2 size={13} />
                         </button>
@@ -233,7 +239,7 @@ export default function EmailManager() {
                       <td className="px-1 py-3 text-slate-300"><ArrowRight size={14} /></td>
                       <td className="table-cell text-slate-600">{fwd.to}</td>
                       <td className="px-3 py-3">
-                        <button onClick={() => deleteForwarder(fwd.from)}
+                        <button onClick={() => deleteForwarder(fwd.from)} disabled={deletingFwd === fwd.from}
                           className="btn-icon opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50">
                           <Trash2 size={13} />
                         </button>

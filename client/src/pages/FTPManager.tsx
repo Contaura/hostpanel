@@ -17,6 +17,7 @@ export default function FTPManager() {
   const [form, setForm] = useState({ username: '', password: '', directory: '', max_rate: '' });
   const [newPass, setNewPass] = useState('');
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [limitsTarget, setLimitsTarget] = useState<string | null>(null);
   const [limitsForm, setLimitsForm] = useState<FTPLimits>({ max_rate: '' });
   const [search, setSearch] = useState('');
@@ -46,8 +47,10 @@ export default function FTPManager() {
 
   async function deleteUser(username: string) {
     if (!confirm(`Delete FTP user "${username}"?`)) return;
+    setDeleting(username);
     try { await axios.delete(`/api/ftp/users/${username}`); toast.success(`"${username}" deleted`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function changePassword(username: string) {
@@ -158,7 +161,7 @@ export default function FTPManager() {
                           >
                             <Gauge size={13} />
                           </button>
-                          <button onClick={() => deleteUser(u.username)}
+                          <button onClick={() => deleteUser(u.username)} disabled={deleting === u.username}
                             className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                             <Trash2 size={13} />
                           </button>

@@ -48,6 +48,8 @@ export default function CronJobs() {
   const [jobSearch, setJobSearch] = useState('');
   const [acctJobSearch, setAcctJobSearch] = useState('');
   const [logSearch, setLogSearch] = useState('');
+  const [deletingJob, setDeletingJob] = useState<number | null>(null);
+  const [deletingAcctJob, setDeletingAcctJob] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -101,11 +103,13 @@ export default function CronJobs() {
 
   async function deleteAcctJob(index: number) {
     if (!confirm('Remove this cron job?')) return;
+    setDeletingAcctJob(index);
     try {
       await axios.delete(`/api/cron/account/${encodeURIComponent(acctUser.trim())}/${index}`);
       toast.success('Job removed');
       loadAcctJobs();
     } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingAcctJob(null); }
   }
 
   async function saveFailureEmail() {
@@ -135,11 +139,13 @@ export default function CronJobs() {
 
   async function deleteJob(id: number) {
     if (!confirm('Remove this cron job?')) return;
+    setDeletingJob(id);
     try {
       await axios.delete(`/api/cron/${id}`);
       toast.success('Cron job removed');
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingJob(null); }
   }
 
   const field = (name: keyof typeof form, label: string, placeholder: string) => (
@@ -258,7 +264,7 @@ export default function CronJobs() {
                               className="btn-icon text-emerald-500" title="Run now">
                               {running === job.id ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg> : <Play size={13} />}
                             </button>
-                            <button onClick={() => deleteJob(job.id)}
+                            <button onClick={() => deleteJob(job.id)} disabled={deletingJob === job.id}
                               className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                               <Trash2 size={13} />
                             </button>
@@ -360,7 +366,7 @@ export default function CronJobs() {
                             </td>
                             <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{j.command}</td>
                             <td className="px-3 py-3">
-                              <button onClick={() => deleteAcctJob(j.id)}
+                              <button onClick={() => deleteAcctJob(j.id)} disabled={deletingAcctJob === j.id}
                                 className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                                 <Trash2 size={13} />
                               </button>
