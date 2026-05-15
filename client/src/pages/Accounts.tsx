@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
+import { openAuthenticatedDownload } from '../lib/api';
 
 interface Account {
   id: number;
@@ -398,13 +399,10 @@ export default function Accounts() {
                       <button
                         title="Export account (files + DBs)"
                         className="btn-icon"
-                        onClick={() => {
-                          const token = localStorage.getItem('hp_token') || '';
-                          fetch(`/api/accounts/${acc.id}/export`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
-                            .then(r => r.blob())
-                            .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `account_${acc.username}.tar.gz`; a.click(); })
-                            .catch(() => toast.error('Export failed'));
-                        }}>
+                        onClick={() => openAuthenticatedDownload(
+                          `/api/accounts/${acc.id}/export`,
+                          { method: 'POST', filename: `account_${acc.username}.tar.gz` },
+                        ).catch(e => toast.error(e.message || 'Export failed'))}>
                         <PackageOpen size={13} />
                       </button>
                       <button onClick={() => deleteAccount(acc.id, acc.username)} disabled={actioning === acc.id}

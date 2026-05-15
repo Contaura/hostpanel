@@ -33,18 +33,24 @@ export default function MailQueue() {
 
   async function loadDeliveryLog() {
     setLogLoading(true);
-    const r = await fetchApi(`/api/mail-queue/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
-    const d = await r.json();
-    setDeliveryLog(d.lines || []);
-    setLogLoading(false);
+    try {
+      const r = await fetchApi(`/api/mail-queue/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
+      const d = await r.json();
+      setDeliveryLog(d.lines || []);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to load delivery log');
+    } finally { setLogLoading(false); }
   }
 
   async function loadBounceLog() {
     setBounceLoading(true);
-    const r = await fetchApi('/api/mail-queue/bounce-log');
-    const d = await r.json();
-    setBounceLog(d.lines || []);
-    setBounceLoading(false);
+    try {
+      const r = await fetchApi('/api/mail-queue/bounce-log');
+      const d = await r.json();
+      setBounceLog(d.lines || []);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to load bounce log');
+    } finally { setBounceLoading(false); }
   }
 
   useEffect(() => {
@@ -56,9 +62,11 @@ export default function MailQueue() {
   useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); if (tab === 'bounce-log') loadBounceLog(); }, [tab]);
 
   async function flush() {
-    await fetchApi('/api/mail-queue/flush', { method: 'POST' });
-    toast.success('Queue flushed');
-    load();
+    try {
+      await fetchApi('/api/mail-queue/flush', { method: 'POST' });
+      toast.success('Queue flushed');
+      load();
+    } catch (e: any) { toast.error(e.message || 'Flush failed'); }
   }
 
   async function deleteMsg(id: string) {
@@ -71,9 +79,11 @@ export default function MailQueue() {
 
   async function deleteAll() {
     if (!await confirm('Delete all deferred messages?')) return;
-    await fetchApi('/api/mail-queue/', { method: 'DELETE' });
-    toast.success('Deferred queue cleared');
-    load();
+    try {
+      await fetchApi('/api/mail-queue/', { method: 'DELETE' });
+      toast.success('Deferred queue cleared');
+      load();
+    } catch (e: any) { toast.error(e.message || 'Clear failed'); }
   }
 
   async function retryMsg(id: string) {

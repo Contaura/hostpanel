@@ -25,10 +25,13 @@ export async function fetchApi(url: string, options: RequestInit = {}): Promise<
 // lets the client portal pass its own portal token instead of hp_token.
 export async function openAuthenticatedDownload(
   url: string,
-  opts: { tokenKey?: string; filename?: string } = {},
+  opts: { tokenKey?: string; filename?: string; method?: 'GET' | 'POST' } = {},
 ): Promise<void> {
   const tok = localStorage.getItem(opts.tokenKey || 'hp_token') || '';
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}` } });
+  const r = await fetch(url, {
+    method: opts.method || 'GET',
+    headers: { Authorization: `Bearer ${tok}` },
+  });
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try { msg = (await r.json()).error || msg; } catch { /* not JSON */ }

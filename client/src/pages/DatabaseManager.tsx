@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Database, User, Plus, Trash2, Download, Upload, Shield, ExternalLink, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
+import { openAuthenticatedDownload } from '../lib/api';
 
 interface DB { name: string; size_mb: number | null }
 interface DBUser { user: string; host: string }
@@ -100,14 +101,12 @@ export default function DatabaseManager() {
   }
 
   function exportDb(name: string) {
-    const token = localStorage.getItem('hp_token') || '';
-    const a = document.createElement('a');
-    a.href = `/api/databases/${name}/export`;
-    // set auth via a short-lived blob workaround isn't needed — use fetch+blob
-    fetch(`/api/databases/${name}/export`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
-      .then(blob => { a.href = URL.createObjectURL(blob); a.download = `${name}.sql.gz`; a.click(); })
-      .catch(() => toast.error('Export failed'));
+    // Server mount is /api/databases, and the export route is /databases/:name
+    // /export under that mount → full URL is /api/databases/databases/.../export.
+    // The previous inline call dropped the inner "databases" prefix and always
+    // 404'd. (It also leaked the blob URL — openAuthenticatedDownload revokes it.)
+    openAuthenticatedDownload(`/api/databases/databases/${name}/export`, { filename: `${name}.sql.gz` })
+      .catch(e => toast.error(e.message || 'Export failed'));
   }
 
   async function openPrivEditor(u: DBUser) {
@@ -176,7 +175,9 @@ export default function DatabaseManager() {
     fd.append('file', file);
     const token = localStorage.getItem('hp_token') || '';
     try {
-      await axios.post(`/api/databases/${importTarget}/import`, fd, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
+      // Server mount /api/databases + route /databases/:name/import →
+      // /api/databases/databases/:name/import. Match the export-route fix.
+      await axios.post(`/api/databases/databases/${importTarget}/import`, fd, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'multipart/form-data' } });
       toast.success(`Imported into ${importTarget}`);
     } catch (e: any) { toast.error(e.response?.data?.error || 'Import failed'); }
     setImporting(null);

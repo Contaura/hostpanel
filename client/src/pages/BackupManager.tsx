@@ -57,8 +57,10 @@ export default function BackupManager() {
   }
 
   async function loadSchedules() {
-    const { data } = await axios.get('/api/backup/schedules');
-    setSchedules(Array.isArray(data) ? data : []);
+    try {
+      const { data } = await axios.get('/api/backup/schedules');
+      setSchedules(Array.isArray(data) ? data : []);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load schedules'); }
   }
 
   async function createSchedule() {
@@ -79,9 +81,11 @@ export default function BackupManager() {
 
   async function loadRemoteConfig() {
     if (remoteLoaded) return;
-    const { data } = await axios.get('/api/backup/remote-config');
-    setRemoteConfig(data || {});
-    setRemoteLoaded(true);
+    try {
+      const { data } = await axios.get('/api/backup/remote-config');
+      setRemoteConfig(data || {});
+      setRemoteLoaded(true);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load remote backup config'); }
   }
 
   async function saveRemoteConfig() {
