@@ -16,6 +16,7 @@ export default function ResourceLimits() {
   const [addingVhost, setAddingVhost] = useState(false);
   const [vhostSearch, setVhostSearch] = useState('');
   const [quotaSearch, setQuotaSearch] = useState('');
+  const [deletingVhost, setDeletingVhost] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -46,8 +47,11 @@ export default function ResourceLimits() {
 
   async function deleteVhost(domain: string) {
     if (!confirm(`Delete vhost for ${domain}?`)) return;
-    await api(`/nginx/vhosts/${domain}`, { method: 'DELETE' });
-    loadVhosts();
+    setDeletingVhost(domain);
+    try {
+      await api(`/nginx/vhosts/${domain}`, { method: 'DELETE' });
+      loadVhosts();
+    } finally { setDeletingVhost(null); }
   }
 
   const [ioUser, setIoUser] = useState('');
@@ -176,7 +180,7 @@ export default function ResourceLimits() {
                         <td className="table-cell text-xs">{v.serverName}</td>
                         <td className="table-cell text-xs text-slate-500 truncate max-w-[180px]">{v.root}</td>
                         <td className="table-cell"><span className={`badge-${v.enabled ? 'success' : 'warning'}`}>{v.enabled ? 'Enabled' : 'Disabled'}</span></td>
-                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteVhost(v.name)}><Trash2 size={13} /></button></td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deletingVhost === v.name} onClick={() => deleteVhost(v.name)}><Trash2 size={13} /></button></td>
                       </tr>
                     ));
                   })()}

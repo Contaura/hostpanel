@@ -15,6 +15,7 @@ export default function GitDeploy() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ repo_url: '', branch: '', deploy_path: '', command: '', auto_deploy: true });
   const [deploying, setDeploying] = useState<number | null>(null);
+  const [deletingDep, setDeletingDep] = useState<number | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -46,8 +47,11 @@ export default function GitDeploy() {
 
   async function del(id: number) {
     if (!confirm('Delete deployment?')) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    load();
+    setDeletingDep(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      load();
+    } finally { setDeletingDep(null); }
   }
 
   async function update(id: number) {
@@ -110,7 +114,7 @@ export default function GitDeploy() {
                   setEditingId(d.id);
                   setEditForm({ repo_url: d.repo_url, branch: d.branch, deploy_path: d.deploy_path, command: d.command, auto_deploy: !!d.auto_deploy });
                 }}><Pencil size={13} /></button>
-                <button className="btn-icon hover:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/30" onClick={() => del(d.id)}><Trash2 size={13} /></button>
+                <button className="btn-icon hover:!text-red-600 hover:!bg-red-50 dark:hover:!bg-red-900/30" disabled={deletingDep === d.id} onClick={() => del(d.id)}><Trash2 size={13} /></button>
               </div>
             </div>
 

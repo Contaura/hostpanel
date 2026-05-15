@@ -31,6 +31,8 @@ export default function SSHKeys() {
   const [acctLoading, setAcctLoading] = useState(false);
   const [adminSearch, setAdminSearch] = useState('');
   const [acctSearch, setAcctSearch] = useState('');
+  const [removing, setRemoving] = useState<number | null>(null);
+  const [removingAcct, setRemovingAcct] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -52,10 +54,12 @@ export default function SSHKeys() {
 
   async function remove(id: number) {
     if (!confirm('Remove this SSH key? You may lose SSH access if it\'s the only key.')) return;
+    setRemoving(id);
     try {
       await axios.delete(`/api/sshkeys/${id}`);
       toast.success('SSH key removed'); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setRemoving(null); }
   }
 
   async function loadAcctKeys() {
@@ -77,8 +81,10 @@ export default function SSHKeys() {
 
   async function removeAcctKey(id: number) {
     if (!confirm('Remove this SSH key?')) return;
+    setRemovingAcct(id);
     try { await axios.delete(`/api/sshkeys/account/${acctUsername.trim()}/${id}`); toast.success('Removed'); loadAcctKeys(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setRemovingAcct(null); }
   }
 
   function copyKey(fullKey: string) {
@@ -173,7 +179,7 @@ export default function SSHKeys() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())} className="btn-icon hover:!text-indigo-600" title="Copy"><Copy size={13} /></button>
-                            <button onClick={() => removeAcctKey(k.id)} className="btn-icon hover:!text-rose-600" title="Remove"><Trash2 size={13} /></button>
+                            <button onClick={() => removeAcctKey(k.id)} disabled={removingAcct === k.id} className="btn-icon hover:!text-rose-600" title="Remove"><Trash2 size={13} /></button>
                           </div>
                         </td>
                       </tr>
@@ -256,6 +262,7 @@ export default function SSHKeys() {
                             <Copy size={13} />
                           </button>
                           <button onClick={() => remove(k.id)}
+                            disabled={removing === k.id}
                             className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                             title="Remove">
                             <Trash2 size={13} />

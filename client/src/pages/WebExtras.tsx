@@ -62,13 +62,24 @@ export default function WebExtras() {
   }
 
   async function deleteMime(mime: string) {
+    setDeletingMime(mime);
     try { await adel('/api/web/mime', { mime }); success('Removed'); loadTab('mime'); }
     catch (e: any) { error('Failed'); }
+    finally { setDeletingMime(null); }
+  }
+
+  async function removeLeech(d: string) {
+    setRemovingLeech(d);
+    try { await adel(`/api/web/leech/${d}`); loadTab('leech'); }
+    catch (e: any) { error('Failed'); }
+    finally { setRemovingLeech(null); }
   }
 
   const [indexDomains, setIndexDomains] = useState<{ domain: string; listing: boolean }[]>([]);
   const [leechDomains, setLeechDomains] = useState<{ enabled: boolean; domains: string[] }>({ enabled: false, domains: [] });
   const [newLeechDomain, setNewLeechDomain] = useState('');
+  const [deletingMime, setDeletingMime] = useState<string | null>(null);
+  const [removingLeech, setRemovingLeech] = useState<string | null>(null);
 
   const tabs = [
     { id: 'hotlink'   as Tab, label: 'Hotlink Protection', icon: ShieldOff  },
@@ -145,7 +156,7 @@ export default function WebExtras() {
                   <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="table-cell font-mono text-xs">{m.mime}</td>
                     <td className="table-cell text-slate-600 dark:text-slate-400">{m.extensions}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteMime(m.mime)}><Trash2 size={14} /></button></td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" disabled={deletingMime === m.mime} onClick={() => deleteMime(m.mime)}><Trash2 size={14} /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -301,10 +312,7 @@ export default function WebExtras() {
                   <tr key={d} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="table-cell font-mono text-sm">{d}</td>
                     <td className="table-cell">
-                      <button className="btn-icon text-red-500" onClick={async () => {
-                        await adel(`/api/web/leech/${d}`);
-                        loadTab('leech');
-                      }}><Trash2 size={13} /></button>
+                      <button className="btn-icon text-red-500" disabled={removingLeech === d} onClick={() => removeLeech(d)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ))}

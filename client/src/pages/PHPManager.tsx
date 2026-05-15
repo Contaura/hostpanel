@@ -62,6 +62,7 @@ export default function PHPManager() {
   const [fpmPool, setFpmPool] = useState<Record<string, string>>({});
   const [fpmLoaded, setFpmLoaded] = useState(false);
   const [fpmSaving, setFpmSaving] = useState(false);
+  const [deletingPool, setDeletingPool] = useState(false);
 
   async function loadFpmPool() {
     if (!fpmDomain.trim()) return toast.error('Enter a domain');
@@ -83,11 +84,13 @@ export default function PHPManager() {
 
   async function deleteFpmPool() {
     if (!confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
+    setDeletingPool(true);
     try {
       await axios.delete(`/api/php/fpm-pool/${fpmDomain.trim()}`);
       toast.success('FPM pool deleted');
       setFpmLoaded(false); setFpmPool({});
     } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingPool(false); }
   }
 
   const [domainIniDomain, setDomainIniDomain] = useState('');
@@ -245,7 +248,7 @@ export default function PHPManager() {
                 <button onClick={saveFpmPool} disabled={fpmSaving} className="btn-primary">
                   <Save size={14} /> {fpmSaving ? 'Saving…' : 'Save FPM Pool'}
                 </button>
-                <button onClick={deleteFpmPool} className="btn-secondary text-rose-600 dark:text-rose-400">
+                <button onClick={deleteFpmPool} disabled={deletingPool} className="btn-secondary text-rose-600 dark:text-rose-400">
                   <Trash2 size={14} /> Delete Pool
                 </button>
               </div>

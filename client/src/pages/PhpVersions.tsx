@@ -16,6 +16,7 @@ export default function PhpVersions() {
   const [installing, setInstalling] = useState(false);
   const [installOutput, setInstallOutput] = useState('');
   const [assignSearch, setAssignSearch] = useState('');
+  const [removingAssign, setRemovingAssign] = useState<string | null>(null);
 
   useEffect(() => { loadPhp(); }, []);
 
@@ -35,8 +36,11 @@ export default function PhpVersions() {
   }
 
   async function removeAssign(d: string) {
-    await api(`/${d}`, { method: 'DELETE' });
-    setAssignments(a => a.filter(x => x.domain !== d));
+    setRemovingAssign(d);
+    try {
+      await api(`/${d}`, { method: 'DELETE' });
+      setAssignments(a => a.filter(x => x.domain !== d));
+    } finally { setRemovingAssign(null); }
   }
 
   async function loadNode() {
@@ -110,7 +114,7 @@ export default function PhpVersions() {
                         <td className="table-cell font-mono text-xs">{a.domain}</td>
                         <td className="table-cell"><span className="badge-info">PHP {a.php_version}</span></td>
                         <td className="table-cell text-xs text-slate-500">{a.updated_at ? new Date(a.updated_at).toLocaleDateString() : '—'}</td>
-                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => removeAssign(a.domain)}><Trash2 size={13} /></button></td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={removingAssign === a.domain} onClick={() => removeAssign(a.domain)}><Trash2 size={13} /></button></td>
                       </tr>
                     ));
                   })()}

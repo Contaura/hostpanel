@@ -127,6 +127,13 @@ export default function EmailExtras() {
     catch { setDsRules([]); }
   }
 
+  async function deleteSpamRule(id: number) {
+    setDeleting(id);
+    try { await del(`/api/email-extras/spam-rules/${dsDomain}/${id}`); success('Rule removed'); loadDomainSpam(); }
+    catch (e: any) { error('Failed'); }
+    finally { setDeleting(null); }
+  }
+
   const tabs: { id: Tab; label: string; icon: any }[] = [
     { id: 'forwarders', label: 'Forwarders', icon: Forward },
     { id: 'autoresponders', label: 'Autoresponders', icon: Mail },
@@ -352,10 +359,7 @@ export default function EmailExtras() {
                       <td className="table-cell"><span className={`badge-${r.type === 'whitelist' ? 'success' : 'danger'} text-xs`}>{r.type}</span></td>
                       <td className="table-cell font-mono text-xs">{r.address}</td>
                       <td className="table-cell">
-                        <button className="btn-icon text-red-500" onClick={async () => {
-                          await del(`/api/email-extras/spam-rules/${dsDomain}/${r.id}`);
-                          success('Rule removed'); loadDomainSpam();
-                        }}><Trash2 size={13} /></button>
+                        <button className="btn-icon text-red-500" disabled={deleting === r.id} onClick={() => deleteSpamRule(r.id)}><Trash2 size={13} /></button>
                       </td>
                     </tr>
                   ))}

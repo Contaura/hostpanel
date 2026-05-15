@@ -10,6 +10,7 @@ export default function CacheManager() {
   const [redis, setRedis] = useState<any>(null);
   const [memcached, setMemcached] = useState<any>(null);
   const [tab, setTab] = useState<'opcache' | 'redis' | 'memcached'>('opcache');
+  const [flushing, setFlushing] = useState<string | null>(null);
 
   async function loadAll() {
     const [o, r, m] = await Promise.all([
@@ -23,10 +24,13 @@ export default function CacheManager() {
   useEffect(() => { loadAll(); }, []);
 
   async function flush(type: string) {
-    const r = await api(`/${type}/flush`, { method: 'POST' });
-    const d = await r.json();
-    if (d.error) toast.error(d.error);
-    else { toast.success(`${type} flushed`); loadAll(); }
+    setFlushing(type);
+    try {
+      const r = await api(`/${type}/flush`, { method: 'POST' });
+      const d = await r.json();
+      if (d.error) toast.error(d.error);
+      else { toast.success(`${type} flushed`); loadAll(); }
+    } finally { setFlushing(null); }
   }
 
   async function redisAction(action: 'start' | 'stop') {
@@ -65,7 +69,7 @@ export default function CacheManager() {
               <span className={`w-2 h-2 rounded-full ${opcache.enabled ? 'bg-emerald-500' : 'bg-red-500'}`} />
               <span className="font-medium text-sm">OPcache {opcache.enabled ? 'Enabled' : 'Disabled'}</span>
             </div>
-            <button className="btn-danger text-xs" onClick={() => flush('opcache')}><Trash2 size={12} className="mr-1" />Flush OPcache</button>
+            <button className="btn-danger text-xs" disabled={flushing === 'opcache'} onClick={() => flush('opcache')}><Trash2 size={12} className="mr-1" />Flush OPcache</button>
           </div>
           {opcache.memory_usage && (
             <div className="card">
@@ -97,7 +101,7 @@ export default function CacheManager() {
             <div className="flex gap-2">
               {redis.running ? (
                 <>
-                  <button className="btn-danger text-xs" onClick={() => flush('redis')}><Trash2 size={12} className="mr-1" />Flush All</button>
+                  <button className="btn-danger text-xs" disabled={flushing === 'redis'} onClick={() => flush('redis')}><Trash2 size={12} className="mr-1" />Flush All</button>
                   <button className="btn-ghost text-xs" onClick={() => redisAction('stop')}><Square size={12} className="mr-1" />Stop</button>
                 </>
               ) : (
@@ -124,7 +128,7 @@ export default function CacheManager() {
               <span className="font-medium text-sm">Memcached {memcached.running ? 'Running' : 'Stopped'}</span>
             </div>
             {memcached.running && (
-              <button className="btn-danger text-xs" onClick={() => flush('memcached')}><Trash2 size={12} className="mr-1" />Flush All</button>
+              <button className="btn-danger text-xs" disabled={flushing === 'memcached'} onClick={() => flush('memcached')}><Trash2 size={12} className="mr-1" />Flush All</button>
             )}
           </div>
           {memcached.running && (

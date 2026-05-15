@@ -33,6 +33,7 @@ export default function ProcessManager() {
   const [procs, setProcs] = useState<Process[]>([]);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [killing, setKilling] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -46,11 +47,13 @@ export default function ProcessManager() {
 
   async function killProcess(pid: string, cmd: string) {
     if (!confirm(`Kill process ${pid} (${cmd.slice(0, 40)})?`)) return;
+    setKilling(pid);
     try {
       await axios.delete(`/api/processes/${pid}`);
       toast.success(`Process ${pid} terminated`);
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setKilling(null); }
   }
 
   const filtered = filter
@@ -112,6 +115,7 @@ export default function ProcessManager() {
                   </td>
                   <td className="px-3 py-3">
                     <button onClick={() => killProcess(p.pid, p.command)}
+                      disabled={killing === p.pid}
                       className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                       title="Kill process">
                       <Trash2 size={13} />

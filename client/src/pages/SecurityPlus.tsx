@@ -34,6 +34,7 @@ export default function SecurityPlus() {
   const [newIp, setNewIp]         = useState('');
   const [newLabel, setNewLabel]   = useState('');
   const [wlSearch, setWlSearch]   = useState('');
+  const [removingIp, setRemovingIp] = useState<number | null>(null);
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
@@ -86,8 +87,10 @@ export default function SecurityPlus() {
   }
 
   async function removeIp(id: number) {
+    setRemovingIp(id);
     try { await adel(`/api/security-extra/ip-whitelist/${id}`); success('Removed'); loadTab('whitelist'); }
     catch (e: any) { error('Failed'); }
+    finally { setRemovingIp(null); }
   }
 
   const tabs = [
@@ -226,7 +229,7 @@ export default function SecurityPlus() {
                         <td className="table-cell font-mono text-xs">{ip.ip}</td>
                         <td className="table-cell text-slate-600 dark:text-slate-400">{ip.label || '—'}</td>
                         <td className="table-cell text-slate-400">{ip.created_at?.slice(0, 10)}</td>
-                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => removeIp(ip.id)}><Trash2 size={14} /></button></td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={removingIp === ip.id} onClick={() => removeIp(ip.id)}><Trash2 size={14} /></button></td>
                       </tr>
                     ));
                   })()}

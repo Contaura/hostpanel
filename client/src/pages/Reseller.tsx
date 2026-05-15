@@ -16,6 +16,7 @@ export default function Reseller() {
   const [showSummary, setShowSummary] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -50,8 +51,11 @@ export default function Reseller() {
 
   async function del(id: number) {
     if (!confirm('Delete reseller? This removes the login account.')) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    load();
+    setDeleting(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      load();
+    } finally { setDeleting(null); }
   }
 
   async function loadSummary(id: number) {
@@ -136,7 +140,7 @@ export default function Reseller() {
               <div className="flex gap-2">
                 <button className="btn-icon text-indigo-500" title="Usage stats" onClick={() => loadSummary(r.id)}><BarChart2 size={13} /></button>
                 <button className="btn-icon" onClick={() => setEditing({ ...r })}><Edit2 size={13} /></button>
-                <button className="btn-icon text-red-500" onClick={() => del(r.id)}><Trash2 size={13} /></button>
+                <button className="btn-icon text-red-500" disabled={deleting === r.id} onClick={() => del(r.id)}><Trash2 size={13} /></button>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-5 gap-3 text-xs">

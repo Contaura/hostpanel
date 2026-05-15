@@ -29,6 +29,8 @@ export default function AppManager() {
   const [stageForm, setStageForm] = useState<Record<string, { port: string; branch: string }>>({});
   const [showStageForm, setShowStageForm] = useState<string | null>(null);
   const [controlling, setControlling] = useState<string | null>(null);
+  const [deletingApp, setDeletingApp] = useState<string | null>(null);
+  const [deletingStaging, setDeletingStaging] = useState<string | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -57,8 +59,10 @@ export default function AppManager() {
 
   async function remove(name: string) {
     if (!confirm(`Delete app "${name}"?`)) return;
+    setDeletingApp(name);
     try { await adel(`/api/apps/${name}`); success('App deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingApp(null); }
   }
 
   async function fetchLogs(name: string) {
@@ -88,8 +92,10 @@ export default function AppManager() {
 
   async function deleteStaging(name: string) {
     if (!confirm(`Delete staging environment for "${name}"?`)) return;
+    setDeletingStaging(name);
     try { await adel(`/api/apps/${name}/staging`); success('Staging deleted'); setStagings(p => ({ ...p, [name]: null })); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingStaging(null); }
   }
 
   return (
@@ -160,7 +166,7 @@ export default function AppManager() {
                 <button className="btn-ghost" title="Logs" onClick={() => { setExpanded(expanded === app.name ? null : app.name); fetchLogs(app.name); }}>
                   <Terminal size={14} />
                 </button>
-                <button className="btn-icon text-red-500" title="Delete" onClick={() => remove(app.name)}><Trash2 size={14} /></button>
+                <button className="btn-icon text-red-500" title="Delete" disabled={deletingApp === app.name} onClick={() => remove(app.name)}><Trash2 size={14} /></button>
                 <button className="btn-ghost" onClick={() => { const next = expanded === app.name ? null : app.name; setExpanded(next); if (next) loadStaging(app.name); }}>
                   {expanded === app.name ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </button>
@@ -200,7 +206,7 @@ export default function AppManager() {
                       <span className={`badge-${stagings[app.name].status === 'running' ? 'success' : 'warning'} text-xs`}>{stagings[app.name].status}</span>
                       <div className="flex gap-1 ml-auto">
                         <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => promoteStaging(app.name)}><ArrowUpCircle size={11} /> Promote</button>
-                        <button className="btn-icon text-red-500" onClick={() => deleteStaging(app.name)}><Trash2 size={12} /></button>
+                        <button className="btn-icon text-red-500" disabled={deletingStaging === app.name} onClick={() => deleteStaging(app.name)}><Trash2 size={12} /></button>
                       </div>
                     </div>
                   ) : (
