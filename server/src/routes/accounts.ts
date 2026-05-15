@@ -4,11 +4,24 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
+
+// /:id/export tars the whole account webroot and mysqldumps every account-
+// owned database in one shot. /:id/usage walks the same tree with du + find.
+// Either one looped under the global 300/min limit pegs disk I/O and fills
+// /tmp; pin them to 3/min.
+const heavyLimit = rateLimit({
+  windowMs: 60_000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Rate limit hit on heavy account operation; wait a minute.' },
+});
 
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 const WEBROOT   = process.env.WEBROOT   || '/var/www';
@@ -160,7 +173,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // GET /api/accounts/:id/usage — disk usage for account's webroot dir
-router.get('/:id/usage', async (req: AuthRequest, res: Response) => {
+router.get('/:id/usage', heavyLimit, async (req: AuthRequest, res: Response) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
@@ -193,7 +206,7 @@ router.get('/:id/usage', async (req: AuthRequest, res: Response) => {
 
 /* ── Full account export / migration ────────────────────── */
 
-router.post('/:id/export', async (req: AuthRequest, res: Response) => {
+router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
 

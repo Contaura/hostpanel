@@ -5,11 +5,24 @@ import mysql from 'mysql2/promise';
 import multer from 'multer';
 import { existsSync, unlinkSync } from 'fs';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
 const sqlUpload = multer({ dest: '/tmp/', limits: { fileSize: 512 * 1024 * 1024 } });
+
+// Export streams a full mysqldump; import pipes a 512 MB SQL file through
+// the mysql CLI. Both are expensive enough that the global 300/min budget
+// isn't enough — pin them to a tighter bucket so a single token can't fill
+// the disk or starve the DB server.
+const heavyLimit = rateLimit({
+  windowMs: 60_000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Rate limit hit on heavy database operation; wait a minute.' },
+});
 
 const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
@@ -144,7 +157,7 @@ router.delete('/users/:username', async (req: AuthRequest, res: Response) => {
 
 /* ── Export (mysqldump → download) ──────────────────────────── */
 
-router.get('/databases/:name/export', async (req: AuthRequest, res: Response) => {
+router.get('/databases/:name/export', heavyLimit, async (req: AuthRequest, res: Response) => {
   const { name } = req.params;
   if (!/^[a-zA-Z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Invalid database name' });
   const user = DB_ROOT_USER;
@@ -160,7 +173,7 @@ router.get('/databases/:name/export', async (req: AuthRequest, res: Response) =>
 
 /* ── Import (SQL file upload → mysql CLI) ────────────────────── */
 
-router.post('/databases/:name/import', sqlUpload.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), async (req: AuthRequest, res: Response) => {
   const { name } = req.params;
   if (!/^[a-zA-Z0-9_]+$/.test(name)) return res.status(400).json({ error: 'Invalid database name' });
   if (!req.file) return res.status(400).json({ error: 'No SQL file uploaded' });

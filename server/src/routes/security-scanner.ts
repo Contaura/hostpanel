@@ -3,11 +3,24 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 import db from '../db';
 
 const router = Router();
 const execAsync = promisify(exec);
 const WEBROOT = process.env.WEBROOT || '/var/www';
+
+// Malware scans and integrity rebuilds each fan out across the whole webroot
+// — letting a single JWT call these every second under the global 300/min
+// limit is enough to keep the CPU pegged. Pin them to a much tighter
+// per-IP bucket.
+const heavyLimit = rateLimit({
+  windowMs: 60_000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Scan rate limit hit; wait a minute before retrying.' },
+});
 
 // Integrity baseline store
 db.exec(`CREATE TABLE IF NOT EXISTS file_hashes (
@@ -19,7 +32,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS file_hashes (
 
 /* ── ClamAV malware scan ─────────────────────────────────────── */
 
-router.post('/scan', async (req: Request, res: Response) => {
+router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
   const { target = WEBROOT } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
   if (!safePath.startsWith(path.resolve(WEBROOT)) && safePath !== WEBROOT) {
@@ -48,7 +61,7 @@ router.post('/scan', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/update-definitions', async (_req: Request, res: Response) => {
+router.post('/update-definitions', heavyLimit, async (_req: Request, res: Response) => {
   try {
     const { stdout } = await execAsync('freshclam 2>&1', { timeout: 120000 });
     res.json({ output: stdout });
@@ -57,7 +70,7 @@ router.post('/update-definitions', async (_req: Request, res: Response) => {
 
 /* ── File integrity baseline ─────────────────────────────────── */
 
-router.post('/integrity/baseline', async (req: Request, res: Response) => {
+router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Response) => {
   const { target = WEBROOT } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
   if (!safePath.startsWith(path.resolve(WEBROOT))) {

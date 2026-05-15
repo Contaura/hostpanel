@@ -3,10 +3,9 @@ import crypto from 'crypto';
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
-import dns from 'dns/promises';
-import { isIP } from 'net';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
+import { assertHttpTargetAllowed } from '../utils/safe-target';
 
 const router = Router();
 
@@ -19,46 +18,6 @@ function scrubWebhook(row: any) {
   if (!row) return row;
   const { secret: _omitted, events, ...rest } = row;
   return { ...rest, events: typeof events === 'string' ? JSON.parse(events || '[]') : events, has_secret: !!_omitted };
-}
-
-// Block private/loopback/link-local/metadata-endpoint targets so webhook tests
-// can't be used as an SSRF primitive against AWS/GCP IMDS or the panel's own
-// internal API. Allowing webhook delivery to arbitrary public hosts is the
-// intended functionality — only the private ranges are off-limits.
-function isBlockedHost(host: string): boolean {
-  const h = host.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return true;
-  if (isIP(h) === 0) return false; // hostname — resolve and re-check in resolveAndCheck
-  const v = isIP(h);
-  if (v === 4) {
-    const [a, b] = h.split('.').map(Number);
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 0) return true;
-    if (a >= 224) return true; // multicast/reserved
-  } else if (v === 6) {
-    if (h === '::1' || h === '::' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80') || h.startsWith('ff')) return true;
-  }
-  return false;
-}
-
-async function assertWebhookTargetAllowed(rawUrl: string): Promise<URL> {
-  let u: URL;
-  try { u = new URL(rawUrl); } catch { throw new Error('Invalid URL'); }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('Only http and https URLs are allowed');
-  if (isBlockedHost(u.hostname)) throw new Error('Webhook target is in a blocked address range');
-  if (isIP(u.hostname) === 0) {
-    // Hostname — resolve and re-check each address. Catches DNS-rebind-style
-    // payloads where the hostname looks public but resolves to 127.0.0.1.
-    const addrs = await dns.lookup(u.hostname, { all: true }).catch(() => []);
-    for (const a of addrs) {
-      if (isBlockedHost(a.address)) throw new Error('Webhook target resolves to a blocked address');
-    }
-  }
-  return u;
 }
 
 /* ── List tokens (never shows full token) ────────────────── */
@@ -136,7 +95,7 @@ router.get('/webhooks', (_req: Request, res: Response) => {
 router.post('/webhooks', adminOnly, async (req: Request, res: Response) => {
   const { name, url, secret, events } = req.body;
   if (!name || !url) return res.status(400).json({ error: 'name and url required' });
-  try { await assertWebhookTargetAllowed(url); }
+  try { await assertHttpTargetAllowed(url); }
   catch (e: any) { return res.status(400).json({ error: e.message }); }
   const evList = Array.isArray(events) ? events : [];
   const r = db.prepare('INSERT INTO webhooks (name, url, secret, events) VALUES (?, ?, ?, ?)').run(name, url, secret || '', JSON.stringify(evList));
@@ -147,7 +106,7 @@ router.post('/webhooks', adminOnly, async (req: Request, res: Response) => {
 router.put('/webhooks/:id', adminOnly, async (req: Request, res: Response) => {
   const { name, url, secret, events, enabled } = req.body;
   if (url) {
-    try { await assertWebhookTargetAllowed(url); }
+    try { await assertHttpTargetAllowed(url); }
     catch (e: any) { return res.status(400).json({ error: e.message }); }
   }
   db.prepare('UPDATE webhooks SET name=?, url=?, secret=?, events=?, enabled=? WHERE id=?')
@@ -180,7 +139,7 @@ async function deliverWebhook(webhook: any, event: string, payload: string): Pro
   // Re-validate on delivery so an old row created before SSRF checks landed
   // (or a hostname whose DNS now resolves to an internal address) can't be
   // used to probe internal services.
-  const parsedUrl = await assertWebhookTargetAllowed(webhook.url);
+  const parsedUrl = await assertHttpTargetAllowed(webhook.url);
   return new Promise((resolve, reject) => {
     const signature = webhook.secret
       ? 'sha256=' + crypto.createHmac('sha256', webhook.secret).update(payload).digest('hex')

@@ -85,6 +85,20 @@ app.set('trust proxy', 'loopback');
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
 
+// Defense-in-depth response headers. Apache (the public-facing reverse proxy)
+// is supposed to set most of these, but if someone exposes the Node port
+// directly — or runs the panel without Apache in front — these stop the
+// obvious browser-side mistakes (MIME-sniffing payloads, clickjacking,
+// referer leakage to external URLs). HSTS is only meaningful when served
+// over TLS; harmless otherwise.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
 // IP whitelist — blocks non-listed IPs when any entries exist
 app.use('/api/', ipWhitelistMiddleware);
 
@@ -101,8 +115,13 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 // GitHub / GitLab signed. The route handler parses the JSON itself.
 app.use('/api/git-deploy/webhook', express.raw({ type: '*/*', limit: '1mb' }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Cap JSON / urlencoded bodies. 1 MB is plenty for control-plane operations
+// (file uploads go through multer, which has its own per-route fileSize
+// limit). Without an explicit cap, body-parser uses ~100 KB by default,
+// which is silently below what some panel operations actually need, and
+// gives no signal to a caller hammering us with megabyte JSON payloads.
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // Block all write operations for readonly-role tokens before any route handler runs
 app.use('/api/', readonlyGuard);
@@ -216,9 +235,18 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Global error handler — must be 4-argument to be recognized by Express
+// Global error handler — must be 4-argument to be recognized by Express.
+// In production we surface a generic message because err.message often
+// contains DB error text, file paths, or SQL fragments that help an
+// attacker fingerprint the box. Route handlers that want a specific
+// client-visible error still call res.status(...).json({ error: '...' })
+// directly — those skip this fallback.
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  const status = err.status || 500;
+  const isProd = process.env.NODE_ENV === 'production';
+  const message = isProd && status >= 500 ? 'Internal server error' : (err.message || 'Internal server error');
+  if (status >= 500) console.error('[unhandled]', err);
+  res.status(status).json({ error: message });
 });
 
 const httpServer = createServer(app);

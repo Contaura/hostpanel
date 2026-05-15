@@ -1,8 +1,22 @@
 import { Router, Request, Response } from 'express';
 import nodemailer from 'nodemailer';
 import db from '../db';
+import { requireRole } from '../middleware/auth';
+import { assertHttpTargetAllowed } from '../utils/safe-target';
 
 const router = Router();
+
+// Notification webhooks are outbound-fetch primitives just like the api-tokens
+// webhooks, so they need the same admin gate and SSRF allowlist. Without this
+// any authenticated user could register a webhook pointing at internal-only
+// services and probe them via the /test delivery loop.
+const adminOnly = requireRole('superadmin', 'admin');
+
+function scrubHook(row: any) {
+  if (!row) return row;
+  const { secret: _omitted, events, ...rest } = row;
+  return { ...rest, events: typeof events === 'string' ? JSON.parse(events || '[]') : events, has_secret: !!_omitted };
+}
 
 const ALL_EVENTS = [
   'invoice.created', 'invoice.paid', 'invoice.overdue',
@@ -14,36 +28,47 @@ const ALL_EVENTS = [
 
 /* ── CRUD for webhooks ───────────────────────────────────── */
 
-router.get('/', (_req: Request, res: Response) => {
-  const rows = db.prepare('SELECT id, name, url, type, events, enabled, created_at FROM notification_webhooks ORDER BY created_at DESC').all() as any[];
-  res.json(rows.map(r => ({ ...r, events: JSON.parse(r.events || '[]') })));
+router.get('/', adminOnly, (_req: Request, res: Response) => {
+  const rows = db.prepare('SELECT id, name, url, type, events, enabled, secret, created_at FROM notification_webhooks ORDER BY created_at DESC').all() as any[];
+  res.json(rows.map(scrubHook));
 });
 
-router.post('/', (req: Request, res: Response) => {
+router.post('/', adminOnly, async (req: Request, res: Response) => {
   const { name, url, type, events, secret } = req.body;
   if (!name || !url) return res.status(400).json({ error: 'name and url required' });
   if (!['webhook', 'slack', 'discord', 'email'].includes(type)) return res.status(400).json({ error: 'type must be webhook, slack, discord, or email' });
+  // Email "URLs" are actually destination addresses, so skip the SSRF check.
+  if (type !== 'email') {
+    try { await assertHttpTargetAllowed(url); }
+    catch (e: any) { return res.status(400).json({ error: e.message }); }
+  }
   try {
     const r = db.prepare('INSERT INTO notification_webhooks (name, url, type, events, secret) VALUES (?, ?, ?, ?, ?)').run(name, url, type || 'webhook', JSON.stringify(events || ALL_EVENTS), secret || '');
-    res.json(db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(r.lastInsertRowid));
+    const row = db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(r.lastInsertRowid);
+    res.json(scrubHook(row));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.put('/:id', (req: Request, res: Response) => {
+router.put('/:id', adminOnly, async (req: Request, res: Response) => {
   const { name, url, type, events, secret, enabled } = req.body;
+  if (url && type !== 'email') {
+    try { await assertHttpTargetAllowed(url); }
+    catch (e: any) { return res.status(400).json({ error: e.message }); }
+  }
   db.prepare('UPDATE notification_webhooks SET name=?, url=?, type=?, events=?, secret=?, enabled=? WHERE id=?')
     .run(name, url, type, JSON.stringify(events || []), secret || '', enabled ? 1 : 0, req.params.id);
-  res.json(db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(req.params.id));
+  const row = db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(req.params.id);
+  res.json(scrubHook(row));
 });
 
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', adminOnly, (req: Request, res: Response) => {
   db.prepare('DELETE FROM notification_webhooks WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
 /* ── Test notification ───────────────────────────────────── */
 
-router.post('/:id/test', async (req: Request, res: Response) => {
+router.post('/:id/test', adminOnly, async (req: Request, res: Response) => {
   const webhook = db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(req.params.id) as any;
   if (!webhook) return res.status(404).json({ error: 'Not found' });
   try {
@@ -79,6 +104,11 @@ async function sendNotification(hook: any, event: string, data: any) {
     await transporter.sendMail({ from: 'HostPanel <noreply@hostpanel>', to: hook.url, subject: `[HostPanel] ${event}`, text: JSON.stringify(payload, null, 2) });
     return;
   }
+
+  // Re-validate the target on delivery so a row created before the SSRF
+  // check landed (or one whose hostname has since pointed at an internal
+  // address) can't be used to probe internal services.
+  await assertHttpTargetAllowed(hook.url);
 
   if (hook.type === 'slack' || hook.type === 'discord') {
     await fetch(hook.url, {

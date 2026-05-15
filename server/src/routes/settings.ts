@@ -146,7 +146,10 @@ router.put('/relay', async (req: Request, res: Response) => {
       setParam('smtp_sasl_password_maps', 'hash:/etc/postfix/sasl_passwd');
       setParam('smtp_sasl_security_options', 'noanonymous');
       setParam('smtp_tls_security_level', 'encrypt');
-      writeFileSync('/etc/postfix/sasl_passwd', `${relayhost} ${sasl_user}:${sasl_pass}\n`);
+      // 0600 root-only — this file is the relay SMTP credentials and gets
+      // post-mapped into /etc/postfix/sasl_passwd.db. Default umask (typically
+      // 0644) would leave the plaintext file world-readable.
+      writeFileSync('/etc/postfix/sasl_passwd', `${relayhost} ${sasl_user}:${sasl_pass}\n`, { mode: 0o600 });
       await execAsync('postmap /etc/postfix/sasl_passwd 2>/dev/null').catch(() => {});
     } else {
       setParam('smtp_sasl_auth_enable', 'no');
