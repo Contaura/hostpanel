@@ -85,19 +85,12 @@ app.set('trust proxy', 'loopback');
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
 
-// Defense-in-depth response headers. Apache (the public-facing reverse proxy)
-// is supposed to set most of these, but if someone exposes the Node port
-// directly — or runs the panel without Apache in front — these stop the
-// obvious browser-side mistakes (MIME-sniffing payloads, clickjacking,
-// referer leakage to external URLs). HSTS is only meaningful when served
-// over TLS; harmless otherwise.
-app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  next();
-});
+// Security response headers (X-Content-Type-Options, X-Frame-Options,
+// Referrer-Policy, Strict-Transport-Security) are emitted by Apache via
+// /etc/httpd/conf.d/zz-hostpanel-headers.conf — see install.sh. Node is
+// always behind Apache in a real deployment (port 3001 is not opened in
+// the firewall), so duplicating them here just produced two copies in
+// every response.
 
 // IP whitelist — blocks non-listed IPs when any entries exist
 app.use('/api/', ipWhitelistMiddleware);
