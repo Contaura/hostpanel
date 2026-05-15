@@ -1,12 +1,20 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
+
+function htpasswdStdin(args: string[], password: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('htpasswd', args);
+    proc.stdin.write(password + '\n');
+    proc.stdin.end();
+    proc.on('close', code => (code === 0 ? resolve() : reject(new Error(`htpasswd exited ${code}`))));
+    proc.on('error', reject);
+  });
+}
 
 const WEBROOT  = process.env.WEBROOT   || '/var/www';
 const HTPW_DIR = process.env.HTPW_DIR  || '/etc/httpd/htpasswd';
@@ -43,7 +51,9 @@ router.post('/protect', async (req: AuthRequest, res: Response) => {
     const absDir = safeDir(directory);
     await fs.mkdir(HTPW_DIR, { recursive: true });
     const htpasswdFile = path.join(HTPW_DIR, `${Buffer.from(directory).toString('hex')}.htpasswd`);
-    await execAsync(`htpasswd -b${(await fs.access(htpasswdFile).then(() => '').catch(() => 'c'))} "${htpasswdFile}" "${username}" "${password}"`);
+    const createFlag = await fs.access(htpasswdFile).then(() => false).catch(() => true);
+    const args = createFlag ? ['-ic', htpasswdFile, username] : ['-i', htpasswdFile, username];
+    await htpasswdStdin(args, password);
 
     // Write .htaccess
     const htaccess = `AuthType Basic\nAuthName "${realm}"\nAuthUserFile ${htpasswdFile}\nRequire valid-user\n`;
@@ -60,7 +70,7 @@ router.post('/add-user', async (req: AuthRequest, res: Response) => {
   if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
   const htpasswdFile = path.join(HTPW_DIR, `${Buffer.from(directory).toString('hex')}.htpasswd`);
   try {
-    await execAsync(`htpasswd -b "${htpasswdFile}" "${username}" "${password}"`);
+    await htpasswdStdin(['-i', htpasswdFile, username], password);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
