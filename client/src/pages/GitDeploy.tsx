@@ -14,6 +14,7 @@ export default function GitDeploy() {
   const [logs, setLogs] = useState<Record<number, string>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ repo_url: '', branch: '', deploy_path: '', command: '', auto_deploy: true });
+  const [deploying, setDeploying] = useState<number | null>(null);
 
   useEffect(() => { load(); }, []);
 
@@ -32,12 +33,15 @@ export default function GitDeploy() {
   }
 
   async function deploy(id: number) {
+    setDeploying(id);
     setLogs(l => ({ ...l, [id]: 'Deploying…' }));
-    const r = await api(`/${id}/deploy`, { method: 'POST' });
-    const d = await r.json();
-    setLogs(l => ({ ...l, [id]: d.output || d.error || 'Done' }));
-    if (d.error) toast.error(d.error);
-    else toast.success('Deployment complete');
+    try {
+      const r = await api(`/${id}/deploy`, { method: 'POST' });
+      const d = await r.json();
+      setLogs(l => ({ ...l, [id]: d.output || d.error || 'Done' }));
+      if (d.error) toast.error(d.error);
+      else toast.success('Deployment complete');
+    } finally { setDeploying(null); }
   }
 
   async function del(id: number) {
@@ -99,7 +103,7 @@ export default function GitDeploy() {
               </div>
               <div className="flex gap-2">
                 {editingId !== d.id && (
-                  <button className="btn-secondary text-xs" onClick={() => deploy(d.id)}><Play size={12} className="mr-1" />Deploy Now</button>
+                  <button className="btn-secondary text-xs" disabled={deploying === d.id} onClick={() => deploy(d.id)}><Play size={12} className="mr-1" />{deploying === d.id ? 'Deploying…' : 'Deploy Now'}</button>
                 )}
                 <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
                   if (editingId === d.id) { setEditingId(null); return; }

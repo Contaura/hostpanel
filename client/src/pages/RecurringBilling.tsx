@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment } from 'react';
-import { Plus, Trash2, Play, Tag, CreditCard, X, Pencil } from 'lucide-react';
+import { Plus, Trash2, Play, Tag, CreditCard, X, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/billing${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -24,6 +24,9 @@ export default function RecurringBilling() {
   const [editScheduleForm, setEditScheduleForm] = useState({ amount: '', cycle: 'monthly', next_run: '', notes: '' });
   const [editingPromoId, setEditingPromoId] = useState<number | null>(null);
   const [editPromoForm, setEditPromoForm] = useState({ max_uses: '', expires_at: '' });
+  const [scheduleSearch, setScheduleSearch] = useState('');
+  const [creditSearch, setCreditSearch] = useState('');
+  const [promoSearch, setPromoSearch] = useState('');
 
   useEffect(() => {
     api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
@@ -184,12 +187,23 @@ export default function RecurringBilling() {
 
       {/* Tables */}
       {tab === 'schedules' && (
-        <div className="card overflow-hidden p-0">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search schedules…" value={scheduleSearch} onChange={e => setScheduleSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden p-0">
           <table className="w-full text-sm">
             <thead><tr>{['Client', 'Amount', 'Cycle', 'Next Run', 'Last Run', 'Status', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
             <tbody>
-              {schedules.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-slate-500">No schedules</td></tr>}
-              {schedules.map((s: any) => (
+              {(() => {
+                const q = scheduleSearch.trim().toLowerCase();
+                const visible = q ? schedules.filter((s: any) => [s.client_name, s.cycle, s.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : schedules;
+                if (schedules.length === 0) return <tr><td colSpan={7} className="table-cell text-center text-slate-500">No schedules</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No schedules match "{scheduleSearch}"</td></tr>;
+                return visible.map((s: any) => (
                 <Fragment key={s.id}>
                   <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="table-cell font-medium">{s.client_name}</td>
@@ -242,117 +256,145 @@ export default function RecurringBilling() {
                     </tr>
                   )}
                 </Fragment>
-              ))}
+                ));
+              })()}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === 'credits' && (
-        <div className="card overflow-hidden p-0">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search credits…" value={creditSearch} onChange={e => setCreditSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden p-0">
           <table className="w-full text-sm">
             <thead><tr>{['#', 'Client', 'Amount', 'Reason', 'Status', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
             <tbody>
-              {credits.length === 0 && <tr><td colSpan={6} className="table-cell text-center text-slate-500">No credit notes</td></tr>}
-              {credits.map((c: any) => (
-                <>
-                  <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell font-mono text-xs">{c.credit_number}</td>
-                    <td className="table-cell">{c.client_name}</td>
-                    <td className="table-cell">{c.currency} {Number(c.amount).toFixed(2)}</td>
-                    <td className="table-cell text-slate-500 text-xs">{c.reason || '—'}</td>
-                    <td className="table-cell"><span className={`badge-${c.status === 'active' ? 'success' : 'warning'}`}>{c.status}</span></td>
-                    <td className="table-cell">
-                      <div className="flex gap-1">
-                        {c.status === 'active' && (
-                          <button className="btn-icon text-indigo-500" title="Apply to invoice"
-                            onClick={() => { setApplyingCredit(applyingCredit === c.id ? null : c.id); setApplyInvoiceId(''); }}>
-                            <CreditCard size={13} />
-                          </button>
-                        )}
-                        <button className="btn-icon text-red-500" onClick={() => { api(`/credit-notes/${c.id}`, { method: 'DELETE' }); setCredits(cc => cc.filter(x => x.id !== c.id)); }}><Trash2 size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                  {applyingCredit === c.id && (
-                    <tr key={`apply-${c.id}`} className="bg-indigo-50 dark:bg-indigo-900/20">
-                      <td colSpan={6} className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <CreditCard size={13} className="text-indigo-500 flex-shrink-0" />
-                          <span className="text-xs font-medium text-indigo-700 dark:text-indigo-300">Apply {c.currency} {Number(c.amount).toFixed(2)} to:</span>
-                          <select className="input text-xs flex-1 max-w-xs" value={applyInvoiceId} onChange={e => setApplyInvoiceId(e.target.value)}>
-                            <option value="">Select invoice…</option>
-                            {invoices.filter((i: any) => ['unpaid', 'overdue'].includes(i.status)).map((i: any) => (
-                              <option key={i.id} value={i.id}>{i.invoice_number} — {i.client_name} ({i.currency} {Number(i.amount).toFixed(2)})</option>
-                            ))}
-                          </select>
-                          <button className="btn-primary text-xs" onClick={() => applyCredit(c.id)}>Apply</button>
-                          <button className="btn-icon" onClick={() => { setApplyingCredit(null); setApplyInvoiceId(''); }}><X size={13} /></button>
+              {(() => {
+                const q = creditSearch.trim().toLowerCase();
+                const visible = q ? credits.filter((c: any) => [c.credit_number, c.client_name, c.reason, c.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : credits;
+                if (credits.length === 0) return <tr><td colSpan={6} className="table-cell text-center text-slate-500">No credit notes</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">No credits match "{creditSearch}"</td></tr>;
+                return visible.map((c: any) => (
+                  <Fragment key={c.id}>
+                    <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <td className="table-cell font-mono text-xs">{c.credit_number}</td>
+                      <td className="table-cell">{c.client_name}</td>
+                      <td className="table-cell">{c.currency} {Number(c.amount).toFixed(2)}</td>
+                      <td className="table-cell text-slate-500 text-xs">{c.reason || '—'}</td>
+                      <td className="table-cell"><span className={`badge-${c.status === 'active' ? 'success' : 'warning'}`}>{c.status}</span></td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          {c.status === 'active' && (
+                            <button className="btn-icon text-indigo-500" title="Apply to invoice"
+                              onClick={() => { setApplyingCredit(applyingCredit === c.id ? null : c.id); setApplyInvoiceId(''); }}>
+                              <CreditCard size={13} />
+                            </button>
+                          )}
+                          <button className="btn-icon text-red-500" onClick={() => { api(`/credit-notes/${c.id}`, { method: 'DELETE' }); setCredits(cc => cc.filter(x => x.id !== c.id)); }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </>
-              ))}
+                    {applyingCredit === c.id && (
+                      <tr className="bg-indigo-50 dark:bg-indigo-900/20">
+                        <td colSpan={6} className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <CreditCard size={13} className="text-indigo-500 flex-shrink-0" />
+                            <span className="text-xs font-medium text-indigo-700 dark:text-indigo-300">Apply {c.currency} {Number(c.amount).toFixed(2)} to:</span>
+                            <select className="input text-xs flex-1 max-w-xs" value={applyInvoiceId} onChange={e => setApplyInvoiceId(e.target.value)}>
+                              <option value="">Select invoice…</option>
+                              {invoices.filter((i: any) => ['unpaid', 'overdue'].includes(i.status)).map((i: any) => (
+                                <option key={i.id} value={i.id}>{i.invoice_number} — {i.client_name} ({i.currency} {Number(i.amount).toFixed(2)})</option>
+                              ))}
+                            </select>
+                            <button className="btn-primary text-xs" onClick={() => applyCredit(c.id)}>Apply</button>
+                            <button className="btn-icon" onClick={() => { setApplyingCredit(null); setApplyInvoiceId(''); }}><X size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ));
+              })()}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
       {tab === 'promos' && (
-        <div className="card overflow-hidden p-0">
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search promo codes…" value={promoSearch} onChange={e => setPromoSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden p-0">
           <table className="w-full text-sm">
             <thead><tr>{['Code', 'Type', 'Value', 'Uses', 'Expires', 'Active', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
             <tbody>
-              {promos.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-slate-500">No promo codes</td></tr>}
-              {promos.map((p: any) => (
-                <Fragment key={p.id}>
-                  <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell"><span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"><Tag size={11} />{p.code}</span></td>
-                    <td className="table-cell capitalize text-xs">{p.type}</td>
-                    <td className="table-cell">{p.type === 'percent' ? `${p.value}%` : `$${p.value}`}</td>
-                    <td className="table-cell text-xs">{p.uses_count}/{p.max_uses || '∞'}</td>
-                    <td className="table-cell text-xs text-slate-500">{p.expires_at || 'Never'}</td>
-                    <td className="table-cell">
-                      <button onClick={() => togglePromo(p.id, p.active)} className={`relative w-9 h-5 rounded-full transition-colors ${p.active ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
-                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${p.active ? 'left-4' : 'left-0.5'}`} />
-                      </button>
-                    </td>
-                    <td className="table-cell">
-                      <div className="flex gap-1">
-                        <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
-                          if (editingPromoId === p.id) { setEditingPromoId(null); return; }
-                          setEditingPromoId(p.id);
-                          setEditPromoForm({ max_uses: p.max_uses ? String(p.max_uses) : '', expires_at: p.expires_at || '' });
-                        }}><Pencil size={13} /></button>
-                        <button className="btn-icon text-red-500" onClick={() => { api(`/promo-codes/${p.id}`, { method: 'DELETE' }); setPromos(pp => pp.filter(x => x.id !== p.id)); }}><Trash2 size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                  {editingPromoId === p.id && (
-                    <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
-                      <td colSpan={7} className="px-4 py-3">
-                        <div className="flex flex-wrap items-end gap-3">
-                          <div>
-                            <label className="label">Max Uses</label>
-                            <input className="input text-sm w-28" type="number" placeholder="unlimited" value={editPromoForm.max_uses} onChange={e => setEditPromoForm(f => ({ ...f, max_uses: e.target.value }))} />
-                          </div>
-                          <div>
-                            <label className="label">Expires At</label>
-                            <input className="input text-sm" type="date" value={editPromoForm.expires_at} onChange={e => setEditPromoForm(f => ({ ...f, expires_at: e.target.value }))} />
-                          </div>
-                          <div className="flex gap-2">
-                            <button className="btn-primary text-sm" onClick={() => updatePromo(p.id)}>Save</button>
-                            <button className="btn-ghost text-sm" onClick={() => setEditingPromoId(null)}>Cancel</button>
-                          </div>
+              {(() => {
+                const q = promoSearch.trim().toLowerCase();
+                const visible = q ? promos.filter((p: any) => [p.code, p.type].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : promos;
+                if (promos.length === 0) return <tr><td colSpan={7} className="table-cell text-center text-slate-500">No promo codes</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No promo codes match "{promoSearch}"</td></tr>;
+                return visible.map((p: any) => (
+                  <Fragment key={p.id}>
+                    <tr className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <td className="table-cell"><span className="font-mono font-bold text-indigo-600 dark:text-indigo-400 flex items-center gap-1"><Tag size={11} />{p.code}</span></td>
+                      <td className="table-cell capitalize text-xs">{p.type}</td>
+                      <td className="table-cell">{p.type === 'percent' ? `${p.value}%` : `$${p.value}`}</td>
+                      <td className="table-cell text-xs">{p.uses_count}/{p.max_uses || '∞'}</td>
+                      <td className="table-cell text-xs text-slate-500">{p.expires_at || 'Never'}</td>
+                      <td className="table-cell">
+                        <button onClick={() => togglePromo(p.id, p.active)} className={`relative w-9 h-5 rounded-full transition-colors ${p.active ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                          <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${p.active ? 'left-4' : 'left-0.5'}`} />
+                        </button>
+                      </td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                            if (editingPromoId === p.id) { setEditingPromoId(null); return; }
+                            setEditingPromoId(p.id);
+                            setEditPromoForm({ max_uses: p.max_uses ? String(p.max_uses) : '', expires_at: p.expires_at || '' });
+                          }}><Pencil size={13} /></button>
+                          <button className="btn-icon text-red-500" onClick={() => { api(`/promo-codes/${p.id}`, { method: 'DELETE' }); setPromos(pp => pp.filter(x => x.id !== p.id)); }}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </Fragment>
-              ))}
+                    {editingPromoId === p.id && (
+                      <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                        <td colSpan={7} className="px-4 py-3">
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div>
+                              <label className="label">Max Uses</label>
+                              <input className="input text-sm w-28" type="number" placeholder="unlimited" value={editPromoForm.max_uses} onChange={e => setEditPromoForm(f => ({ ...f, max_uses: e.target.value }))} />
+                            </div>
+                            <div>
+                              <label className="label">Expires At</label>
+                              <input className="input text-sm" type="date" value={editPromoForm.expires_at} onChange={e => setEditPromoForm(f => ({ ...f, expires_at: e.target.value }))} />
+                            </div>
+                            <div className="flex gap-2">
+                              <button className="btn-primary text-sm" onClick={() => updatePromo(p.id)}>Save</button>
+                              <button className="btn-ghost text-sm" onClick={() => setEditingPromoId(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ));
+              })()}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

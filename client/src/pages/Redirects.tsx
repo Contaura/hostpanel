@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { ArrowRight, Plus, Trash2 } from 'lucide-react';
+import { ArrowRight, Plus, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Redirect {
@@ -21,6 +21,7 @@ export default function Redirects() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ domain: '', from: '/', to: '', type: '301' as '301' | '302' });
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
 
   async function load() {
     try {
@@ -111,40 +112,54 @@ export default function Redirects() {
         </form>
       )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className={theadCls}><tr>
-            <th className="table-header-cell">From</th>
-            <th className="table-header-cell">To</th>
-            <th className="table-header-cell w-20">Type</th>
-            <th className="px-4 py-3 w-12" />
-          </tr></thead>
-          <tbody>
-            {redirects.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-16 text-center">
-                <ArrowRight className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No redirects configured</p>
-              </td></tr>
-            ) : redirects.map(r => (
-              <tr key={r.id} className={rowCls}>
-                <td className="table-cell font-mono text-xs">
-                  <span className="text-slate-400 dark:text-slate-500">{r.domain}</span>
-                  <span className="text-slate-900 dark:text-slate-100">{r.from}</span>
-                </td>
-                <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{r.to}</td>
-                <td className="table-cell">
-                  <span className={r.type === '301' ? 'badge-blue' : 'badge-yellow'}>{r.type}</span>
-                </td>
-                <td className="px-3 py-3">
-                  <button onClick={() => remove(r.id)}
-                    className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                    <Trash2 size={13} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search redirects…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className={theadCls}><tr>
+              <th className="table-header-cell">From</th>
+              <th className="table-header-cell">To</th>
+              <th className="table-header-cell w-20">Type</th>
+              <th className="px-4 py-3 w-12" />
+            </tr></thead>
+            <tbody>
+              {(() => {
+                const q = search.trim().toLowerCase();
+                const visible = q ? redirects.filter(r => [r.domain, r.from, r.to].some(v => v?.toLowerCase().includes(q))) : redirects;
+                if (redirects.length === 0) return (
+                  <tr><td colSpan={4} className="px-4 py-16 text-center">
+                    <ArrowRight className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                    <p className="text-slate-400 text-sm">No redirects configured</p>
+                  </td></tr>
+                );
+                if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No redirects match "{search}"</td></tr>;
+                return visible.map(r => (
+                  <tr key={r.id} className={rowCls}>
+                    <td className="table-cell font-mono text-xs">
+                      <span className="text-slate-400 dark:text-slate-500">{r.domain}</span>
+                      <span className="text-slate-900 dark:text-slate-100">{r.from}</span>
+                    </td>
+                    <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{r.to}</td>
+                    <td className="table-cell">
+                      <span className={r.type === '301' ? 'badge-blue' : 'badge-yellow'}>{r.type}</span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <button onClick={() => remove(r.id)}
+                        className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

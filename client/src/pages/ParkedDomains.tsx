@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, ArrowRight } from 'lucide-react';
+import { Plus, Trash2, ArrowRight, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/parked-domains${p}`, {
@@ -12,6 +12,7 @@ export default function ParkedDomains() {
   const [domains, setDomains] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ domain: '', primary_domain: '' });
+  const [parkedSearch, setParkedSearch] = useState('');
 
   useEffect(() => {
     api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : []));
@@ -75,30 +76,43 @@ export default function ParkedDomains() {
         </div>
       )}
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr>{['Parked Domain', 'Redirects To', 'Created', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {parked.length === 0 && <tr><td colSpan={4} className="table-cell text-center text-slate-500 py-8">No parked domains configured</td></tr>}
-            {parked.map((p: any) => (
-              <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                <td className="table-cell font-medium">{p.domain}</td>
-                <td className="table-cell">
-                  <div className="flex items-center gap-2 text-slate-500">
-                    <ArrowRight size={12} className="text-indigo-500" />
-                    <span className="font-mono text-xs">{p.primary_domain}</span>
-                  </div>
-                </td>
-                <td className="table-cell text-xs text-slate-500">{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
-                <td className="table-cell">
-                  <button className="btn-icon text-red-500" onClick={() => del(p.id, p.domain)}><Trash2 size={13} /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search domains…" value={parkedSearch} onChange={e => setParkedSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>{['Parked Domain', 'Redirects To', 'Created', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const q = parkedSearch.trim().toLowerCase();
+                const visible = q ? parked.filter((p: any) => [p.domain, p.primary_domain].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : parked;
+                if (parked.length === 0) return <tr><td colSpan={4} className="table-cell text-center text-slate-500 py-8">No parked domains configured</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No domains match "{parkedSearch}"</td></tr>;
+                return visible.map((p: any) => (
+                  <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-medium">{p.domain}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <ArrowRight size={12} className="text-indigo-500" />
+                        <span className="font-mono text-xs">{p.primary_domain}</span>
+                      </div>
+                    </td>
+                    <td className="table-cell text-xs text-slate-500">{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
+                    <td className="table-cell">
+                      <button className="btn-icon text-red-500" onClick={() => del(p.id, p.domain)}><Trash2 size={13} /></button>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

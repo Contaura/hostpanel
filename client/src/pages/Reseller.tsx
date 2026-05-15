@@ -14,6 +14,8 @@ export default function Reseller() {
   const [adding, setAdding] = useState(false);
   const [summaries, setSummaries] = useState<Record<number, any>>({});
   const [showSummary, setShowSummary] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -23,21 +25,27 @@ export default function Reseller() {
   }
 
   async function create() {
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
-    const d = await r.json();
-    if (d.error) { toast.error(d.error); return; }
-    toast.success('Reseller created');
-    setAdding(false); setForm(blank);
-    load();
+    setCreating(true);
+    try {
+      const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+      const d = await r.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success('Reseller created');
+      setAdding(false); setForm(blank);
+      load();
+    } finally { setCreating(false); }
   }
 
   async function update() {
-    const r = await api(`/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
-    const d = await r.json();
-    if (d.error) { toast.error(d.error); return; }
-    toast.success('Updated');
-    setEditing(null);
-    load();
+    setUpdating(true);
+    try {
+      const r = await api(`/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
+      const d = await r.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success('Updated');
+      setEditing(null);
+      load();
+    } finally { setUpdating(false); }
   }
 
   async function del(id: number) {
@@ -88,7 +96,7 @@ export default function Reseller() {
             <AllocField label="Databases" field="alloc_dbs" obj={form} setObj={setForm} />
           </div>
           <div className="flex gap-2">
-            <button className="btn-primary text-sm" onClick={create}>Create</button>
+            <button className="btn-primary text-sm" onClick={create} disabled={creating}>{creating ? 'Creating…' : 'Create'}</button>
             <button className="btn-ghost text-sm" onClick={() => setAdding(false)}>Cancel</button>
           </div>
         </div>
@@ -105,7 +113,7 @@ export default function Reseller() {
             <AllocField label="Databases" field="alloc_dbs" obj={editing} setObj={setEditing} />
           </div>
           <div className="flex gap-2">
-            <button className="btn-primary text-sm" onClick={update}>Save</button>
+            <button className="btn-primary text-sm" onClick={update} disabled={updating}>{updating ? 'Saving…' : 'Save'}</button>
             <button className="btn-ghost text-sm" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </div>
