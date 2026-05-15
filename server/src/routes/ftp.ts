@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
@@ -10,6 +10,16 @@ const execAsync = promisify(exec);
 
 const FTP_USER_DIR = process.env.FTP_USER_DIR || '/etc/vsftpd/users';
 const WEBROOT = process.env.WEBROOT || '/var/www';
+
+function chpasswdStdin(username: string, password: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('chpasswd', []);
+    proc.stdin.write(`${username}:${password}\n`);
+    proc.stdin.end();
+    proc.on('close', code => (code === 0 ? resolve() : reject(new Error(`chpasswd exited ${code}`))));
+    proc.on('error', reject);
+  });
+}
 
 router.get('/users', async (_req: AuthRequest, res: Response) => {
   try {
@@ -41,7 +51,7 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
   try {
     // Create system user locked to FTP only
     await execAsync(`useradd -m -d "${homeDir}" -s /sbin/nologin ${username} 2>/dev/null || true`);
-    await execAsync(`echo '${username}:${password.replace(/'/g, "'\\''")}' | chpasswd`);
+    await chpasswdStdin(username, password);
     await execAsync(`mkdir -p "${homeDir}"`);
     await execAsync(`chown ${username}:${username} "${homeDir}"`);
 
@@ -72,7 +82,7 @@ router.put('/users/:username/password', async (req: AuthRequest, res: Response) 
   }
 
   try {
-    await execAsync(`echo '${username}:${password.replace(/'/g, "'\\''")}' | chpasswd`);
+    await chpasswdStdin(username, password);
     res.json({ message: 'Password updated' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

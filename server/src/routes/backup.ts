@@ -44,9 +44,13 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
   try {
     let filename: string;
     if (type === 'files') {
+      const webroot = process.env.WEBROOT || '/var/www';
       const srcDir = target
-        ? path.join(process.env.WEBROOT || '/var/www', target)
-        : (process.env.WEBROOT || '/var/www');
+        ? path.resolve(path.join(webroot, target))
+        : webroot;
+      if (!srcDir.startsWith(path.resolve(webroot))) {
+        return res.status(400).json({ error: 'Invalid target path' });
+      }
       const label = target ? target.replace(/[^a-zA-Z0-9]/g, '_') : 'all';
       filename = `files_${label}_${ts}.tar.gz`;
       const out = path.join(dir, filename);
@@ -220,17 +224,30 @@ router.post('/push-remote/:name', async (req: AuthRequest, res: Response) => {
 
   if (!bucket) return res.status(400).json({ error: 'Remote backup not configured. Set bucket first.' });
 
+  if (!/^[a-zA-Z0-9._-]+$/.test(bucket)) return res.status(400).json({ error: 'Invalid bucket name' });
+  if (prefix && !/^[a-zA-Z0-9._/-]+$/.test(prefix)) return res.status(400).json({ error: 'Invalid path prefix' });
+
   try {
     let cmd = '';
+    const execEnv: Record<string, string> = { ...process.env } as Record<string, string>;
+
     if (provider === 's3' || !provider) {
-      const env = accessKey ? `AWS_ACCESS_KEY_ID=${accessKey} AWS_SECRET_ACCESS_KEY=${secretKey} AWS_DEFAULT_REGION=${region} ` : '';
-      cmd = `${env}aws s3 cp "${file}" "s3://${bucket}/${prefix}/${name}" 2>&1`;
+      if (accessKey) {
+        execEnv.AWS_ACCESS_KEY_ID = accessKey;
+        execEnv.AWS_SECRET_ACCESS_KEY = secretKey;
+        execEnv.AWS_DEFAULT_REGION = region;
+      }
+      cmd = `aws s3 cp "${file}" "s3://${bucket}/${prefix}/${name}" 2>&1`;
     } else if (provider === 'b2') {
-      cmd = `B2_APPLICATION_KEY_ID=${accessKey} B2_APPLICATION_KEY=${secretKey} b2 upload-file ${bucket} "${file}" "${prefix}/${name}" 2>&1`;
-    } else {
+      execEnv.B2_APPLICATION_KEY_ID = accessKey;
+      execEnv.B2_APPLICATION_KEY = secretKey;
+      cmd = `b2 upload-file "${bucket}" "${file}" "${prefix}/${name}" 2>&1`;
+    } else if (/^[a-zA-Z0-9_-]+$/.test(provider)) {
       cmd = `rclone copy "${file}" "${provider}:${bucket}/${prefix}" 2>&1`;
+    } else {
+      return res.status(400).json({ error: 'Invalid provider' });
     }
-    const { stdout } = await execAsync(cmd, { timeout: 300000 });
+    const { stdout } = await execAsync(cmd, { timeout: 300000, env: execEnv });
     res.json({ success: true, output: stdout });
   } catch (err: any) {
     res.status(500).json({ error: err.stderr || err.message });

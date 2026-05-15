@@ -23,8 +23,12 @@ router.post('/', async (req: Request, res: Response) => {
   const { account_id, domain, subdomain, document_root } = req.body;
   if (!account_id || !domain || !subdomain) return res.status(400).json({ error: 'account_id, domain, subdomain required' });
   if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(subdomain)) return res.status(400).json({ error: 'Invalid subdomain' });
 
-  const docRoot = document_root || path.join(WEBROOT, subdomain, 'public_html');
+  const resolvedWebroot = path.resolve(WEBROOT);
+  const rawDocRoot = document_root || path.join(WEBROOT, subdomain, 'public_html');
+  const docRoot = path.resolve(rawDocRoot);
+  if (!docRoot.startsWith(resolvedWebroot)) return res.status(400).json({ error: 'Invalid document root' });
   try {
     mkdirSync(docRoot, { recursive: true });
 

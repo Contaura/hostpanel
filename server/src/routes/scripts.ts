@@ -167,7 +167,7 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
       try {
         const siteUrl = `http://${domain}`;
         await execAsync(
-          `wp --path="${installPath}" core install --url='${siteUrl}' --title='${(siteTitle || 'My Site').replace(/'/g, "'\\''")}' --admin_user='${(adminUser || 'admin').replace(/'/g, "'\\''")}' --admin_password='${(adminPass || 'changeme').replace(/'/g, "'\\''")}' --admin_email='${adminEmail || 'admin@example.com'}' --skip-email 2>/dev/null || true`
+          `wp --path="${installPath}" core install --url='${siteUrl}' --title='${(siteTitle || 'My Site').replace(/'/g, "'\\''")}' --admin_user='${(adminUser || 'admin').replace(/'/g, "'\\''")}' --admin_password='${(adminPass || 'changeme').replace(/'/g, "'\\''")}' --admin_email='${(adminEmail || 'admin@example.com').replace(/'/g, "'\\''")}' --skip-email 2>/dev/null || true`
         );
       } catch {}
     }

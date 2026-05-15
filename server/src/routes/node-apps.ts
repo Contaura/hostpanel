@@ -8,6 +8,14 @@ const router = Router();
 const execAsync = promisify(exec);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
+const APP_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
+const SAFE_PATH_RE = /^\/[a-zA-Z0-9_./ -]+$/;
+const INTERP_ALLOWLIST = ['node', 'python3', 'python', 'python2', 'bun', 'deno'];
+
+function isSafePath(p: string): boolean {
+  return SAFE_PATH_RE.test(p) && !/["$`\\!]/.test(p);
+}
+
 async function pm2List() {
   try {
     const { stdout } = await execAsync('pm2 jlist 2>/dev/null');
@@ -38,6 +46,13 @@ router.get('/node', async (_req: AuthRequest, res: Response) => {
 router.post('/node', async (req: AuthRequest, res: Response) => {
   const { name, script, cwd, interpreter = 'node', env = '' } = req.body;
   if (!name || !script) return res.status(400).json({ error: 'name and script required' });
+  if (!APP_NAME_RE.test(name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (!isSafePath(script)) return res.status(400).json({ error: 'Invalid script path' });
+  if (cwd && !isSafePath(cwd)) return res.status(400).json({ error: 'Invalid cwd' });
+  if (env && !isSafePath(env)) return res.status(400).json({ error: 'Invalid env file path' });
+  if (!INTERP_ALLOWLIST.includes(interpreter) && !isSafePath(interpreter)) {
+    return res.status(400).json({ error: 'Invalid interpreter' });
+  }
   try {
     const envFlag = env ? `--env-file "${env}"` : '';
     const interpFlag = interpreter !== 'node' ? `--interpreter "${interpreter}"` : '';
@@ -89,6 +104,10 @@ router.get('/python', async (_req: AuthRequest, res: Response) => {
 router.post('/python', async (req: AuthRequest, res: Response) => {
   const { name, script, cwd, venv } = req.body;
   if (!name || !script) return res.status(400).json({ error: 'name and script required' });
+  if (!APP_NAME_RE.test(name)) return res.status(400).json({ error: 'Invalid app name' });
+  if (!isSafePath(script)) return res.status(400).json({ error: 'Invalid script path' });
+  if (cwd && !isSafePath(cwd)) return res.status(400).json({ error: 'Invalid cwd' });
+  if (venv && !isSafePath(venv)) return res.status(400).json({ error: 'Invalid venv path' });
   const interpreter = venv ? `${venv}/bin/python` : 'python3';
   try {
     await execAsync(`pm2 start "${script}" --name "${name}" --interpreter "${interpreter}" --cwd "${cwd || WEBROOT}"`);
@@ -100,6 +119,7 @@ router.post('/python', async (req: AuthRequest, res: Response) => {
 router.post('/python/create-venv', async (req: AuthRequest, res: Response) => {
   const { path: venvPath } = req.body;
   if (!venvPath) return res.status(400).json({ error: 'path required' });
+  if (!isSafePath(venvPath)) return res.status(400).json({ error: 'Invalid venv path' });
   try {
     await execAsync(`python3 -m venv "${venvPath}"`, { timeout: 60000 });
     res.json({ success: true, path: venvPath });

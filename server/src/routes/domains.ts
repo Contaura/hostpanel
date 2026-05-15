@@ -91,7 +91,10 @@ router.post('/ssl/:domain', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    const emailArg = email ? `--email ${email}` : '--register-unsafely-without-email';
+    if (email && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    const emailArg = email ? `--email "${email}"` : '--register-unsafely-without-email';
     const { stdout } = await execAsync(
       `certbot --apache -d ${domain} -d www.${domain} ${emailArg} --agree-tos --non-interactive 2>&1`
     );

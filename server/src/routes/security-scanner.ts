@@ -60,6 +60,9 @@ router.post('/update-definitions', async (_req: Request, res: Response) => {
 router.post('/integrity/baseline', async (req: Request, res: Response) => {
   const { target = WEBROOT } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
+  if (!safePath.startsWith(path.resolve(WEBROOT))) {
+    return res.status(400).json({ error: 'Path outside webroot' });
+  }
   try {
     const { stdout } = await execAsync(
       `find "${safePath}" -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -5000 | xargs sha256sum 2>/dev/null`,
@@ -81,6 +84,9 @@ router.post('/integrity/baseline', async (req: Request, res: Response) => {
 router.get('/integrity/check', async (req: Request, res: Response) => {
   const target = (req.query.target as string) || WEBROOT;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
+  if (!safePath.startsWith(path.resolve(WEBROOT))) {
+    return res.status(400).json({ error: 'Path outside webroot' });
+  }
 
   try {
     const baseline = db.prepare('SELECT file_path, sha256 FROM file_hashes WHERE file_path LIKE ?').all(`${safePath}%`) as { file_path: string; sha256: string }[];
