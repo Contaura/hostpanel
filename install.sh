@@ -131,9 +131,10 @@ else
   PANEL_HOST="${PANEL_HOST%%/*}"
 fi
 
-# ── 7/9  Build client ────────────────────────────────────────────────────────
-echo "[7/9] Building client..."
+# ── 7/9  Build server + client ───────────────────────────────────────────────
+echo "[7/9] Building server and client..."
 cd "$PANEL_DIR"
+npm run build --workspace=server
 npm run build --workspace=client
 
 # ── 8/9  Systemd service + Apache reverse proxy ─────────────────────────────
