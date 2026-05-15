@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History, Pencil } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History, Pencil, Search } from 'lucide-react';
 
 interface Token { id: number; name: string; token_prefix: string; permissions: string; last_used: string; expires_at: string; created_at: string }
 interface Webhook { id: number; name: string; url: string; events: string; active: number; created_at: string }
@@ -34,6 +34,8 @@ export default function ApiTokens() {
   const [showDeliveries, setShowDeliveries] = useState<number | null>(null);
   const [editingWhId, setEditingWhId] = useState<number | null>(null);
   const [editWhForm, setEditWhForm] = useState({ name: '', url: '', secret: '', events: [] as string[], enabled: true });
+  const [tokenSearch, setTokenSearch] = useState('');
+  const [webhookSearch, setWebhookSearch] = useState('');
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
@@ -151,32 +153,45 @@ export default function ApiTokens() {
         </div>
       )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-700">
-              <th className="table-header-cell">Name</th>
-              <th className="table-header-cell">Token Prefix</th>
-              <th className="table-header-cell">Permissions</th>
-              <th className="table-header-cell">Last Used</th>
-              <th className="table-header-cell">Expires</th>
-              <th className="table-header-cell w-16"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {tokens.length === 0 && <tr><td colSpan={6} className="table-cell text-slate-400 text-center py-8">No API tokens yet</td></tr>}
-            {tokens.map(t => (
-              <tr key={t.id} className="border-b border-slate-100 dark:border-slate-800">
-                <td className="table-cell font-medium">{t.name}</td>
-                <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400">{t.token_prefix}…</td>
-                <td className="table-cell"><span className={PERM_BADGE[t.permissions] || 'badge-info'}>{t.permissions}</span></td>
-                <td className="table-cell text-slate-400 text-xs"><div className="flex items-center gap-1"><Clock size={11} /> {t.last_used?.slice(0, 16) || 'Never'}</div></td>
-                <td className="table-cell text-slate-400 text-xs">{t.expires_at || '—'}</td>
-                <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => revoke(t.id, t.name)}><Trash2 size={13} /></button></td>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search tokens…" value={tokenSearch} onChange={e => setTokenSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="table-header-cell">Name</th>
+                <th className="table-header-cell">Token Prefix</th>
+                <th className="table-header-cell">Permissions</th>
+                <th className="table-header-cell">Last Used</th>
+                <th className="table-header-cell">Expires</th>
+                <th className="table-header-cell w-16"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(() => {
+                const q = tokenSearch.trim().toLowerCase();
+                const visible = q ? tokens.filter(t => [t.name, t.permissions, t.token_prefix].some(v => v?.toLowerCase().includes(q))) : tokens;
+                if (tokens.length === 0) return <tr><td colSpan={6} className="table-cell text-slate-400 text-center py-8">No API tokens yet</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">No tokens match "{tokenSearch}"</td></tr>;
+                return visible.map(t => (
+                  <tr key={t.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="table-cell font-medium">{t.name}</td>
+                    <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400">{t.token_prefix}…</td>
+                    <td className="table-cell"><span className={PERM_BADGE[t.permissions] || 'badge-info'}>{t.permissions}</span></td>
+                    <td className="table-cell text-slate-400 text-xs"><div className="flex items-center gap-1"><Clock size={11} /> {t.last_used?.slice(0, 16) || 'Never'}</div></td>
+                    <td className="table-cell text-slate-400 text-xs">{t.expires_at || '—'}</td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => revoke(t.id, t.name)}><Trash2 size={13} /></button></td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card p-4 bg-slate-50 dark:bg-slate-800/50">
@@ -211,7 +226,14 @@ export default function ApiTokens() {
             </div>
           )}
 
-          <div className="card overflow-hidden">
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search webhooks…" value={webhookSearch} onChange={e => setWebhookSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-slate-200 dark:border-slate-700">
                 <th className="table-header-cell">Name</th>
@@ -220,8 +242,12 @@ export default function ApiTokens() {
                 <th className="table-header-cell w-32"></th>
               </tr></thead>
               <tbody>
-                {webhooks.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No webhooks configured</td></tr>}
-                {webhooks.map(wh => (
+                {(() => {
+                  const q = webhookSearch.trim().toLowerCase();
+                  const visible = q ? webhooks.filter(wh => [wh.name, wh.url, wh.events].some(v => v?.toLowerCase().includes(q))) : webhooks;
+                  if (webhooks.length === 0) return <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No webhooks configured</td></tr>;
+                  if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No webhooks match "{webhookSearch}"</td></tr>;
+                  return visible.map(wh => (
                   <Fragment key={wh.id}>
                     <tr className="border-b border-slate-100 dark:border-slate-800">
                       <td className="table-cell font-medium">{wh.name}</td>
@@ -288,9 +314,11 @@ export default function ApiTokens() {
                       </tr>
                     )}
                   </Fragment>
-                ))}
+                  ));
+                })()}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

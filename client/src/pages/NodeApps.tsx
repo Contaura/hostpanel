@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, RefreshCw, Play, Square, RotateCcw, Trash2, FileText, Terminal } from 'lucide-react';
+import { Plus, RefreshCw, Play, Square, RotateCcw, Trash2, FileText, Terminal, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/node-apps${p}`, {
@@ -31,6 +31,8 @@ export default function NodeApps() {
   const [pyForm, setPyForm] = useState({ name: '', script: '', cwd: '', venv: '' });
   const [venvPath, setVenvPath] = useState('');
   const [creatingVenv, setCreatingVenv] = useState(false);
+  const [actioning, setActioning] = useState<string | null>(null);
+  const [appSearch, setAppSearch] = useState('');
 
   useEffect(() => { load(); }, [type]);
 
@@ -42,9 +44,12 @@ export default function NodeApps() {
   }
 
   async function action(id: string, act: string) {
-    await api(`/node/${id}/action`, { method: 'POST', body: JSON.stringify({ action: act }) });
-    toast.success(`${act} sent`);
-    load();
+    setActioning(id);
+    try {
+      await api(`/node/${id}/action`, { method: 'POST', body: JSON.stringify({ action: act }) });
+      toast.success(`${act} sent`);
+      load();
+    } finally { setActioning(null); }
   }
 
   async function addApp() {
@@ -144,42 +149,55 @@ export default function NodeApps() {
         </div>
       )}
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr>{['Name', 'Status', 'PID', 'CPU', 'Memory', 'Restarts', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={7} className="table-cell text-center py-8 text-slate-400">Loading…</td></tr>}
-            {!loading && apps.length === 0 && <tr><td colSpan={7} className="table-cell text-center py-8 text-slate-400">No apps running. Deploy one above.</td></tr>}
-            {apps.map((app: any) => (
-              <tr key={app.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                <td className="table-cell">
-                  <div>
-                    <p className="font-medium">{app.name}</p>
-                    <p className="text-xs text-slate-400 font-mono truncate max-w-[180px]">{app.script}</p>
-                  </div>
-                </td>
-                <td className="table-cell"><span className={`badge text-xs ${statusBadge(app.status)}`}>{app.status}</span></td>
-                <td className="table-cell text-xs text-slate-500">{app.pid || '—'}</td>
-                <td className="table-cell text-xs">{app.cpu != null ? `${app.cpu}%` : '—'}</td>
-                <td className="table-cell text-xs">{fmtMem(app.memory)}</td>
-                <td className="table-cell text-xs text-slate-500">{app.restarts ?? '—'}</td>
-                <td className="table-cell">
-                  <div className="flex items-center gap-1">
-                    {app.status === 'online'
-                      ? <button className="btn-icon text-amber-500" onClick={() => action(app.id, 'stop')} title="Stop"><Square size={12} /></button>
-                      : <button className="btn-icon text-emerald-500" onClick={() => action(app.id, 'start')} title="Start"><Play size={12} /></button>
-                    }
-                    <button className="btn-icon text-blue-500" onClick={() => action(app.id, 'restart')} title="Restart"><RotateCcw size={12} /></button>
-                    <button className="btn-icon text-slate-500" onClick={() => loadLogs(String(app.id))} title="Logs"><FileText size={12} /></button>
-                    <button className="btn-icon text-red-500" onClick={() => action(app.id, 'delete')} title="Delete"><Trash2 size={12} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search apps…" value={appSearch} onChange={e => setAppSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>{['Name', 'Status', 'PID', 'CPU', 'Memory', 'Restarts', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={7} className="table-cell text-center py-8 text-slate-400">Loading…</td></tr>}
+              {!loading && (() => {
+                const q = appSearch.trim().toLowerCase();
+                const visible = q ? apps.filter((app: any) => [app.name, app.script, app.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : apps;
+                if (apps.length === 0) return <tr><td colSpan={7} className="table-cell text-center py-8 text-slate-400">No apps running. Deploy one above.</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No apps match "{appSearch}"</td></tr>;
+                return visible.map((app: any) => (
+                  <tr key={app.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell">
+                      <div>
+                        <p className="font-medium">{app.name}</p>
+                        <p className="text-xs text-slate-400 font-mono truncate max-w-[180px]">{app.script}</p>
+                      </div>
+                    </td>
+                    <td className="table-cell"><span className={`badge text-xs ${statusBadge(app.status)}`}>{app.status}</span></td>
+                    <td className="table-cell text-xs text-slate-500">{app.pid || '—'}</td>
+                    <td className="table-cell text-xs">{app.cpu != null ? `${app.cpu}%` : '—'}</td>
+                    <td className="table-cell text-xs">{fmtMem(app.memory)}</td>
+                    <td className="table-cell text-xs text-slate-500">{app.restarts ?? '—'}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1">
+                        {app.status === 'online'
+                          ? <button className="btn-icon text-amber-500" disabled={actioning === String(app.id)} onClick={() => action(app.id, 'stop')} title="Stop"><Square size={12} /></button>
+                          : <button className="btn-icon text-emerald-500" disabled={actioning === String(app.id)} onClick={() => action(app.id, 'start')} title="Start"><Play size={12} /></button>
+                        }
+                        <button className="btn-icon text-blue-500" disabled={actioning === String(app.id)} onClick={() => action(app.id, 'restart')} title="Restart"><RotateCcw size={12} /></button>
+                        <button className="btn-icon text-slate-500" onClick={() => loadLogs(String(app.id))} title="Logs"><FileText size={12} /></button>
+                        <button className="btn-icon text-red-500" disabled={actioning === String(app.id)} onClick={() => action(app.id, 'delete')} title="Delete"><Trash2 size={12} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {logs && (
