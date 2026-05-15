@@ -1274,4 +1274,232 @@ router.get('/files/:domain/download', clientAuth, async (req: Request, res: Resp
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
+/* ── htpasswd directory protection (scoped to public_html) ──── */
+
+const PORTAL_HTPW_DIR = process.env.HTPW_DIR || '/etc/httpd/htpasswd';
+
+router.get('/htpasswd/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // Each protected directory lives under public_html/<sub> with its own
+  // .htaccess pointing at the matching htpasswd file in HTPW_DIR (the
+  // filename is a hex-encoded copy of the absolute directory path, same
+  // convention as admin htpasswd.ts).
+  const base = path.join(PORTAL_WEBROOT, domain, 'public_html');
+  const walk = async (dir: string): Promise<{ directory: string; users: string[] }[]> => {
+    const out: { directory: string; users: string[] }[] = [];
+    const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.')) continue;
+      const sub = path.join(dir, e.name);
+      const file = path.join(PORTAL_HTPW_DIR, Buffer.from(sub).toString('hex') + '.htpasswd');
+      if (existsSync(file)) {
+        const content = await fs.readFile(file, 'utf-8').catch(() => '');
+        const users = content.split('\n').filter(Boolean).map(l => l.split(':')[0]);
+        out.push({ directory: sub, users });
+      }
+      out.push(...await walk(sub));
+    }
+    return out;
+  };
+  const list = existsSync(base) ? await walk(base) : [];
+  res.json(list);
+});
+
+function htpasswdStdinAdd(file: string, username: string, password: string, createFile: boolean): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = createFile ? ['-ic', file, username] : ['-i', file, username];
+    const p = spawn('htpasswd', args);
+    let err = '';
+    p.stderr.on('data', d => err += d);
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(err || `htpasswd exit ${code}`)));
+    p.on('error', reject);
+    p.stdin.write(password + '\n'); p.stdin.end();
+  });
+}
+
+router.post('/htpasswd/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { subpath, username, password, realm } = req.body;
+  if (!subpath || !username || !password) return res.status(400).json({ error: 'subpath, username, password required' });
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  // Reuse the file-manager's safePath to keep the protected directory
+  // strictly under the client's own /var/www/<domain> tree.
+  const absDir = portalResolveOwnedPath((req as any).clientId, domain, `public_html/${subpath}`);
+  if (!existsSync(absDir)) return res.status(404).json({ error: 'Directory does not exist' });
+  const htpasswdFile = path.join(PORTAL_HTPW_DIR, Buffer.from(absDir).toString('hex') + '.htpasswd');
+  await fs.mkdir(PORTAL_HTPW_DIR, { recursive: true });
+  const fresh = !existsSync(htpasswdFile);
+  await htpasswdStdinAdd(htpasswdFile, username, password, fresh);
+  // Write/update .htaccess in the directory pointing at the file. Each
+  // directory has its own .htaccess so users for one protected area
+  // can't authenticate for another.
+  const htaccessBlock = `AuthType Basic\nAuthName "${(realm || 'Protected Area').replace(/[\r\n"]/g, '')}"\nAuthUserFile ${htpasswdFile}\nRequire valid-user\n`;
+  await fs.writeFile(path.join(absDir, '.htaccess'), htaccessBlock);
+  res.json({ success: true });
+});
+
+router.delete('/htpasswd/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { subpath } = req.body;
+  if (!subpath) return res.status(400).json({ error: 'subpath required' });
+  const absDir = portalResolveOwnedPath((req as any).clientId, domain, `public_html/${subpath}`);
+  const file = path.join(PORTAL_HTPW_DIR, Buffer.from(absDir).toString('hex') + '.htpasswd');
+  await fs.unlink(file).catch(() => {});
+  await fs.unlink(path.join(absDir, '.htaccess')).catch(() => {});
+  res.json({ success: true });
+});
+
+/* ── Hotlink protection (per owned domain) ──────────────────── */
+
+router.get('/hotlink/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const htaccess = path.join(PORTAL_WEBROOT, domain, 'public_html', '.htaccess');
+  const content = await fs.readFile(htaccess, 'utf-8').catch(() => '');
+  const enabled = content.includes('# portal-hotlink-begin');
+  const blockMatch = content.match(/# portal-hotlink-begin([\s\S]*?)# portal-hotlink-end/);
+  const block = blockMatch?.[1] || '';
+  const exts = (block.match(/\\\.\([^)]+\)/)?.[1] || '').split('|').filter(Boolean);
+  const allowed = [...block.matchAll(/RewriteCond %\{HTTP_REFERER\} !\^\?https?:\/\/(?:www\.)?([^/\s$]+)/g)].map(m => m[1]).filter(d => d !== domain);
+  res.json({ enabled, allowed_domains: allowed, blocked_extensions: exts.join(',') });
+});
+
+router.put('/hotlink/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { enabled, allowed_domains, blocked_extensions } = req.body;
+  const htaccess = path.join(PORTAL_WEBROOT, domain, 'public_html', '.htaccess');
+  const content = await fs.readFile(htaccess, 'utf-8').catch(() => '');
+  // Strip any prior portal-hotlink block before writing the new one.
+  const stripped = content.replace(/# portal-hotlink-begin[\s\S]*?# portal-hotlink-end\n?/g, '');
+  let next = stripped;
+  if (enabled) {
+    const exts = String(blocked_extensions || 'jpg,jpeg,png,gif,webp,mp4,mp3,pdf').replace(/[^a-zA-Z0-9,]/g, '').split(',').filter(Boolean).join('|');
+    const allowList = ([domain] as string[]).concat(Array.isArray(allowed_domains) ? allowed_domains.filter((d: string) => /^[a-zA-Z0-9.-]+$/.test(d)) : []);
+    const conds = allowList.map(d => `RewriteCond %{HTTP_REFERER} !^https?://(?:www\\.)?${d.replace(/\./g, '\\.')} [NC]`).join('\n');
+    next = stripped.replace(/\n+$/, '') + `\n# portal-hotlink-begin\nRewriteEngine On\n${conds}\nRewriteRule \\.(${exts})$ - [F,NC]\n# portal-hotlink-end\n`;
+  }
+  await fs.writeFile(htaccess, next);
+  res.json({ success: true });
+});
+
+/* ── Per-domain spam rules (whitelist / blacklist) ──────────── */
+
+router.get('/spam-rules/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const rows = db.prepare("SELECT * FROM domain_spam_rules WHERE domain = ? ORDER BY type, address").all(domain);
+  res.json(rows);
+});
+
+router.post('/spam-rules/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { type, address } = req.body;
+  if (!['whitelist', 'blacklist'].includes(type)) return res.status(400).json({ error: 'type must be whitelist or blacklist' });
+  if (!address || !/^[A-Za-z0-9._%+@*-]+$/.test(String(address))) return res.status(400).json({ error: 'Invalid address pattern' });
+  try {
+    db.prepare('INSERT INTO domain_spam_rules (domain, type, address) VALUES (?, ?, ?)').run(domain, type, address);
+    res.json({ success: true });
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Rule already exists' });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete('/spam-rules/:domain/:id', clientAuth, (req: Request, res: Response) => {
+  const { domain, id } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // The row is keyed by id; also verify the row's domain matches the URL
+  // domain so a client can't delete a rule on a domain they don't own
+  // even with a guessed id.
+  const row: any = db.prepare('SELECT domain FROM domain_spam_rules WHERE id = ?').get(id);
+  if (!row || row.domain !== domain) return res.status(404).json({ error: 'Not found' });
+  db.prepare('DELETE FROM domain_spam_rules WHERE id = ?').run(id);
+  res.json({ success: true });
+});
+
+/* ── Bandwidth / hit stats from the per-domain Apache log ───── */
+
+router.get('/stats/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const log = `/var/log/httpd/${domain}-access.log`;
+  if (!existsSync(log)) return res.json({ hits: 0, bytes: 0, top: [], log_path: log });
+  try {
+    // Awk over the access log: $7 is the URL path, $10 is response size
+    // in CLF combined log format. Aggregate hits + bytes total + top 10
+    // paths. tail -50000 caps memory for very chatty logs.
+    const { stdout: total } = await execAsync(`tail -50000 "${log}" 2>/dev/null | awk '{ hits++; bytes += ($10 ~ /^[0-9]+$/ ? $10 : 0) } END { print hits"\\t"bytes }'`, { timeout: 15000 });
+    const [hitsStr, bytesStr] = total.trim().split('\t');
+    const { stdout: top } = await execAsync(`tail -50000 "${log}" 2>/dev/null | awk '{ print $7 }' | sort | uniq -c | sort -rn | head -10`, { timeout: 15000 });
+    const topPaths = top.split('\n').filter(Boolean).map(l => { const m = l.trim().match(/^(\d+)\s+(.+)$/); return m ? { hits: parseInt(m[1]), path: m[2] } : null; }).filter(Boolean);
+    res.json({ hits: parseInt(hitsStr) || 0, bytes: parseInt(bytesStr) || 0, top: topPaths, log_path: log });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Security scan (ClamAV) scoped to owned webroot ─────────── */
+
+router.post('/security-scan/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!existsSync('/usr/bin/clamscan')) return res.status(503).json({ error: 'ClamAV is not installed on this server' });
+  const target = path.join(PORTAL_WEBROOT, domain);
+  // path.resolve + base-prefix check is unnecessary here because the
+  // domain regex already restricts the input to safe characters, but
+  // wrap clamscan's output in a try/catch so a non-zero exit (clamscan
+  // returns 1 when it finds infections, 2 on error) is still reported
+  // as a usable JSON response.
+  try {
+    const { stdout, stderr } = await execAsync(`clamscan -r --infected --no-summary "${target}" 2>&1`, { timeout: 300000 })
+      .catch((e: any) => ({ stdout: (e.stdout || '') as string, stderr: (e.stderr || '') as string }));
+    const lines: string[] = (stdout + stderr).split('\n').filter(Boolean);
+    const infected = lines.filter((l: string) => l.includes(': ') && !l.startsWith('LibClamAV')).map((l: string) => l.trim());
+    res.json({ scanned: target, infected_count: infected.length, infected });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Raw .htaccess editor (for owned domain public_html) ───── */
+
+router.get('/htaccess/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const file = path.join(PORTAL_WEBROOT, domain, 'public_html', '.htaccess');
+  const content = await fs.readFile(file, 'utf-8').catch(() => '');
+  res.json({ content });
+});
+
+router.post('/htaccess/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { content } = req.body;
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content required' });
+  if (content.length > 64 * 1024) return res.status(413).json({ error: '.htaccess too large (> 64 KB)' });
+  // Apache will refuse to start a vhost with a broken .htaccess, but
+  // since AllowOverride is per-Directory, a bad file only breaks the
+  // tenant's own site. Still, refuse obviously-malicious directives.
+  if (/\b(SetHandler\s+server-status|SetHandler\s+server-info)\b/i.test(content)) {
+    return res.status(400).json({ error: 'Server-status / server-info handlers are not allowed' });
+  }
+  const file = path.join(PORTAL_WEBROOT, domain, 'public_html', '.htaccess');
+  await fs.writeFile(file, content);
+  res.json({ success: true });
+});
+
 export default router;

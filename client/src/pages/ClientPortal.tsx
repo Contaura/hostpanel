@@ -24,10 +24,15 @@ interface FileItem { name: string; type: string; size: number; modified: string;
 interface SshKey { id: number; raw: string; comment: string }
 interface SshKeyGroup { user: string; keys: SshKey[] }
 interface CronGroup { user: string; jobs: { id: number; line: string }[] }
+interface HtpasswdEntry { directory: string; users: string[] }
+interface HotlinkConfig { enabled: boolean; allowed_domains: string[]; blocked_extensions: string }
+interface SpamRule { id: number; domain: string; type: string; address: string }
+interface SiteStats { hits: number; bytes: number; top: { hits: number; path: string }[] }
 
 function portalAuth() { return { Authorization: 'Bearer ' + (localStorage.getItem('hp_portal_token') || '') }; }
 const api   = (p: string) => axios.get(p, { headers: portalAuth() });
 const apost = (p: string, d?: any) => axios.post(p, d || {}, { headers: portalAuth() });
+const aput  = (p: string, d?: any) => axios.put(p, d || {}, { headers: portalAuth() });
 const adel  = (p: string) => axios.delete(p, { headers: portalAuth() });
 
 const STATUS_CONFIG: Record<string, { icon: any; color: string; label: string }> = {
@@ -52,7 +57,7 @@ export default function ClientPortal() {
   const [accounts, setAccounts]                 = useState<PortalAccount[]>([]);
   const [accountsLoaded, setAccountsLoaded]     = useState(false);
   const [selectedAccount, setSelectedAccount]   = useState<PortalAccount | null>(null);
-  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'files' | 'subdomains' | 'dns' | 'redirects' | 'errpages' | 'email' | 'mailauth' | 'ftp' | 'databases' | 'cron' | 'sshkeys' | 'backups' | 'scripts' | 'ssl'>('details');
+  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'files' | 'subdomains' | 'dns' | 'redirects' | 'errpages' | 'email' | 'mailauth' | 'spamrules' | 'ftp' | 'databases' | 'cron' | 'sshkeys' | 'backups' | 'scripts' | 'ssl' | 'htpasswd' | 'hotlink' | 'htaccess' | 'stats' | 'scan'>('details');
   const [usage, setUsage]                       = useState<{ disk_bytes: number } | null>(null);
   const [dnsRecords, setDnsRecords]             = useState<DnsRecord[]>([]);
   const [dnsForm, setDnsForm]                   = useState({ name: '', type: 'A', value: '', ttl: '3600' });
@@ -90,6 +95,17 @@ export default function ClientPortal() {
   const [sshForm, setSshForm]                   = useState({ user: '', key: '' });
   const [backups, setBackups]                   = useState<PortalBackup[]>([]);
   const [scriptForm, setScriptForm]             = useState({ dbName: '', dbUser: '', dbPass: '', siteTitle: '', adminUser: '', adminPass: '', adminEmail: '' });
+  // Round-5 portal state
+  const [htpasswdList, setHtpasswdList]         = useState<HtpasswdEntry[]>([]);
+  const [htpasswdForm, setHtpasswdForm]         = useState({ subpath: '', username: '', password: '', realm: 'Protected Area' });
+  const [hotlink, setHotlink]                   = useState<HotlinkConfig | null>(null);
+  const [hotlinkAllowed, setHotlinkAllowed]     = useState('');
+  const [hotlinkExts, setHotlinkExts]           = useState('jpg,jpeg,png,gif,webp,mp4,mp3,pdf');
+  const [spamRules, setSpamRules]               = useState<SpamRule[]>([]);
+  const [spamForm, setSpamForm]                 = useState({ type: 'blacklist', address: '' });
+  const [stats, setStats]                       = useState<SiteStats | null>(null);
+  const [htaccess, setHtaccess]                 = useState<string>('');
+  const [scanResult, setScanResult]             = useState<{ infected: string[]; infected_count: number } | null>(null);
   const [hostingBusy, setHostingBusy]           = useState(false);
 
   // 2FA state
@@ -140,6 +156,12 @@ export default function ClientPortal() {
     if (accountSubtab === 'cron')       loadCron();
     if (accountSubtab === 'sshkeys')    loadSshKeys();
     if (accountSubtab === 'backups')    loadBackups();
+    if (accountSubtab === 'htpasswd')   loadHtpasswd(selectedAccount.domain);
+    if (accountSubtab === 'hotlink')    loadHotlink(selectedAccount.domain);
+    if (accountSubtab === 'spamrules')  loadSpamRules(selectedAccount.domain);
+    if (accountSubtab === 'stats')      loadStats(selectedAccount.domain);
+    if (accountSubtab === 'htaccess')   loadHtaccess(selectedAccount.domain);
+    if (accountSubtab === 'scan')       setScanResult(null);
   }, [selectedAccount, accountSubtab]);
 
   async function load() {
@@ -559,6 +581,71 @@ export default function ClientPortal() {
     catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
   }
 
+  /* Round-5 actions */
+  async function loadHtpasswd(domain: string) { try { const r = await api(`/api/portal/htpasswd/${domain}`); setHtpasswdList(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addHtpasswd() {
+    if (!selectedAccount || !htpasswdForm.subpath || !htpasswdForm.username || !htpasswdForm.password) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/htpasswd/${selectedAccount.domain}`, htpasswdForm); setToast({ type: 'success', msg: 'Directory protected' }); setHtpasswdForm({ subpath: '', username: '', password: '', realm: 'Protected Area' }); await loadHtpasswd(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function unprotect(subpath: string) {
+    if (!selectedAccount) return;
+    if (!await confirm(`Remove password protection for ${subpath}?`)) return;
+    try {
+      await axios.delete(`/api/portal/htpasswd/${selectedAccount.domain}`, { headers: portalAuth(), data: { subpath } });
+      setToast({ type: 'success', msg: 'Unprotected' }); await loadHtpasswd(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadHotlink(domain: string) {
+    try { const r = await api(`/api/portal/hotlink/${domain}`); setHotlink(r.data); setHotlinkAllowed((r.data.allowed_domains || []).join(', ')); setHotlinkExts(r.data.blocked_extensions || 'jpg,jpeg,png,gif,webp,mp4,mp3,pdf'); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function saveHotlink(enabled: boolean) {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try {
+      const allowed_domains = hotlinkAllowed.split(/[\s,]+/).filter(Boolean);
+      await aput(`/api/portal/hotlink/${selectedAccount.domain}`, { enabled, allowed_domains, blocked_extensions: hotlinkExts });
+      setToast({ type: 'success', msg: enabled ? 'Hotlink protection enabled' : 'Hotlink protection disabled' });
+      await loadHotlink(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadSpamRules(domain: string) { try { const r = await api(`/api/portal/spam-rules/${domain}`); setSpamRules(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addSpamRule() {
+    if (!selectedAccount || !spamForm.address) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/spam-rules/${selectedAccount.domain}`, spamForm); setToast({ type: 'success', msg: 'Rule added' }); setSpamForm({ type: 'blacklist', address: '' }); await loadSpamRules(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteSpamRule(id: number) {
+    if (!selectedAccount) return;
+    try { await adel(`/api/portal/spam-rules/${selectedAccount.domain}/${id}`); setToast({ type: 'success', msg: 'Removed' }); await loadSpamRules(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadStats(domain: string) { try { const r = await api(`/api/portal/stats/${domain}`); setStats(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function loadHtaccess(domain: string) { try { const r = await api(`/api/portal/htaccess/${domain}`); setHtaccess(r.data.content || ''); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function saveHtaccess() {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/htaccess/${selectedAccount.domain}`, { content: htaccess }); setToast({ type: 'success', msg: '.htaccess saved' }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function runScan() {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try { const r = await apost(`/api/portal/security-scan/${selectedAccount.domain}`); setScanResult(r.data); setToast({ type: 'success', msg: `Scanned — ${r.data.infected_count} infected files` }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Scan failed' }); }
+    setHostingBusy(false);
+  }
+
   async function installWordpress() {
     if (!selectedAccount) return;
     if (!scriptForm.dbName || !scriptForm.dbUser || !scriptForm.dbPass) { setToast({ type: 'error', msg: 'Fill in DB name, user, password' }); return; }
@@ -777,19 +864,25 @@ export default function ClientPortal() {
                       <nav className="ml-auto flex items-center gap-1 flex-wrap max-w-[70%] justify-end">
                         {([
                           ['details',    'Details'],
+                          ['stats',      'Stats'],
                           ['files',      'Files'],
+                          ['htaccess',   '.htaccess'],
                           ['subdomains', 'Subdomains'],
                           ['dns',        'DNS'],
                           ['redirects',  'Redirects'],
                           ['errpages',   'Errors'],
+                          ['htpasswd',   'Protect Dir'],
+                          ['hotlink',    'Hotlink'],
                           ['email',      'Email'],
                           ['mailauth',   'Mail Auth'],
+                          ['spamrules',  'Spam'],
                           ['ftp',        'FTP'],
                           ['databases',  'Databases'],
                           ['cron',       'Cron'],
                           ['sshkeys',    'SSH'],
                           ['backups',    'Backups'],
                           ['scripts',    'Apps'],
+                          ['scan',       'Scan'],
                           ['ssl',        'SSL'],
                         ] as const).map(([t, label]) => (
                           <button key={t} onClick={() => setAccountSubtab(t as any)}
@@ -1073,6 +1166,138 @@ export default function ClientPortal() {
                             </tbody>
                           </table>
                         </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'stats' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Parsed from the last ~50,000 lines of <code>/var/log/httpd/{selectedAccount.domain}-access.log</code>.</p>
+                        {!stats && <p className="text-sm text-slate-400">Loading…</p>}
+                        {stats && (
+                          <>
+                            <div className="grid grid-cols-3 gap-3">
+                              <div className="card p-3"><div className="text-xs text-slate-500">Hits</div><div className="text-2xl font-bold">{stats.hits.toLocaleString()}</div></div>
+                              <div className="card p-3"><div className="text-xs text-slate-500">Bandwidth</div><div className="text-2xl font-bold">{(stats.bytes / 1024 / 1024).toFixed(1)} MB</div></div>
+                              <div className="card p-3"><div className="text-xs text-slate-500">Top paths</div><div className="text-2xl font-bold">{stats.top.length}</div></div>
+                            </div>
+                            <table className="w-full text-sm">
+                              <thead><tr className="text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700"><th className="text-left py-2 px-1">Hits</th><th className="text-left">Path</th></tr></thead>
+                              <tbody>
+                                {stats.top.map(t => (
+                                  <tr key={t.path} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                    <td className="py-2 px-1 text-xs">{t.hits}</td>
+                                    <td className="font-mono text-xs truncate max-w-[420px]">{t.path}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </>
+                        )}
+                      </div>
+                    )}
+
+                    {accountSubtab === 'htaccess' && (
+                      <div className="space-y-3 max-w-3xl">
+                        <p className="text-xs text-slate-500">Raw <code>/var/www/{selectedAccount.domain}/public_html/.htaccess</code>. Be careful — a syntax error breaks the whole site.</p>
+                        <textarea className="input font-mono text-xs h-80" value={htaccess} onChange={e => setHtaccess(e.target.value)} />
+                        <button className="btn-primary text-sm" onClick={saveHtaccess} disabled={hostingBusy}>Save .htaccess</button>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'htpasswd' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Password-protect a folder under <code>public_html/</code>. Visitors hit it and get an HTTP Basic Auth prompt.</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-3"><label className="label text-xs">Subfolder</label><input className="input font-mono text-xs" placeholder="admin" value={htpasswdForm.subpath} onChange={e => setHtpasswdForm(f => ({ ...f, subpath: e.target.value.replace(/^\/+|\/$/g, '') }))} /></div>
+                          <div className="col-span-2"><label className="label text-xs">Username</label><input className="input font-mono text-xs" value={htpasswdForm.username} onChange={e => setHtpasswdForm(f => ({ ...f, username: e.target.value.replace(/[^a-zA-Z0-9_]/g, '') }))} /></div>
+                          <div className="col-span-3"><label className="label text-xs">Password</label><input className="input" type="password" value={htpasswdForm.password} onChange={e => setHtpasswdForm(f => ({ ...f, password: e.target.value }))} /></div>
+                          <div className="col-span-2"><label className="label text-xs">Realm</label><input className="input text-xs" value={htpasswdForm.realm} onChange={e => setHtpasswdForm(f => ({ ...f, realm: e.target.value }))} /></div>
+                          <button className="btn-primary col-span-2 text-xs" onClick={addHtpasswd} disabled={hostingBusy}><Plus size={12} /> Protect</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {htpasswdList.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400 text-xs">No protected folders</td></tr>}
+                            {htpasswdList.map(h => {
+                              const sub = h.directory.replace(`/var/www/${selectedAccount.domain}/public_html/`, '');
+                              return (
+                                <tr key={h.directory} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                  <td className="py-2 px-1 font-mono text-xs">{sub || '(root)'}</td>
+                                  <td className="text-xs text-slate-500">{h.users.length} user{h.users.length !== 1 ? 's' : ''}: {h.users.join(', ')}</td>
+                                  <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => unprotect(sub)}><Trash2 size={12} /></button></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'hotlink' && (
+                      <div className="space-y-4 max-w-2xl">
+                        <p className="text-xs text-slate-500">Block other sites from embedding your images / media. Requests with a Referer that isn't your own domain (or an explicit allow-list) get a 403.</p>
+                        <div className="card p-3 space-y-2">
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="font-medium">Status:</span>
+                            {hotlink === null ? <span className="text-slate-400">loading…</span> : hotlink.enabled ? <span className="text-emerald-600 font-medium">Enabled</span> : <span className="text-slate-500">Disabled</span>}
+                          </div>
+                          <div>
+                            <label className="label text-xs">Extra allowed referer domains (comma-separated)</label>
+                            <input className="input font-mono text-xs" placeholder="example.com, cdn.partner.com" value={hotlinkAllowed} onChange={e => setHotlinkAllowed(e.target.value)} />
+                          </div>
+                          <div>
+                            <label className="label text-xs">Blocked extensions</label>
+                            <input className="input font-mono text-xs" placeholder="jpg,jpeg,png,gif,webp" value={hotlinkExts} onChange={e => setHotlinkExts(e.target.value)} />
+                          </div>
+                          <div className="flex gap-2">
+                            <button className="btn-primary text-xs" onClick={() => saveHotlink(true)} disabled={hostingBusy}>Enable / Save</button>
+                            {hotlink?.enabled && <button className="btn-secondary text-xs" onClick={() => saveHotlink(false)} disabled={hostingBusy}>Disable</button>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'spamrules' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Per-domain spam allowlist / blocklist for SpamAssassin. Patterns can be full addresses (<code>spam@bad.com</code>) or wildcards (<code>*@bad.com</code>).</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <select className="input col-span-3 text-xs" value={spamForm.type} onChange={e => setSpamForm(f => ({ ...f, type: e.target.value }))}>
+                            <option value="blacklist">Blocklist</option><option value="whitelist">Allowlist</option>
+                          </select>
+                          <input className="input col-span-7 font-mono text-xs" placeholder="*@bad.com" value={spamForm.address} onChange={e => setSpamForm(f => ({ ...f, address: e.target.value }))} />
+                          <button className="btn-primary col-span-2 text-xs" onClick={addSpamRule} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {spamRules.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400 text-xs">No rules</td></tr>}
+                            {spamRules.map(r => (
+                              <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 text-xs"><span className={r.type === 'blacklist' ? 'text-rose-600' : 'text-emerald-600'}>{r.type}</span></td>
+                                <td className="font-mono text-xs">{r.address}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteSpamRule(r.id)}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'scan' && (
+                      <div className="space-y-4 max-w-2xl">
+                        <p className="text-xs text-slate-500">Run ClamAV against <code>/var/www/{selectedAccount.domain}</code>. Slow on large trees — finishes in under a few minutes for typical WordPress sites.</p>
+                        <button className="btn-primary text-sm" onClick={runScan} disabled={hostingBusy}>{hostingBusy ? 'Scanning…' : 'Start scan'}</button>
+                        {scanResult && (
+                          <div className={`card p-3 text-sm ${scanResult.infected_count > 0 ? 'border-rose-300 bg-rose-50 dark:bg-rose-900/20' : 'border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20'}`}>
+                            <div className="flex items-center gap-2">
+                              {scanResult.infected_count > 0 ? <AlertCircle size={14} className="text-rose-600" /> : <CheckCircle size={14} className="text-emerald-600" />}
+                              <span className="font-medium">{scanResult.infected_count} infected file{scanResult.infected_count !== 1 ? 's' : ''}</span>
+                            </div>
+                            {scanResult.infected.length > 0 && (
+                              <ul className="mt-2 space-y-1 text-xs font-mono">
+                                {scanResult.infected.map((f, i) => <li key={i}>{f}</li>)}
+                              </ul>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
