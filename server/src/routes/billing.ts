@@ -56,13 +56,32 @@ router.post('/plans', (req, res: Response) => {
 });
 
 router.put('/plans/:id', (req, res: Response) => {
-  const { name, description, price, billing_cycle, disk_quota, bandwidth, email_accts, databases, subdomains, ftp_accts, ssl } = req.body;
+  // Partial updates: keep whatever's already in the row when a field is
+  // omitted. The previous form blanked everything to NULL and 500'd with
+  // "NOT NULL constraint failed: plans.disk_quota" the moment someone PUT
+  // a minimal {name,price} body (which is the common "rename a plan" flow).
+  const current: any = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Plan not found' });
+  const pick = <T,>(k: string, fallback: T) => (req.body[k] !== undefined ? req.body[k] : fallback);
   try {
     db.prepare(`
       UPDATE plans SET name=?, description=?, price=?, billing_cycle=?, disk_quota=?, bandwidth=?,
         email_accts=?, databases=?, subdomains=?, ftp_accts=?, ssl=?
       WHERE id=?
-    `).run(name, description || '', price, billing_cycle, disk_quota, bandwidth, email_accts, databases, subdomains, ftp_accts, ssl, req.params.id);
+    `).run(
+      pick('name',          current.name),
+      pick('description',   current.description ?? ''),
+      pick('price',         current.price),
+      pick('billing_cycle', current.billing_cycle),
+      pick('disk_quota',    current.disk_quota),
+      pick('bandwidth',     current.bandwidth),
+      pick('email_accts',   current.email_accts),
+      pick('databases',     current.databases),
+      pick('subdomains',    current.subdomains),
+      pick('ftp_accts',     current.ftp_accts),
+      pick('ssl',           current.ssl),
+      req.params.id,
+    );
     res.json(db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -469,13 +488,26 @@ router.get('/promo-codes', (_req, res: Response) => {
   res.json(db.prepare('SELECT * FROM promo_codes ORDER BY created_at DESC').all());
 });
 
+// promo_codes columns (per db.ts schema): code, discount_type, discount_value,
+// max_uses, uses, expires_at, enabled. The routes used to reference type /
+// value / active / uses_count, which don't exist — every promo endpoint 500'd
+// with "no such column: active" until this rewrite. Accept the old field
+// names from older clients as aliases so a stale UI doesn't break.
 router.post('/promo-codes', (req, res: Response) => {
-  const { code, type, value, max_uses, expires_at } = req.body;
-  if (!code || !type || value === undefined) return res.status(400).json({ error: 'code, type, value required' });
-  if (!['percent', 'fixed'].includes(type)) return res.status(400).json({ error: 'type must be percent or fixed' });
+  const { code } = req.body;
+  const discount_type  = req.body.discount_type  ?? req.body.type;
+  const discount_value = req.body.discount_value ?? req.body.value;
+  const max_uses       = req.body.max_uses ?? 0;
+  const expires_at     = req.body.expires_at ?? null;
+  if (!code || !discount_type || discount_value === undefined) {
+    return res.status(400).json({ error: 'code, discount_type, discount_value required' });
+  }
+  if (!['percent', 'fixed'].includes(discount_type)) {
+    return res.status(400).json({ error: 'discount_type must be percent or fixed' });
+  }
   try {
-    const r = db.prepare('INSERT INTO promo_codes (code, type, value, max_uses, expires_at) VALUES (?, ?, ?, ?, ?)')
-      .run(code.toUpperCase(), type, value, max_uses || null, expires_at || null);
+    const r = db.prepare('INSERT INTO promo_codes (code, discount_type, discount_value, max_uses, expires_at) VALUES (?, ?, ?, ?, ?)')
+      .run(code.toUpperCase(), discount_type, discount_value, max_uses, expires_at);
     res.json(db.prepare('SELECT * FROM promo_codes WHERE id = ?').get(r.lastInsertRowid));
   } catch (err: any) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Code already exists' });
@@ -484,19 +516,28 @@ router.post('/promo-codes', (req, res: Response) => {
 });
 
 router.post('/promo-codes/validate', (req, res: Response) => {
-  const { code, amount } = req.body;
-  const promo = db.prepare("SELECT * FROM promo_codes WHERE code=? AND active=1").get(code?.toUpperCase()) as any;
+  const { code } = req.body;
+  // Accept either `amount` (legacy) or `subtotal` (what the rest of the
+  // billing flow uses) as the value to discount against.
+  const amount = Number(req.body.amount ?? req.body.subtotal);
+  if (!code) return res.status(400).json({ error: 'code is required' });
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: 'amount must be a non-negative number' });
+  const promo = db.prepare("SELECT * FROM promo_codes WHERE code=? AND enabled=1").get(code.toUpperCase()) as any;
   if (!promo) return res.status(404).json({ error: 'Invalid or inactive promo code' });
   if (promo.expires_at && new Date(promo.expires_at) < new Date()) return res.status(400).json({ error: 'Promo code expired' });
-  if (promo.max_uses && promo.uses_count >= promo.max_uses) return res.status(400).json({ error: 'Promo code usage limit reached' });
-  const discount = promo.type === 'percent' ? Math.round(amount * promo.value / 100 * 100) / 100 : Math.min(Number(promo.value), Number(amount));
-  res.json({ valid: true, promo, discount, final_amount: Math.max(0, Number(amount) - discount) });
+  if (promo.max_uses && promo.uses >= promo.max_uses) return res.status(400).json({ error: 'Promo code usage limit reached' });
+  const discount = promo.discount_type === 'percent'
+    ? Math.round(amount * Number(promo.discount_value) / 100 * 100) / 100
+    : Math.min(Number(promo.discount_value), amount);
+  res.json({ valid: true, promo, discount, final_amount: Math.max(0, amount - discount) });
 });
 
 router.put('/promo-codes/:id', (req, res: Response) => {
-  const { active, max_uses, expires_at } = req.body;
-  db.prepare('UPDATE promo_codes SET active=?, max_uses=?, expires_at=? WHERE id=?')
-    .run(active ? 1 : 0, max_uses || null, expires_at || null, req.params.id);
+  // Accept old `active` alongside the schema's `enabled` for backward compat.
+  const enabled = req.body.enabled ?? req.body.active;
+  const { max_uses, expires_at } = req.body;
+  db.prepare('UPDATE promo_codes SET enabled=?, max_uses=?, expires_at=? WHERE id=?')
+    .run(enabled ? 1 : 0, max_uses ?? 0, expires_at ?? null, req.params.id);
   res.json(db.prepare('SELECT * FROM promo_codes WHERE id = ?').get(req.params.id));
 });
 

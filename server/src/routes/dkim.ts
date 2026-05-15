@@ -75,8 +75,12 @@ router.post('/:domain/dmarc', async (req: Request, res: Response) => {
   const { policy, pct, rua, ruf, sp } = req.body;
   const parts = [`v=DMARC1`, `p=${policy || 'none'}`];
   if (pct && pct < 100) parts.push(`pct=${pct}`);
-  if (rua) parts.push(`rua=mailto:${rua}`);
-  if (ruf) parts.push(`ruf=mailto:${ruf}`);
+  // Accept either "mailto:admin@…" or just "admin@…" — DMARC requires the
+  // mailto: scheme but a caller that already includes it would otherwise
+  // produce "rua=mailto:mailto:admin@…".
+  const ensureMailto = (v: string) => v.startsWith('mailto:') ? v : `mailto:${v}`;
+  if (rua) parts.push(`rua=${ensureMailto(rua)}`);
+  if (ruf) parts.push(`ruf=${ensureMailto(ruf)}`);
   if (sp)  parts.push(`sp=${sp}`);
   const dmarcRecord = parts.join('; ');
   res.json({ success: true, dmarcRecord, dnsRecord: { host: `_dmarc.${domain}`, type: 'TXT', value: dmarcRecord } });

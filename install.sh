@@ -26,6 +26,9 @@ echo "[1/9] Node.js $(node -v) ready."
 # ── 2/9  System packages ─────────────────────────────────────────────────────
 echo "[2/9] Installing system packages..."
 dnf install -y epel-release 2>/dev/null || true
+# CRB (CodeReady Builder) carries libmemcached-awesome and sendmail-milter
+# which are runtime deps for opendkim/opendkim-tools.
+dnf config-manager --set-enabled crb 2>/dev/null || true
 # php-cli + php-mysqlnd + php-curl are needed for the Script Installer's
 # WordPress/Joomla/Drupal flows: roundcubemail pulls in php-fpm + a few
 # extensions, but not the CLI binary or the MySQL driver, so WordPress
@@ -33,7 +36,8 @@ dnf install -y epel-release 2>/dev/null || true
 dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
                curl tar gzip openssl make gcc-c++ python3 roundcubemail \
-               php-cli php-mysqlnd php-curl php-gd
+               php-cli php-mysqlnd php-curl php-gd \
+               opendkim opendkim-tools
 
 # wp-cli — required by every endpoint in /api/wordpress/*. It's not in the
 # RHEL repos so pull the official phar release. Pinned to LATEST stable to

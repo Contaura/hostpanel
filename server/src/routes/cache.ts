@@ -16,7 +16,14 @@ router.get('/opcache', async (_req: Request, res: Response) => {
 
 router.post('/opcache/flush', async (_req: Request, res: Response) => {
   try {
-    await execAsync(`php -r "opcache_reset();" 2>/dev/null`);
+    // php returns non-zero if the OPcache extension isn't loaded, which
+    // surfaced as a 500 "Command failed: php -r 'opcache_reset()'" before.
+    // Check the extension first so we can return a clearer 503.
+    const { stdout: check } = await execAsync(`php -r "echo function_exists('opcache_reset') ? 'yes' : 'no';" 2>/dev/null`).catch(() => ({ stdout: 'no' }));
+    if (check.trim() !== 'yes') {
+      return res.status(503).json({ error: 'OPcache is not enabled on this server. Install php-opcache and restart php-fpm to use this feature.' });
+    }
+    await execAsync(`php -r "opcache_reset();"`);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
