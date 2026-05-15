@@ -34,6 +34,7 @@ router.get('/', (_req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const { domain, php_version } = req.body;
   if (!domain || !php_version) return res.status(400).json({ error: 'domain and php_version required' });
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}[a-zA-Z0-9]$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!/^\d+\.\d+$/.test(php_version)) return res.status(400).json({ error: 'Invalid PHP version format' });
 
   try {

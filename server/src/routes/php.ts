@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { readFileSync, writeFileSync } from 'fs';
+import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -67,8 +68,9 @@ router.post('/settings', async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'iniPath and settings are required' });
   }
 
-  // Validate iniPath is a real php.ini
-  if (!iniPath.endsWith('.ini')) return res.status(400).json({ error: 'Invalid ini path' });
+  if (!path.isAbsolute(iniPath) || iniPath.includes('..') || !iniPath.endsWith('.ini')) {
+    return res.status(400).json({ error: 'Invalid ini path' });
+  }
 
   try {
     let content = readFileSync(iniPath, 'utf8');
@@ -121,7 +123,7 @@ router.put('/fpm-pool/:domain', async (req: AuthRequest, res: Response) => {
   try {
     const { writeFileSync: wf, mkdirSync: mk, existsSync: ex } = require('fs');
     if (!ex(FPM_POOL_DIR)) mk(FPM_POOL_DIR, { recursive: true });
-    const user = settings.user || domain;
+    const user = (settings.user || domain).replace(/[^a-zA-Z0-9._-]/g, '');
     const lines = [
       `[${domain}]`,
       `user = ${user}`,

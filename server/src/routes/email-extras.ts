@@ -120,7 +120,7 @@ router.put('/spam', async (req: Request, res: Response) => {
   try {
     const lines = Object.entries(req.body)
       .filter(([k]) => allowed.has(k))
-      .map(([k, v]) => `${k} ${String(v)}`);
+      .map(([k, v]) => `${k} ${String(v).replace(/[\r\n]/g, '')}`);
     writeFileSync(SA_CONFIG, '# Managed by HostPanel\n' + lines.join('\n') + '\n');
     await execAsync('systemctl restart spamassassin').catch(() => {});
     res.json({ success: true });
@@ -167,13 +167,17 @@ function writeDomainRules(domain: string) {
   } catch {}
 }
 
+const SA_DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}[a-zA-Z0-9]$/;
+
 router.get('/spam-rules/:domain', (req: Request, res: Response) => {
+  if (!SA_DOMAIN_RE.test(req.params.domain)) return res.status(400).json({ error: 'Invalid domain' });
   const rules = db.prepare("SELECT * FROM domain_spam_rules WHERE domain = ? ORDER BY type, address").all(req.params.domain);
   res.json(rules);
 });
 
 router.post('/spam-rules/:domain', (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!SA_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const { type, address } = req.body;
   if (!['whitelist', 'blacklist'].includes(type) || !address) {
     return res.status(400).json({ error: 'type (whitelist|blacklist) and address required' });
@@ -185,6 +189,7 @@ router.post('/spam-rules/:domain', (req: Request, res: Response) => {
 
 router.delete('/spam-rules/:domain/:id', (req: Request, res: Response) => {
   const { domain, id } = req.params;
+  if (!SA_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   db.prepare("DELETE FROM domain_spam_rules WHERE id = ? AND domain = ?").run(parseInt(id), domain);
   writeDomainRules(domain);
   res.json({ success: true });
@@ -203,6 +208,7 @@ router.get('/catch-all', (_req: Request, res: Response) => {
 router.post('/catch-all', async (req: Request, res: Response) => {
   const { domain, dest } = req.body;
   if (!domain || !dest) return res.status(400).json({ error: 'domain and dest required' });
+  if (!SA_DOMAIN_RE.test(domain.replace(/^@/, ''))) return res.status(400).json({ error: 'Invalid domain' });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dest)) return res.status(400).json({ error: 'Invalid destination email' });
   const source = `@${domain.replace(/^@/, '')}`;
   try {

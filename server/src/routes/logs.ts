@@ -49,11 +49,10 @@ router.get('/search/:key', async (req: AuthRequest, res: Response) => {
   const log = LOG_FILES[key];
   if (!log || !existsSync(log.path)) return res.status(404).json({ error: 'Log not found' });
   try {
-    // Use fgrep for literal search to avoid regex injection
-    const { stdout } = await execAsync(
-      `fgrep -i ${JSON.stringify(query)} "${log.path}" 2>/dev/null | tail -500`
-    );
-    res.json({ content: stdout, path: log.path });
+    const { stdout } = await execAsync(`tail -n 10000 "${log.path}" 2>/dev/null`);
+    const lq = query.toLowerCase();
+    const content = stdout.split('\n').filter(l => l.toLowerCase().includes(lq)).slice(-500).join('\n');
+    res.json({ content, path: log.path });
   } catch {
     res.json({ content: '', path: log.path });
   }
@@ -81,9 +80,11 @@ router.get('/domain/:domain/:type', async (req: AuthRequest, res: Response) => {
   const logPath = `${HTTPD_LOG_DIR}/${domain}-${type}.log`;
   if (!existsSync(logPath)) return res.status(404).json({ error: `No ${type} log found for ${domain}`, path: logPath });
   try {
-    const grepPart = search ? `| fgrep -i ${JSON.stringify(search)}` : '';
-    const { stdout } = await execAsync(`tail -n ${lines} "${logPath}" ${grepPart} 2>/dev/null || true`);
-    res.json({ content: stdout, path: logPath, domain, type });
+    const { stdout } = await execAsync(`tail -n ${lines} "${logPath}" 2>/dev/null || true`);
+    const content = search
+      ? stdout.split('\n').filter(l => l.toLowerCase().includes(search.toLowerCase())).join('\n')
+      : stdout;
+    res.json({ content, path: logPath, domain, type });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

@@ -42,6 +42,9 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
   const { subdomain, domain, docRoot: customRoot } = req.body;
   if (!sanitizeSub(subdomain)) return res.status(400).json({ error: 'Invalid subdomain name' });
   if (!sanitizeDomain(domain)) return res.status(400).json({ error: 'Invalid domain name' });
+  if (customRoot && (!/^\/[a-zA-Z0-9_./ -]+$/.test(customRoot) || /["$`\\!]/.test(customRoot))) {
+    return res.status(400).json({ error: 'Invalid document root path' });
+  }
 
   const fqdn = `${subdomain}.${domain}`;
   const docRoot = customRoot || path.join(WEBROOT, domain, subdomain, 'public_html');
