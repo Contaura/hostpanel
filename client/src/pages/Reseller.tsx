@@ -17,12 +17,15 @@ export default function Reseller() {
   const [creating, setCreating] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const r = await api('/');
-    setResellers(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    try {
+      const r = await api('/');
+      setResellers(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setPageLoading(false); }
   }
 
   async function create() {
@@ -81,6 +84,13 @@ export default function Reseller() {
         <h1 className="page-title">Resellers (WHM)</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />New Reseller</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -173,6 +183,8 @@ export default function Reseller() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }

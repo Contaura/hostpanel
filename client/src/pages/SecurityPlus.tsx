@@ -35,8 +35,9 @@ export default function SecurityPlus() {
   const [newLabel, setNewLabel]   = useState('');
   const [wlSearch, setWlSearch]   = useState('');
   const [removingIp, setRemovingIp] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => { loadTab(tab); }, [tab]);
+  useEffect(() => { loadTab(tab); setPageLoading(false); }, [tab]);
 
   function loadTab(t: Tab) {
     if (t === '2fa') {
@@ -105,6 +106,13 @@ export default function SecurityPlus() {
         <h1 className="page-title">Security</h1>
         <p className="page-subtitle">Manage admin password, two-factor authentication, and IP access restrictions</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -238,6 +246,8 @@ export default function SecurityPlus() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

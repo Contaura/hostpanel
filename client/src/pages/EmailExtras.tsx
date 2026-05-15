@@ -53,11 +53,12 @@ export default function EmailExtras() {
 
   // Delete tracking
   const [deleting, setDeleting] = useState<string | number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
-    if (t === 'forwarders') api('/api/email-extras/forwarders').then(r => setForwarders(r.data)).catch(() => {});
+    if (t === 'forwarders') api('/api/email-extras/forwarders').then(r => setForwarders(r.data)).catch(() => {}).finally(() => setPageLoading(false));
     if (t === 'autoresponders') api('/api/email-extras/autoresponders').then(r => setAutoresponders(r.data)).catch(() => {});
     if (t === 'spam') api('/api/email-extras/spam').then(r => setSpam(r.data)).catch(() => {});
     if (t === 'quotas') api('/api/email-extras/quotas').then(r => setQuotas(r.data)).catch(() => {});
@@ -149,6 +150,13 @@ export default function EmailExtras() {
         <h1 className="page-title">Email Extras</h1>
         <p className="page-subtitle">Manage forwarders, autoresponders, spam filtering, and disk quotas</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -415,6 +423,8 @@ export default function EmailExtras() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -14,12 +14,19 @@ export default function AddonDomains() {
   const [adding, setAdding] = useState(false);
   const [addonSearch, setAddonSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => {
-    api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : []));
-    fetch('/api/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
-      .then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : []));
-  }, []);
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      await Promise.all([
+        api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : [])),
+        fetch('/api/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
+          .then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])),
+      ]);
+    } finally { setPageLoading(false); }
+  }
 
   async function add() {
     if (!form.account_id || !form.domain || !form.subdomain) return;
@@ -50,6 +57,13 @@ export default function AddonDomains() {
         </div>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Add Domain</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -121,6 +135,8 @@ export default function AddonDomains() {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

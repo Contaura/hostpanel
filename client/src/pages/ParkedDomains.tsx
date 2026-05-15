@@ -14,12 +14,19 @@ export default function ParkedDomains() {
   const [form, setForm] = useState({ domain: '', primary_domain: '' });
   const [parkedSearch, setParkedSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => {
-    api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : []));
-    fetch('/api/domains/domains', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
-      .then(r => r.json()).then(d => setDomains(Array.isArray(d) ? d : []));
-  }, []);
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      await Promise.all([
+        api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : [])),
+        fetch('/api/domains/domains', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
+          .then(r => r.json()).then(d => setDomains(Array.isArray(d) ? d : [])),
+      ]);
+    } finally { setPageLoading(false); }
+  }
 
   async function add() {
     if (!form.domain || !form.primary_domain) return;
@@ -51,6 +58,13 @@ export default function ParkedDomains() {
         </div>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Park Domain</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -118,6 +132,8 @@ export default function ParkedDomains() {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

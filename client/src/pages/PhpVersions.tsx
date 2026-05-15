@@ -17,14 +17,17 @@ export default function PhpVersions() {
   const [installOutput, setInstallOutput] = useState('');
   const [assignSearch, setAssignSearch] = useState('');
   const [removingAssign, setRemovingAssign] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { loadPhp(); }, []);
 
   async function loadPhp() {
-    const [v, a] = await Promise.all([api('/versions').then(r => r.json()), api('/').then(r => r.json())]);
-    setVersions(Array.isArray(v) ? v : []);
-    setAssignments(Array.isArray(a) ? a : []);
-    if (Array.isArray(v) && v.length) setPhpVer(v[0]);
+    try {
+      const [v, a] = await Promise.all([api('/versions').then(r => r.json()), api('/').then(r => r.json())]);
+      setVersions(Array.isArray(v) ? v : []);
+      setAssignments(Array.isArray(a) ? a : []);
+      if (Array.isArray(v) && v.length) setPhpVer(v[0]);
+    } finally { setPageLoading(false); }
   }
 
   async function assign() {
@@ -74,6 +77,13 @@ export default function PhpVersions() {
   return (
     <div className="space-y-6">
       <h1 className="page-title">Runtime Versions</h1>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'php' ? 'tab-item-active' : ''}`} onClick={() => setTab('php')}>PHP (per domain)</button>
@@ -167,6 +177,8 @@ export default function PhpVersions() {
           </div>
           {installOutput && <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-48 overflow-y-auto whitespace-pre-wrap">{installOutput}</pre>}
         </div>
+      )}
+      </>
       )}
     </div>
   );

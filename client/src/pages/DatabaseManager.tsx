@@ -38,6 +38,7 @@ export default function DatabaseManager() {
   const [deletingDb, setDeletingDb] = useState<string | null>(null);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
   const [revokingAccess, setRevokingAccess] = useState<string | null>(null);
+  const [slowLogToggling, setSlowLogToggling] = useState(false);
 
   useEffect(() => {
     axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
@@ -380,10 +381,13 @@ export default function DatabaseManager() {
                   <p className="text-sm font-mono text-slate-600 dark:text-slate-400">{slowLog.log_file || 'not configured'}</p>
                 </div>
                 <div className="flex gap-2 items-end">
-                  <button className={slowLog.enabled ? 'btn-danger' : 'btn-primary'} onClick={async () => {
-                    await axios.put('/api/databases/slow-query-log', { enabled: !slowLog.enabled, long_query_time: slowLog.long_query_time });
-                    toast.success(slowLog.enabled ? 'Slow query log disabled' : 'Slow query log enabled');
-                    loadSlowLog();
+                  <button className={slowLog.enabled ? 'btn-danger' : 'btn-primary'} disabled={slowLogToggling} onClick={async () => {
+                    setSlowLogToggling(true);
+                    try {
+                      await axios.put('/api/databases/slow-query-log', { enabled: !slowLog.enabled, long_query_time: slowLog.long_query_time });
+                      toast.success(slowLog.enabled ? 'Slow query log disabled' : 'Slow query log enabled');
+                      loadSlowLog();
+                    } finally { setSlowLogToggling(false); }
                   }}>{slowLog.enabled ? 'Disable' : 'Enable'}</button>
                 </div>
               </div>

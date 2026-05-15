@@ -31,6 +31,7 @@ export default function PHPManager() {
   const [editSettings, setEditSettings] = useState<Settings>({});
   const [saving, setSaving] = useState(false);
   const [extSearch, setExtSearch] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
 
   async function load() {
     try {
@@ -42,6 +43,7 @@ export default function PHPManager() {
       setSettings(settingsRes.data);
       setEditSettings({ ...settingsRes.data });
     } catch (err: any) { toast.error('Failed to load PHP info'); }
+    finally { setPageLoading(false); }
   }
   useEffect(() => { load(); }, []);
 
@@ -122,6 +124,13 @@ export default function PHPManager() {
         <h1 className="page-title">PHP Manager</h1>
         <p className="page-subtitle">View PHP configuration and manage settings</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {info && (
         <div className="flex items-center gap-3 p-4 card">
@@ -291,6 +300,8 @@ export default function PHPManager() {
             </>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

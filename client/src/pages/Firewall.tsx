@@ -42,6 +42,8 @@ export default function Firewall() {
   const [ipSearch, setIpSearch] = useState('');
   const [ipv6Search, setIpv6Search] = useState('');
   const [geoSearch, setGeoSearch] = useState('');
+  const [unblockingIpv6, setUnblockingIpv6] = useState<string | null>(null);
+  const [unblockingGeo, setUnblockingGeo] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -357,9 +359,10 @@ export default function Firewall() {
                           </div>
                         </td>
                         <td className="px-3 py-3">
-                          <button onClick={async () => {
-                            await axios.delete(`/api/firewall/ipv6-blocks/${encodeURIComponent(addr)}`);
-                            toast.success(`${addr} unblocked`); loadIpv6();
+                          <button disabled={unblockingIpv6 === addr} onClick={async () => {
+                            setUnblockingIpv6(addr);
+                            try { await axios.delete(`/api/firewall/ipv6-blocks/${encodeURIComponent(addr)}`); toast.success(`${addr} unblocked`); loadIpv6(); }
+                            finally { setUnblockingIpv6(null); }
                           }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
                         </td>
                       </tr>
@@ -483,9 +486,10 @@ export default function Firewall() {
                           </div>
                         </td>
                         <td className="px-3 py-3">
-                          <button onClick={async () => {
-                            await axios.delete(`/api/firewall/geo-blocks/${code}`);
-                            toast.success(`${code} unblocked`); loadGeo();
+                          <button disabled={unblockingGeo === code} onClick={async () => {
+                            setUnblockingGeo(code);
+                            try { await axios.delete(`/api/firewall/geo-blocks/${code}`); toast.success(`${code} unblocked`); loadGeo(); }
+                            finally { setUnblockingGeo(null); }
                           }} className="btn-icon opacity-0 group-hover:opacity-100"><Trash2 size={13} /></button>
                         </td>
                       </tr>

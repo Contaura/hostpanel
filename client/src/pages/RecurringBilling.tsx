@@ -29,14 +29,21 @@ export default function RecurringBilling() {
   const [promoSearch, setPromoSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
   const [runningId, setRunningId] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => {
-    api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
-    api('/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : []));
-    api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
-    api('/clients').then(r => r.json()).then(d => setClients(Array.isArray(d) ? d : []));
-    api('/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : []));
-  }, []);
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    try {
+      await Promise.all([
+        api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])),
+        api('/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : [])),
+        api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : [])),
+        api('/clients').then(r => r.json()).then(d => setClients(Array.isArray(d) ? d : [])),
+        api('/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : [])),
+      ]);
+    } finally { setPageLoading(false); }
+  }
 
   async function saveSchedule() {
     const r = await api('/recurring', { method: 'POST', body: JSON.stringify(form) });
@@ -143,6 +150,13 @@ export default function RecurringBilling() {
           <Plus size={14} className="mr-1" />New
         </button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'schedules' ? 'tab-item-active' : ''}`} onClick={() => setTab('schedules')}>Schedules</button>
@@ -425,6 +439,8 @@ export default function RecurringBilling() {
           </table>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

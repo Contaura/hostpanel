@@ -31,12 +31,14 @@ export default function AppManager() {
   const [controlling, setControlling] = useState<string | null>(null);
   const [deletingApp, setDeletingApp] = useState<string | null>(null);
   const [deletingStaging, setDeletingStaging] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     try { const r = await api('/api/apps/'); setApps(r.data); }
     catch (e: any) { error(e.response?.data?.error || 'Failed to load apps'); }
+    finally { setPageLoading(false); }
   }
 
   async function createApp() {
@@ -107,6 +109,13 @@ export default function AppManager() {
         </div>
         <button className="btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> Deploy App</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {showForm && (
         <div className="card p-5 space-y-4">
@@ -218,6 +227,8 @@ export default function AppManager() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }

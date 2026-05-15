@@ -40,6 +40,7 @@ export default function SystemMonitor() {
   // Search
   const [pkgSearch, setPkgSearch] = useState('');
   const [ruleSearch, setRuleSearch] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
@@ -56,7 +57,7 @@ export default function SystemMonitor() {
     } catch {}
   }
 
-  async function loadRules() { try { const r = await api('/api/alerts/rules'); setRules(r.data); } catch {} }
+  async function loadRules() { try { const r = await api('/api/alerts/rules'); setRules(r.data); } catch {} finally { setPageLoading(false); } }
   async function loadLive() {
     try { const r = await api('/api/alerts/current'); setLiveAlerts(r.data.alerts || []); setStats(r.data.stats); }
     catch {}
@@ -104,6 +105,13 @@ export default function SystemMonitor() {
         <h1 className="page-title">System Monitor</h1>
         <p className="page-subtitle">Alert rules for resource thresholds and system package updates</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button onClick={() => setTab('alerts')}   className={tab === 'alerts'   ? 'tab-item-active' : 'tab-item'}><Bell size={14} /> Alerts & Thresholds</button>
@@ -317,6 +325,8 @@ export default function SystemMonitor() {
             </>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

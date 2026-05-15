@@ -26,10 +26,11 @@ export default function AdminUsers() {
   const [policySaving, setPolicySaving] = useState(false);
   const [search, setSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); loadPolicy(); }, []);
 
-  async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} }
+  async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} finally { setPageLoading(false); } }
   async function loadPolicy() { try { const r = await api('/api/admin-users/password-policy'); setPolicy(r.data); } catch {} }
   async function savePolicy() {
     setPolicySaving(true);
@@ -74,6 +75,13 @@ export default function AdminUsers() {
           <Plus size={14} /> New Admin
         </button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {showForm && (
         <div className="card p-5 space-y-4 max-w-lg">
@@ -175,6 +183,8 @@ export default function AdminUsers() {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -17,12 +17,15 @@ export default function Notifications() {
   const [hookSearch, setHookSearch] = useState('');
   const [deleting, setDeleting] = useState<number | null>(null);
   const [testing, setTesting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); api('/events').then(r => r.json()).then(setAllEvents); }, []);
 
   async function load() {
-    const r = await api('/');
-    setHooks(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    try {
+      const r = await api('/');
+      setHooks(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setPageLoading(false); }
   }
 
   async function save() {
@@ -89,6 +92,13 @@ export default function Notifications() {
         <h1 className="page-title">Notification Webhooks</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Add Webhook</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -235,6 +245,8 @@ export default function Notifications() {
         ))}</>;
         })()}
       </div>
+      </>
+      )}
     </div>
   );
 }

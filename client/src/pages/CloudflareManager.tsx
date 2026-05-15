@@ -15,12 +15,15 @@ export default function CloudflareManager() {
   const [token, setToken] = useState('');
   const [dnsSearch, setDnsSearch] = useState('');
   const [deletingZone, setDeletingZone] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { loadZones(); }, []);
 
   async function loadZones() {
-    const r = await api('/');
-    setZones(await r.json());
+    try {
+      const r = await api('/');
+      setZones(await r.json());
+    } finally { setPageLoading(false); }
   }
 
   async function addZone() {
@@ -79,6 +82,13 @@ export default function CloudflareManager() {
         <h1 className="page-title">Cloudflare CDN</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Add API Token</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-3">
@@ -190,6 +200,8 @@ export default function CloudflareManager() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -17,10 +17,13 @@ export default function WafManager() {
   const [banJail, setBanJail] = useState('');
   const [banIp, setBanIp] = useState('');
   const [ruleSearch, setRuleSearch] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
 
   async function load() {
-    const [w, f] = await Promise.all([api('/modsec').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
-    setWaf(w); setF2b(f);
+    try {
+      const [w, f] = await Promise.all([api('/modsec').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
+      setWaf(w); setF2b(f);
+    } finally { setPageLoading(false); }
   }
 
   async function loadRules() {
@@ -76,6 +79,13 @@ export default function WafManager() {
         <h1 className="page-title">WAF & Intrusion Prevention</h1>
         <button className="btn-ghost" onClick={load}><RefreshCw size={14} /></button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'modsec' ? 'tab-item-active' : ''}`} onClick={() => setTab('modsec')}><Shield size={13} /> ModSecurity WAF</button>
@@ -243,6 +253,8 @@ export default function WafManager() {
             })}
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

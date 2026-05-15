@@ -40,7 +40,7 @@ export default function WebExtras() {
   function loadTab(t: Tab) {
     if (t === 'index') api('/api/web/index-manager').then(r => setIndexDomains(r.data || [])).catch(() => {});
     if (t === 'leech') api('/api/web/leech').then(r => setLeechDomains(r.data || { enabled: false, domains: [] })).catch(() => {});
-    if (t === 'hotlink') api('/api/web/hotlink').then(r => setHotlink(r.data)).catch(() => {});
+    if (t === 'hotlink') api('/api/web/hotlink').then(r => setHotlink(r.data)).catch(() => {}).finally(() => setPageLoading(false));
     if (t === 'mime') api('/api/web/mime').then(r => setMimeTypes(r.data)).catch(() => {});
     if (t === 'diskusage') loadDisk();
     if (t === 'bandwidth') api('/api/web/bandwidth').then(r => setBwData(r.data)).catch(() => {});
@@ -80,6 +80,7 @@ export default function WebExtras() {
   const [newLeechDomain, setNewLeechDomain] = useState('');
   const [deletingMime, setDeletingMime] = useState<string | null>(null);
   const [removingLeech, setRemovingLeech] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   const tabs = [
     { id: 'hotlink'   as Tab, label: 'Hotlink Protection', icon: ShieldOff  },
@@ -97,6 +98,13 @@ export default function WebExtras() {
         <h1 className="page-title">Web Extras</h1>
         <p className="page-subtitle">Hotlink protection, MIME types, disk usage, bandwidth stats, and SSL certificates</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -320,6 +328,8 @@ export default function WebExtras() {
             </table>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

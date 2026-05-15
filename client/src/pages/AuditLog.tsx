@@ -11,17 +11,20 @@ export default function AuditLog() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [user, setUser] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
   const perPage = 50;
 
   async function load(p = 1) {
-    const params = new URLSearchParams({ page: String(p), per_page: String(perPage) });
-    if (search) params.set('search', search);
-    if (user) params.set('user', user);
-    const r = await api(`/?${params}`);
-    const d = await r.json();
-    setLogs(Array.isArray(d.logs) ? d.logs : []);
-    setTotal(d.total || 0);
-    setPage(p);
+    try {
+      const params = new URLSearchParams({ page: String(p), per_page: String(perPage) });
+      if (search) params.set('search', search);
+      if (user) params.set('user', user);
+      const r = await api(`/?${params}`);
+      const d = await r.json();
+      setLogs(Array.isArray(d.logs) ? d.logs : []);
+      setTotal(d.total || 0);
+      setPage(p);
+    } finally { setPageLoading(false); }
   }
 
   useEffect(() => { load(); }, []);
@@ -46,6 +49,13 @@ export default function AuditLog() {
         <h1 className="page-title">Audit Log</h1>
         <button className="btn-danger text-xs" onClick={clearOld}><Trash2 size={12} className="mr-1" />Clear Old (&gt;90d)</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="card flex gap-3">
         <div className="relative flex-1">
@@ -90,6 +100,8 @@ export default function AuditLog() {
             <button className="btn-ghost text-xs" disabled={page >= Math.ceil(total / perPage)} onClick={() => load(page + 1)}>Next</button>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

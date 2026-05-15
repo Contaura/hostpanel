@@ -39,11 +39,12 @@ export default function ApiTokens() {
   const [revoking, setRevoking] = useState<number | null>(null);
   const [deletingWh, setDeletingWh] = useState<number | null>(null);
   const [testingWh, setTestingWh] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
 
-  async function load() { try { const r = await api('/api/api-tokens/'); setTokens(r.data); } catch {} }
+  async function load() { try { const r = await api('/api/api-tokens/'); setTokens(r.data); } catch {} finally { setPageLoading(false); } }
 
   async function loadWebhooks() { try { const r = await api('/api/api-tokens/webhooks'); setWebhooks(r.data); } catch {} }
 
@@ -124,6 +125,12 @@ export default function ApiTokens() {
       </div>
 
       {tab === 'tokens' && <>
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
       {/* Newly created token — shown once */}
       {newToken && (
         <div className="card border-2 border-emerald-400 p-5 space-y-3">
@@ -207,6 +214,8 @@ export default function ApiTokens() {
         <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Usage</h4>
         <pre className="text-xs font-mono text-slate-600 dark:text-slate-400">{`curl -H "Authorization: Bearer hp_your_token" https://panel.example.com/api/billing/summary`}</pre>
       </div>
+      </>
+      )}
       </>}
 
       {tab === 'webhooks' && (

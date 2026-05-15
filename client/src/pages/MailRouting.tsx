@@ -25,11 +25,14 @@ export default function MailRouting() {
   const [deletingRule, setDeletingRule] = useState<string | null>(null);
   const [deletingList, setDeletingList] = useState<number | null>(null);
   const [removingMember, setRemovingMember] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { loadRules(); loadLists(); loadWebmail(); }, []);
 
   async function loadRules() {
-    const r = await api('/'); setRules(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    try {
+      const r = await api('/'); setRules(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setPageLoading(false); }
   }
   async function loadLists() {
     const r = await api('/lists'); setLists(Array.isArray(await r.json()) ? await r.clone().json() : []);
@@ -116,6 +119,13 @@ export default function MailRouting() {
   return (
     <div className="space-y-6">
       <h1 className="page-title">Mail Routing & Lists</h1>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'transport' ? 'tab-item-active' : ''}`} onClick={() => setTab('transport')}>Transport Rules</button>
@@ -273,6 +283,8 @@ export default function MailRouting() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -17,12 +17,15 @@ export default function ResourceLimits() {
   const [vhostSearch, setVhostSearch] = useState('');
   const [quotaSearch, setQuotaSearch] = useState('');
   const [deletingVhost, setDeletingVhost] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const r = await api('/');
-    setAccounts(Array.isArray(await r.clone().json()) ? await r.json() : []);
+    try {
+      const r = await api('/');
+      setAccounts(Array.isArray(await r.clone().json()) ? await r.json() : []);
+    } finally { setPageLoading(false); }
   }
 
   async function loadVhosts() {
@@ -85,6 +88,13 @@ export default function ResourceLimits() {
   return (
     <div className="space-y-6">
       <h1 className="page-title">Resource Limits</h1>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         <button className={`tab-item ${tab === 'cgroups' ? 'tab-item-active' : ''}`} onClick={() => setTab('cgroups')}>cgroup Limits</button>
@@ -292,6 +302,8 @@ export default function ResourceLimits() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

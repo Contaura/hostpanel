@@ -16,12 +16,15 @@ export default function GitDeploy() {
   const [editForm, setEditForm] = useState({ repo_url: '', branch: '', deploy_path: '', command: '', auto_deploy: true });
   const [deploying, setDeploying] = useState<number | null>(null);
   const [deletingDep, setDeletingDep] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const r = await api('/');
-    setDeps(await r.json());
+    try {
+      const r = await api('/');
+      setDeps(await r.json());
+    } finally { setPageLoading(false); }
   }
 
   async function save() {
@@ -73,6 +76,13 @@ export default function GitDeploy() {
         <h1 className="page-title">Git Deployments</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />New Deployment</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -156,6 +166,8 @@ export default function GitDeploy() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }

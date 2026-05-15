@@ -24,13 +24,21 @@ export default function WordPressManager() {
   const [uploadOutput, setUploadOutput] = useState('');
   const [pluginSearch, setPluginSearch] = useState('');
   const [themeSearch, setThemeSearch] = useState('');
+  const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const pluginZipRef = useRef<HTMLInputElement>(null);
   const themeZipRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []));
-    api('/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : []));
-  }, []);
+  useEffect(() => { loadInitial(); }, []);
+
+  async function loadInitial() {
+    try {
+      await Promise.all([
+        api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : [])),
+        api('/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : [])),
+      ]);
+    } finally { setPageLoading(false); }
+  }
 
   async function selectSite(domain: string) {
     setSelected(domain); setOutput(''); setInfo(null); setPlugins([]); setThemes([]);
@@ -99,6 +107,13 @@ export default function WordPressManager() {
   return (
     <div className="space-y-6">
       <h1 className="page-title">WordPress Manager</h1>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="card flex gap-3 items-center">
         <select className="input flex-1" value={selected} onChange={e => selectSite(e.target.value)}>
@@ -301,17 +316,23 @@ export default function WordPressManager() {
                   </select>
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn-primary" onClick={async () => {
-                    await api(`/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
-                    const d = await api('/auto-updates').then(r => r.json());
-                    setAutoUpdates(Array.isArray(d) ? d : []);
-                    toast.success('Auto-update schedule saved');
+                  <button className="btn-primary" disabled={autoUpdateSaving} onClick={async () => {
+                    setAutoUpdateSaving(true);
+                    try {
+                      await api(`/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
+                      const d = await api('/auto-updates').then(r => r.json());
+                      setAutoUpdates(Array.isArray(d) ? d : []);
+                      toast.success('Auto-update schedule saved');
+                    } finally { setAutoUpdateSaving(false); }
                   }}>Save Schedule</button>
-                  <button className="btn-secondary text-red-500" onClick={async () => {
-                    await api(`/auto-updates/${selected}`, { method: 'DELETE' });
-                    const d = await api('/auto-updates').then(r => r.json());
-                    setAutoUpdates(Array.isArray(d) ? d : []);
-                    toast.success('Auto-update removed');
+                  <button className="btn-secondary text-red-500" disabled={autoUpdateSaving} onClick={async () => {
+                    setAutoUpdateSaving(true);
+                    try {
+                      await api(`/auto-updates/${selected}`, { method: 'DELETE' });
+                      const d = await api('/auto-updates').then(r => r.json());
+                      setAutoUpdates(Array.isArray(d) ? d : []);
+                      toast.success('Auto-update removed');
+                    } finally { setAutoUpdateSaving(false); }
                   }}>Remove</button>
                 </div>
               </div>
@@ -340,6 +361,8 @@ export default function WordPressManager() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </div>
   );

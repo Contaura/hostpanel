@@ -11,14 +11,17 @@ export default function CacheManager() {
   const [memcached, setMemcached] = useState<any>(null);
   const [tab, setTab] = useState<'opcache' | 'redis' | 'memcached'>('opcache');
   const [flushing, setFlushing] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
   async function loadAll() {
-    const [o, r, m] = await Promise.all([
-      api('/opcache').then(r => r.json()),
-      api('/redis').then(r => r.json()),
-      api('/memcached').then(r => r.json()),
-    ]);
-    setOpcache(o); setRedis(r); setMemcached(m);
+    try {
+      const [o, r, m] = await Promise.all([
+        api('/opcache').then(r => r.json()),
+        api('/redis').then(r => r.json()),
+        api('/memcached').then(r => r.json()),
+      ]);
+      setOpcache(o); setRedis(r); setMemcached(m);
+    } finally { setPageLoading(false); }
   }
 
   useEffect(() => { loadAll(); }, []);
@@ -53,6 +56,13 @@ export default function CacheManager() {
         <h1 className="page-title">Cache Manager</h1>
         <button className="btn-ghost" onClick={loadAll}><RefreshCw size={14} /></button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {(['opcache', 'redis', 'memcached'] as const).map(t => (
@@ -140,6 +150,8 @@ export default function CacheManager() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );
