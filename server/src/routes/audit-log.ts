@@ -9,15 +9,20 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
   const SKIP_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
   if (SKIP_METHODS.has(req.method)) return next();
 
+  // Capture the request line up front — req.path is consumed by sub-routers
+  // mounted further down the stack, so by the time res.json fires it can be "/".
+  const method = req.method;
+  const fullPath = (req.originalUrl || req.url).split('?')[0];
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '';
+
   const origJson = res.json.bind(res);
   res.json = function (body: any) {
     if (res.statusCode < 400) {
       try {
         const user = (req as any).user;
         const username = user?.username || 'anonymous';
-        const action   = `${req.method} ${req.path}`;
+        const action   = `${method} ${fullPath}`;
         const resource = req.params?.id || req.params?.name || req.params?.domain || '';
-        const ip       = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket?.remoteAddress || '';
         db.prepare("INSERT INTO audit_logs (username, action, resource, ip) VALUES (?, ?, ?, ?)").run(username, action, resource, ip);
       } catch (_) {}
     }

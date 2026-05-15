@@ -21,7 +21,10 @@ const HTPW_DIR = process.env.HTPW_DIR  || '/etc/httpd/htpasswd';
 
 function safeDir(dir: string): string {
   const resolved = path.resolve(dir);
-  if (!resolved.startsWith(WEBROOT)) throw new Error('Directory must be inside web root');
+  const base = path.resolve(WEBROOT);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error('Directory must be inside web root');
+  }
   return resolved;
 }
 

@@ -92,15 +92,23 @@ router.delete('/mime', async (req: Request, res: Response) => {
 /* ── Disk Usage ──────────────────────────────────────────── */
 
 router.get('/diskusage', async (req: Request, res: Response) => {
-  const target = (req.query.path as string) || WEBROOT;
-  if (!target.startsWith(WEBROOT) && target !== '/') return res.status(400).json({ error: 'Path not allowed' });
+  const raw = (req.query.path as string) || WEBROOT;
+  // Resolve and anchor the prefix check on a path separator (so /var/wwwx doesn't pass /var/www),
+  // and reject any path containing shell metacharacters before interpolating into a command line.
+  const resolved = path.resolve(raw);
+  const base = path.resolve(WEBROOT);
+  const allowed = resolved === '/' || resolved === base || resolved.startsWith(base + path.sep);
+  if (!allowed) return res.status(400).json({ error: 'Path not allowed' });
+  if (/[$`"'\\;&|<>\n*?(){}[\]!]/.test(resolved)) {
+    return res.status(400).json({ error: 'Path contains invalid characters' });
+  }
   try {
-    const { stdout } = await execAsync(`du -sh "${target}"/* 2>/dev/null | sort -hr | head -50`);
+    const { stdout } = await execAsync(`du -sh "${resolved}"/* 2>/dev/null | sort -hr | head -50`);
     const items = stdout.trim().split('\n').filter(Boolean).map(l => {
       const [size, ...rest] = l.split('\t');
       return { path: rest.join('\t'), size };
     });
-    const { stdout: total } = await execAsync(`df -h "${target}" | tail -1`);
+    const { stdout: total } = await execAsync(`df -h "${resolved}" | tail -1`);
     const parts = total.trim().split(/\s+/);
     res.json({ items, disk: { total: parts[1], used: parts[2], available: parts[3], percent: parts[4] } });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

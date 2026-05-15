@@ -25,7 +25,12 @@ router.post('/login', async (req: Request, res: Response) => {
   let totpSecret: string | null = null;
   let role = 'admin';
 
-  if (dbUser) {
+  // A DB row may exist with an empty password_hash for an env-fallback admin
+  // who just enabled 2FA (security-extra /2fa/setup inserts the row with hash='').
+  // In that case fall through to the env credentials, but still honour the DB-stored TOTP state.
+  const dbHasPassword = !!dbUser?.password_hash;
+
+  if (dbUser && dbHasPassword) {
     valid = await bcrypt.compare(password, dbUser.password_hash);
     totpEnabled = !!dbUser.totp_enabled;
     totpSecret = dbUser.totp_secret;
@@ -36,6 +41,12 @@ router.post('/login', async (req: Request, res: Response) => {
     const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || bcrypt.hashSync('changeme', 10);
     if (username !== ADMIN_USER) return res.status(401).json({ error: 'Invalid credentials' });
     valid = await bcrypt.compare(password, ADMIN_PASS_HASH);
+    if (dbUser) {
+      // Env user has set up 2FA — pull TOTP state from the DB row.
+      totpEnabled = !!dbUser.totp_enabled;
+      totpSecret = dbUser.totp_secret;
+      role = dbUser.role;
+    }
   }
 
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });

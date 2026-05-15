@@ -9,8 +9,10 @@ const router = Router();
 const BASE_DIR = process.env.FILES_BASE_DIR || '/var/www';
 
 function safePath(userPath: string): string {
-  const resolved = path.resolve(BASE_DIR, userPath.replace(/^\/+/, ''));
-  if (!resolved.startsWith(path.resolve(BASE_DIR))) {
+  const base = path.resolve(BASE_DIR);
+  const resolved = path.resolve(base, userPath.replace(/^\/+/, ''));
+  // Anchor the prefix check on a path separator so /var/wwwx doesn't pass /var/www.
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
     throw new Error('Path traversal not allowed');
   }
   if (/[$`"\\!]/.test(resolved)) {

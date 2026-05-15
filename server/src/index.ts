@@ -101,6 +101,11 @@ app.use(express.urlencoded({ extended: true }));
 // Block all write operations for readonly-role tokens before any route handler runs
 app.use('/api/', readonlyGuard);
 
+// Audit log — must be installed BEFORE route mounts so it captures non-GET requests
+// across every protected route. The middleware itself only writes on res.statusCode < 400
+// and falls back to username='anonymous' when req.user isn't populated yet.
+app.use('/api/', auditMiddleware);
+
 // Auth
 app.use('/api/auth', authRoutes);
 
@@ -161,9 +166,6 @@ app.use('/api/stripe', (req, res, next) => {
 
 // PayPal
 app.use('/api/paypal', authenticateToken, paypalRoutes);
-
-// Audit log middleware (after auth routes, before protected routes)
-app.use(auditMiddleware);
 
 // Email extras
 app.use('/api/dkim',         authenticateToken, dkimRoutes);
