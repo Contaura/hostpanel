@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Download } from 'lucide-react';
+import { Plus, Trash2, Download, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/php-domains${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -15,6 +15,7 @@ export default function PhpVersions() {
   const [pyInfo, setPyInfo] = useState<any>(null);
   const [installing, setInstalling] = useState(false);
   const [installOutput, setInstallOutput] = useState('');
+  const [assignSearch, setAssignSearch] = useState('');
 
   useEffect(() => { loadPhp(); }, []);
 
@@ -88,21 +89,34 @@ export default function PhpVersions() {
               <button className="btn-primary" onClick={assign}><Plus size={14} className="mr-1" />Assign</button>
             </div>
           </div>
-          <div className="card overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead><tr>{['Domain', 'PHP Version', 'Updated', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-              <tbody>
-                {assignments.length === 0 && <tr><td colSpan={4} className="table-cell text-center text-slate-500">No assignments yet</td></tr>}
-                {assignments.map((a: any) => (
-                  <tr key={a.domain} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell font-mono text-xs">{a.domain}</td>
-                    <td className="table-cell"><span className="badge-info">PHP {a.php_version}</span></td>
-                    <td className="table-cell text-xs text-slate-500">{a.updated_at ? new Date(a.updated_at).toLocaleDateString() : '—'}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => removeAssign(a.domain)}><Trash2 size={13} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search domains…" value={assignSearch} onChange={e => setAssignSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden p-0">
+              <table className="w-full text-sm">
+                <thead><tr>{['Domain', 'PHP Version', 'Updated', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = assignSearch.trim().toLowerCase();
+                    const visible = q ? assignments.filter((a: any) => [a.domain, a.php_version].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : assignments;
+                    if (assignments.length === 0) return <tr><td colSpan={4} className="table-cell text-center text-slate-500">No assignments yet</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No assignments match "{assignSearch}"</td></tr>;
+                    return visible.map((a: any) => (
+                      <tr key={a.domain} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="table-cell font-mono text-xs">{a.domain}</td>
+                        <td className="table-cell"><span className="badge-info">PHP {a.php_version}</span></td>
+                        <td className="table-cell text-xs text-slate-500">{a.updated_at ? new Date(a.updated_at).toLocaleDateString() : '—'}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => removeAssign(a.domain)}><Trash2 size={13} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

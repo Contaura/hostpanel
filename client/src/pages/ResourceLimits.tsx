@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Save, BarChart2 } from 'lucide-react';
+import { Plus, Trash2, Save, BarChart2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/resource-limits${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -14,6 +14,8 @@ export default function ResourceLimits() {
   const [limits, setLimits] = useState<Record<string, any>>({});
   const [newVhost, setNewVhost] = useState({ domain: '', root: '', php_fpm_socket: '' });
   const [addingVhost, setAddingVhost] = useState(false);
+  const [vhostSearch, setVhostSearch] = useState('');
+  const [quotaSearch, setQuotaSearch] = useState('');
 
   useEffect(() => { load(); }, []);
 
@@ -152,48 +154,72 @@ export default function ResourceLimits() {
             </div>
           )}
 
-          <div className="card overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead><tr>{['Domain', 'Server Name', 'Root', 'Status', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-              <tbody>
-                {vhosts.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No vhosts</td></tr>}
-                {vhosts.map((v: any) => (
-                  <tr key={v.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell font-mono text-xs">{v.name}</td>
-                    <td className="table-cell text-xs">{v.serverName}</td>
-                    <td className="table-cell text-xs text-slate-500 truncate max-w-[180px]">{v.root}</td>
-                    <td className="table-cell"><span className={`badge-${v.enabled ? 'success' : 'warning'}`}>{v.enabled ? 'Enabled' : 'Disabled'}</span></td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteVhost(v.name)}><Trash2 size={13} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search vhosts…" value={vhostSearch} onChange={e => setVhostSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden p-0">
+              <table className="w-full text-sm">
+                <thead><tr>{['Domain', 'Server Name', 'Root', 'Status', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = vhostSearch.trim().toLowerCase();
+                    const visible = q ? vhosts.filter((v: any) => [v.name, v.serverName, v.root].some((x: any) => String(x ?? '').toLowerCase().includes(q))) : vhosts;
+                    if (vhosts.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No vhosts</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No vhosts match "{vhostSearch}"</td></tr>;
+                    return visible.map((v: any) => (
+                      <tr key={v.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="table-cell font-mono text-xs">{v.name}</td>
+                        <td className="table-cell text-xs">{v.serverName}</td>
+                        <td className="table-cell text-xs text-slate-500 truncate max-w-[180px]">{v.root}</td>
+                        <td className="table-cell"><span className={`badge-${v.enabled ? 'success' : 'warning'}`}>{v.enabled ? 'Enabled' : 'Disabled'}</span></td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteVhost(v.name)}><Trash2 size={13} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
       {tab === 'quotas' && (
         <div className="space-y-4">
           <p className="text-xs text-slate-500">Set disk space limits per user via <code>setquota</code>. Requires quota kernel support and the <code>quota</code> package.</p>
-          <div className="card overflow-hidden p-0">
-            <table className="w-full text-sm">
-              <thead><tr>
-                {['User', 'Used', 'Soft Limit (MB)', 'Hard Limit (MB)', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {diskQuotas.length === 0 && (
-                  <tr><td colSpan={5} className="table-cell text-center text-slate-400 py-8">No quota data. Click an account username below to set quotas.</td></tr>
-                )}
-                {diskQuotas.map((q: any) => (
-                  <tr key={q.user} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell font-mono font-bold">{q.user}</td>
-                    <td className="table-cell text-xs">{q.block_used}</td>
-                    <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[q.user]?.soft || ''} onChange={e => setQuotaForm(f => ({ ...f, [q.user]: { ...(f[q.user] || {}), soft: e.target.value } }))} /></td>
-                    <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[q.user]?.hard || ''} onChange={e => setQuotaForm(f => ({ ...f, [q.user]: { ...(f[q.user] || {}), hard: e.target.value } }))} /></td>
-                    <td className="table-cell"><button className="btn-primary text-xs" onClick={() => setDiskQuota(q.user)}><Save size={12} /> Set</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search users…" value={quotaSearch} onChange={e => setQuotaSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden p-0">
+              <table className="w-full text-sm">
+                <thead><tr>
+                  {['User', 'Used', 'Soft Limit (MB)', 'Hard Limit (MB)', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = quotaSearch.trim().toLowerCase();
+                    const visible = q ? diskQuotas.filter((dq: any) => String(dq.user ?? '').toLowerCase().includes(q)) : diskQuotas;
+                    if (diskQuotas.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-400 py-8">No quota data. Click an account username below to set quotas.</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No users match "{quotaSearch}"</td></tr>;
+                    return visible.map((dq: any) => (
+                      <tr key={dq.user} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="table-cell font-mono font-bold">{dq.user}</td>
+                        <td className="table-cell text-xs">{dq.block_used}</td>
+                        <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[dq.user]?.soft || ''} onChange={e => setQuotaForm(f => ({ ...f, [dq.user]: { ...(f[dq.user] || {}), soft: e.target.value } }))} /></td>
+                        <td className="table-cell"><input type="number" className="input w-24 text-xs" placeholder="MB" value={quotaForm[dq.user]?.hard || ''} onChange={e => setQuotaForm(f => ({ ...f, [dq.user]: { ...(f[dq.user] || {}), hard: e.target.value } }))} /></td>
+                        <td className="table-cell"><button className="btn-primary text-xs" onClick={() => setDiskQuota(dq.user)}><Save size={12} /> Set</button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
           <div className="card p-4 space-y-3 max-w-sm">
             <p className="text-xs font-bold text-slate-700 dark:text-slate-300">Set quota for a specific user</p>

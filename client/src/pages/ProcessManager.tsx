@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Activity, RefreshCw, Trash2 } from 'lucide-react';
+import { Activity, RefreshCw, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface Process {
@@ -65,8 +65,11 @@ export default function ProcessManager() {
           <p className="page-subtitle">View and manage running server processes</p>
         </div>
         <div className="flex gap-2">
-          <input className="input w-56" placeholder="Filter by user, PID, or command…"
-            value={filter} onChange={e => setFilter(e.target.value)} />
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-56" placeholder="Filter by user, PID, or command…"
+              value={filter} onChange={e => setFilter(e.target.value)} />
+          </div>
           <button onClick={load} className="btn-secondary">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>

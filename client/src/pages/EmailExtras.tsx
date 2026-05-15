@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil } from 'lucide-react';
+import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil, Search } from 'lucide-react';
 
 type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all';
 
@@ -46,6 +46,14 @@ export default function EmailExtras() {
   const [catchAlls, setCatchAlls] = useState<{ domain: string; destination: string }[]>([]);
   const [caForm, setCaForm] = useState({ domain: '', destination: '' });
 
+  // Search
+  const [fwSearch, setFwSearch] = useState('');
+  const [arSearch, setArSearch] = useState('');
+  const [caSearch, setCaSearch] = useState('');
+
+  // Delete tracking
+  const [deleting, setDeleting] = useState<string | number | null>(null);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
@@ -63,8 +71,10 @@ export default function EmailExtras() {
   }
 
   async function deleteCatchAll(domain: string) {
+    setDeleting(domain);
     try { await del(`/api/email-extras/catch-all/${encodeURIComponent(domain)}`); success('Removed'); loadTab('catch-all'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function addForwarder() {
@@ -74,8 +84,10 @@ export default function EmailExtras() {
   }
 
   async function deleteForwarder(source: string) {
+    setDeleting(source);
     try { await del(`/api/email-extras/forwarders/${encodeURIComponent(source)}`); success('Deleted'); loadTab('forwarders'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function saveAutoresponder() {
@@ -89,8 +101,10 @@ export default function EmailExtras() {
   }
 
   async function deleteAutoresponder(id: number) {
+    setDeleting(id);
     try { await del(`/api/email-extras/autoresponders/${id}`); success('Deleted'); loadTab('autoresponders'); }
     catch (e: any) { error('Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function updateAutoresponder(id: number) {
@@ -149,20 +163,33 @@ export default function EmailExtras() {
               <button className="btn-primary" onClick={addForwarder}><Plus size={14} /> Add</button>
             </div>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Source</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
-              <tbody>
-                {forwarders.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No forwarders configured</td></tr>}
-                {forwarders.map(f => (
-                  <tr key={f.source} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-medium">{f.source}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{f.dest}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteForwarder(f.source)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search forwarders…" value={fwSearch} onChange={e => setFwSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Source</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = fwSearch.trim().toLowerCase();
+                    const visible = q ? forwarders.filter(f => [f.source, f.dest].some(v => v.toLowerCase().includes(q))) : forwarders;
+                    if (forwarders.length === 0) return <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No forwarders configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No forwarders match "{fwSearch}"</td></tr>;
+                    return visible.map(f => (
+                      <tr key={f.source} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell font-medium">{f.source}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{f.dest}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deleting === f.source} onClick={() => deleteForwarder(f.source)}><Trash2 size={14} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -188,51 +215,64 @@ export default function EmailExtras() {
             </div>
           )}
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Email</th><th className="table-header-cell">Subject</th><th className="table-header-cell">Active</th><th className="table-header-cell w-20"></th></tr></thead>
-              <tbody>
-                {autoresponders.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>}
-                {autoresponders.map(ar => (
-                  <Fragment key={ar.id}>
-                    <tr className="border-b border-slate-100 dark:border-slate-800">
-                      <td className="table-cell font-medium">{ar.email}</td>
-                      <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
-                      <td className="table-cell">
-                        <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
-                      </td>
-                      <td className="table-cell">
-                        <div className="flex gap-1">
-                          <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
-                            if (editingArId === ar.id) { setEditingArId(null); return; }
-                            setEditingArId(ar.id);
-                            setEditArForm({ email: ar.email, subject: ar.subject, body: ar.body, start_date: ar.start_date || '', end_date: ar.end_date || '' });
-                          }}><Pencil size={13} /></button>
-                          <button className="btn-icon text-red-500" onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                    {editingArId === ar.id && (
-                      <tr className="bg-slate-50 dark:bg-slate-800/30">
-                        <td colSpan={4} className="px-4 py-3 space-y-3">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div><label className="label">Email Address</label><input className="input" value={editArForm.email} onChange={e => setEditArForm(f => ({ ...f, email: e.target.value }))} /></div>
-                            <div><label className="label">Subject</label><input className="input" value={editArForm.subject} onChange={e => setEditArForm(f => ({ ...f, subject: e.target.value }))} /></div>
-                            <div><label className="label">Start Date</label><input type="date" className="input" value={editArForm.start_date} onChange={e => setEditArForm(f => ({ ...f, start_date: e.target.value }))} /></div>
-                            <div><label className="label">End Date</label><input type="date" className="input" value={editArForm.end_date} onChange={e => setEditArForm(f => ({ ...f, end_date: e.target.value }))} /></div>
-                            <div className="col-span-2"><label className="label">Message Body</label><textarea className="input min-h-[80px]" value={editArForm.body} onChange={e => setEditArForm(f => ({ ...f, body: e.target.value }))} /></div>
-                          </div>
-                          <div className="flex gap-2">
-                            <button className="btn-primary text-sm" onClick={() => updateAutoresponder(ar.id)}>Save</button>
-                            <button className="btn-ghost text-sm" onClick={() => setEditingArId(null)}>Cancel</button>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search autoresponders…" value={arSearch} onChange={e => setArSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Email</th><th className="table-header-cell">Subject</th><th className="table-header-cell">Active</th><th className="table-header-cell w-20"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = arSearch.trim().toLowerCase();
+                    const visible = q ? autoresponders.filter(ar => [ar.email, ar.subject].some(v => v.toLowerCase().includes(q))) : autoresponders;
+                    if (autoresponders.length === 0) return <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No autoresponders match "{arSearch}"</td></tr>;
+                    return visible.map(ar => (
+                      <Fragment key={ar.id}>
+                        <tr className="border-b border-slate-100 dark:border-slate-800">
+                          <td className="table-cell font-medium">{ar.email}</td>
+                          <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
+                          <td className="table-cell">
+                            <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
+                          </td>
+                          <td className="table-cell">
+                            <div className="flex gap-1">
+                              <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                                if (editingArId === ar.id) { setEditingArId(null); return; }
+                                setEditingArId(ar.id);
+                                setEditArForm({ email: ar.email, subject: ar.subject, body: ar.body, start_date: ar.start_date || '', end_date: ar.end_date || '' });
+                              }}><Pencil size={13} /></button>
+                              <button className="btn-icon text-red-500" disabled={deleting === ar.id} onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                        {editingArId === ar.id && (
+                          <tr className="bg-slate-50 dark:bg-slate-800/30">
+                            <td colSpan={4} className="px-4 py-3 space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div><label className="label">Email Address</label><input className="input" value={editArForm.email} onChange={e => setEditArForm(f => ({ ...f, email: e.target.value }))} /></div>
+                                <div><label className="label">Subject</label><input className="input" value={editArForm.subject} onChange={e => setEditArForm(f => ({ ...f, subject: e.target.value }))} /></div>
+                                <div><label className="label">Start Date</label><input type="date" className="input" value={editArForm.start_date} onChange={e => setEditArForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+                                <div><label className="label">End Date</label><input type="date" className="input" value={editArForm.end_date} onChange={e => setEditArForm(f => ({ ...f, end_date: e.target.value }))} /></div>
+                                <div className="col-span-2"><label className="label">Message Body</label><textarea className="input min-h-[80px]" value={editArForm.body} onChange={e => setEditArForm(f => ({ ...f, body: e.target.value }))} /></div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button className="btn-primary text-sm" onClick={() => updateAutoresponder(ar.id)}>Save</button>
+                                <button className="btn-ghost text-sm" onClick={() => setEditingArId(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -342,20 +382,33 @@ export default function EmailExtras() {
               <button className="btn-primary self-end" onClick={addCatchAll}><Plus size={14} /> Set</button>
             </div>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Domain</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
-              <tbody>
-                {catchAlls.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No catch-all addresses configured</td></tr>}
-                {catchAlls.map(ca => (
-                  <tr key={ca.domain} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-mono">@{ca.domain}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{ca.destination}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteCatchAll(ca.domain)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search catch-alls…" value={caSearch} onChange={e => setCaSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Domain</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = caSearch.trim().toLowerCase();
+                    const visible = q ? catchAlls.filter(ca => [ca.domain, ca.destination].some(v => v.toLowerCase().includes(q))) : catchAlls;
+                    if (catchAlls.length === 0) return <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No catch-all addresses configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No catch-alls match "{caSearch}"</td></tr>;
+                    return visible.map(ca => (
+                      <tr key={ca.domain} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell font-mono">@{ca.domain}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{ca.destination}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deleting === ca.domain} onClick={() => deleteCatchAll(ca.domain)}><Trash2 size={14} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

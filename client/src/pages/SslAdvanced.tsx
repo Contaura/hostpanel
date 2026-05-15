@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Lock, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import { Lock, CheckCircle, XCircle, RefreshCw, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/ssl-advanced${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -21,6 +21,7 @@ export default function SslAdvanced() {
   const [acmeDomain, setAcmeDomain] = useState('');
   const [acmeResult, setAcmeResult] = useState<any>(null);
   const [acmeChecking, setAcmeChecking] = useState(false);
+  const [certSearch, setCertSearch] = useState('');
 
   const csrBlank = { domain: '', country: 'US', state: '', locality: '', organization: '', email: '' };
   const [csrForm, setCsrForm] = useState(csrBlank);
@@ -236,32 +237,45 @@ export default function SslAdvanced() {
               <RefreshCw size={14} className={renewing === 'all' ? 'animate-spin' : ''} /> Renew All
             </button>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr>
-                {['Name', 'Domains', 'Expires', 'Days Left', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {certs.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-400">No certificates found. Run certbot to issue certificates first.</td></tr>}
-                {certs.map(c => (
-                  <tr key={c.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="table-cell font-mono text-xs">{c.name}</td>
-                    <td className="table-cell text-xs">{c.domains}</td>
-                    <td className="table-cell text-xs">{c.expiry}</td>
-                    <td className="table-cell">
-                      {c.days_left !== null ? (
-                        <span className={`badge-${c.days_left > 30 ? 'success' : c.days_left > 7 ? 'warning' : 'danger'}`}>{c.days_left}d</span>
-                      ) : '—'}
-                    </td>
-                    <td className="table-cell">
-                      <button className="btn-secondary text-xs" onClick={() => renewCert(c.name)} disabled={renewing !== null}>
-                        <RefreshCw size={12} className={renewing === c.name ? 'animate-spin' : ''} /> Force Renew
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search certs…" value={certSearch} onChange={e => setCertSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr>
+                  {['Name', 'Domains', 'Expires', 'Days Left', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = certSearch.trim().toLowerCase();
+                    const visible = q ? certs.filter(c => [c.name, c.domains].some(v => String(v ?? '').toLowerCase().includes(q))) : certs;
+                    if (certs.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-400">No certificates found. Run certbot to issue certificates first.</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No certs match "{certSearch}"</td></tr>;
+                    return visible.map(c => (
+                      <tr key={c.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="table-cell font-mono text-xs">{c.name}</td>
+                        <td className="table-cell text-xs">{c.domains}</td>
+                        <td className="table-cell text-xs">{c.expiry}</td>
+                        <td className="table-cell">
+                          {c.days_left !== null ? (
+                            <span className={`badge-${c.days_left > 30 ? 'success' : c.days_left > 7 ? 'warning' : 'danger'}`}>{c.days_left}d</span>
+                          ) : '—'}
+                        </td>
+                        <td className="table-cell">
+                          <button className="btn-secondary text-xs" onClick={() => renewCert(c.name)} disabled={renewing !== null}>
+                            <RefreshCw size={12} className={renewing === c.name ? 'animate-spin' : ''} /> Force Renew
+                          </button>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
           {renewOutput && (
             <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-48 overflow-y-auto whitespace-pre-wrap">{renewOutput}</pre>

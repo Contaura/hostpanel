@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Key, Plus, Trash2, Copy, User } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, User, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 interface SSHKey {
@@ -29,6 +29,8 @@ export default function SSHKeys() {
   const [showAcctForm, setShowAcctForm] = useState(false);
   const [newAcctKey, setNewAcctKey] = useState('');
   const [acctLoading, setAcctLoading] = useState(false);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [acctSearch, setAcctSearch] = useState('');
 
   async function load() {
     try {
@@ -137,35 +139,49 @@ export default function SSHKeys() {
             </form>
           )}
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}><tr>
-                <th className="table-header-cell">Type</th>
-                <th className="table-header-cell">Key Fingerprint</th>
-                <th className="table-header-cell hidden md:table-cell">Comment</th>
-                <th className="px-4 py-3 w-20" />
-              </tr></thead>
-              <tbody>
-                {acctKeys.length === 0 ? (
-                  <tr><td colSpan={4} className="px-4 py-16 text-center">
-                    <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                    <p className="text-slate-400 text-sm">{acctUsername ? 'No SSH keys for this user' : 'Enter a username and click Load Keys'}</p>
-                  </td></tr>
-                ) : acctKeys.map(k => (
-                  <tr key={k.id} className={rowCls}>
-                    <td className="table-cell"><span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span></td>
-                    <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">{k.key.slice(0, 20)}…{k.key.slice(-8)}</td>
-                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())} className="btn-icon hover:!text-indigo-600" title="Copy"><Copy size={13} /></button>
-                        <button onClick={() => removeAcctKey(k.id)} className="btn-icon hover:!text-rose-600" title="Remove"><Trash2 size={13} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search keys…" value={acctSearch} onChange={e => setAcctSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}><tr>
+                  <th className="table-header-cell">Type</th>
+                  <th className="table-header-cell">Key Fingerprint</th>
+                  <th className="table-header-cell hidden md:table-cell">Comment</th>
+                  <th className="px-4 py-3 w-20" />
+                </tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = acctSearch.trim().toLowerCase();
+                    const visible = q ? acctKeys.filter(k => [k.type, k.comment, k.key].some(v => String(v ?? '').toLowerCase().includes(q))) : acctKeys;
+                    if (acctKeys.length === 0) return (
+                      <tr><td colSpan={4} className="px-4 py-16 text-center">
+                        <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                        <p className="text-slate-400 text-sm">{acctUsername ? 'No SSH keys for this user' : 'Enter a username and click Load Keys'}</p>
+                      </td></tr>
+                    );
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No keys match "{acctSearch}"</td></tr>;
+                    return visible.map(k => (
+                      <tr key={k.id} className={rowCls}>
+                        <td className="table-cell"><span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span></td>
+                        <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">{k.key.slice(0, 20)}…{k.key.slice(-8)}</td>
+                        <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())} className="btn-icon hover:!text-indigo-600" title="Copy"><Copy size={13} /></button>
+                            <button onClick={() => removeAcctKey(k.id)} className="btn-icon hover:!text-rose-600" title="Remove"><Trash2 size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -196,48 +212,62 @@ export default function SSHKeys() {
       )}
 
       {tab === 'admin' && (
-        <div className="card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className={theadCls}><tr>
-              <th className="table-header-cell">Type</th>
-              <th className="table-header-cell">Key Fingerprint</th>
-              <th className="table-header-cell hidden md:table-cell">Comment</th>
-              <th className="px-4 py-3 w-20" />
-            </tr></thead>
-            <tbody>
-              {keys.length === 0 ? (
-                <tr><td colSpan={4} className="px-4 py-16 text-center">
-                  <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                  <p className="text-slate-400 text-sm">No SSH keys configured</p>
-                </td></tr>
-              ) : keys.map(k => (
-                <tr key={k.id} className={rowCls}>
-                  <td className="table-cell">
-                    <span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span>
-                  </td>
-                  <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">
-                    {k.key.slice(0, 20)}…{k.key.slice(-8)}
-                  </td>
-                  <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())}
-                        className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
-                        title="Copy">
-                        <Copy size={13} />
-                      </button>
-                      <button onClick={() => remove(k.id)}
-                        className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
-                        title="Remove">
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search keys…" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className={theadCls}><tr>
+                <th className="table-header-cell">Type</th>
+                <th className="table-header-cell">Key Fingerprint</th>
+                <th className="table-header-cell hidden md:table-cell">Comment</th>
+                <th className="px-4 py-3 w-20" />
+              </tr></thead>
+              <tbody>
+                {(() => {
+                  const q = adminSearch.trim().toLowerCase();
+                  const visible = q ? keys.filter(k => [k.type, k.comment, k.key].some(v => String(v ?? '').toLowerCase().includes(q))) : keys;
+                  if (keys.length === 0) return (
+                    <tr><td colSpan={4} className="px-4 py-16 text-center">
+                      <Key className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                      <p className="text-slate-400 text-sm">No SSH keys configured</p>
+                    </td></tr>
+                  );
+                  if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No keys match "{adminSearch}"</td></tr>;
+                  return visible.map(k => (
+                    <tr key={k.id} className={rowCls}>
+                      <td className="table-cell">
+                        <span className={TYPE_COLORS[k.type] || 'badge-gray'}>{k.type}</span>
+                      </td>
+                      <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">
+                        {k.key.slice(0, 20)}…{k.key.slice(-8)}
+                      </td>
+                      <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{k.comment || '—'}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => copyKey(`${k.type} ${k.key} ${k.comment}`.trim())}
+                            className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
+                            title="Copy">
+                            <Copy size={13} />
+                          </button>
+                          <button onClick={() => remove(k.id)}
+                            className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
+                            title="Remove">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
