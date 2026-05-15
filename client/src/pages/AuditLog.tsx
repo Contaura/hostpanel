@@ -28,6 +28,11 @@ export default function AuditLog() {
     } finally { setPageLoading(false); }
   }
 
+  useEffect(() => {
+    document.title = 'Audit Log — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function clearOld() {

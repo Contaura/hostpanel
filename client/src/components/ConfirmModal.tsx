@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 interface Props {
@@ -7,6 +8,17 @@ interface Props {
 }
 
 export default function ConfirmModal({ message, onConfirm, onCancel }: Props) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onCancel(); }
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onCancel]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onCancel} />

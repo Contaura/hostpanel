@@ -18,6 +18,11 @@ export default function CloudflareManager() {
   const [deletingZone, setDeletingZone] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Cloudflare — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadZones(); }, []);
 
   async function loadZones() {

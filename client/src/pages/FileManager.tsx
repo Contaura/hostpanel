@@ -52,6 +52,11 @@ export default function FileManager() {
     } finally { setLoading(false); }
   }
 
+  useEffect(() => {
+    document.title = 'File Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadDir('/'); }, []);
 
   function navigate(item: FileItem) {

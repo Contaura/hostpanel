@@ -47,6 +47,11 @@ export default function PHPManager() {
     } catch (err: any) { toast.error('Failed to load PHP info'); }
     finally { setPageLoading(false); }
   }
+  useEffect(() => {
+    document.title = 'PHP Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function saveSettings() {

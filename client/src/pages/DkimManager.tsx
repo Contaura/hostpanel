@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
 
@@ -9,6 +9,11 @@ export default function DkimManager() {
   const [loading, setLoading] = useState(false);
   const [spf, setSpf] = useState({ policy: 'softfail', extra_ips: '' });
   const [dmarc, setDmarc] = useState({ policy: 'none', rua: '', pct: '100' });
+
+  useEffect(() => {
+    document.title = 'DKIM / SPF — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   async function load() {
     if (!domain.trim()) return;

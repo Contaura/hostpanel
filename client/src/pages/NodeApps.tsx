@@ -22,6 +22,7 @@ export default function NodeApps() {
   const [type, setType] = useState<AppType>('node');
   const [apps, setApps] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [logs, setLogs] = useState<{ id: string; lines: string[] } | null>(null);
   const [nodeForm, setNodeForm] = useState({ name: '', script: '', cwd: '', interpreter: 'node', env: '' });
@@ -31,13 +32,19 @@ export default function NodeApps() {
   const [actioning, setActioning] = useState<string | null>(null);
   const [appSearch, setAppSearch] = useState('');
 
+  useEffect(() => {
+    document.title = 'Node / Python Apps — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, [type]);
 
   async function load() {
     setLoading(true);
-    const r = await fetchApi(`/api/node-apps/${type}`);
-    setApps(Array.isArray(await r.json()) ? await r.clone().json() : []);
-    setLoading(false);
+    try {
+      const r = await fetchApi(`/api/node-apps/${type}`);
+      setApps(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setLoading(false); setPageLoading(false); }
   }
 
   async function action(id: string, act: string) {
@@ -90,6 +97,12 @@ export default function NodeApps() {
         <p className="page-subtitle">Manage applications with PM2 process manager</p>
       </div>
 
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
       <div className="tab-bar">
         <button className={type === 'node' ? 'tab-item-active' : 'tab-item'} onClick={() => setType('node')}>Node.js Apps</button>
         <button className={type === 'python' ? 'tab-item-active' : 'tab-item'} onClick={() => setType('python')}>Python Apps</button>
@@ -207,6 +220,8 @@ export default function NodeApps() {
             {logs.lines.length ? logs.lines.join('\n') : 'No log output yet.'}
           </pre>
         </div>
+      )}
+      </>
       )}
     </div>
   );

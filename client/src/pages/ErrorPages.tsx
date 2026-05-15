@@ -19,6 +19,11 @@ export default function ErrorPages() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    document.title = 'Error Pages — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     axios.get<string[]>('/api/domains/domains').then(r => {
       setDomains(r.data);
       if (r.data.length) setDomain(r.data[0]);

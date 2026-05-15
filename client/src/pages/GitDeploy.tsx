@@ -19,6 +19,11 @@ export default function GitDeploy() {
   const [deletingDep, setDeletingDep] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Git Deploy — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function load() {

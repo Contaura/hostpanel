@@ -26,6 +26,11 @@ export default function WordPressManager() {
   const pluginZipRef = useRef<HTMLInputElement>(null);
   const themeZipRef = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    document.title = 'WordPress — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadInitial(); }, []);
 
   async function loadInitial() {

@@ -49,6 +49,11 @@ export default function Plans() {
     try { const { data } = await axios.get<Plan[]>('/api/billing/plans'); setPlans(data); }
     catch { toast.error('Failed to load plans'); }
   }
+  useEffect(() => {
+    document.title = 'Hosting Plans — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   function startEdit(plan: Plan) {

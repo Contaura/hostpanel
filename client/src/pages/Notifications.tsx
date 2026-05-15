@@ -18,6 +18,11 @@ export default function Notifications() {
   const [testing, setTesting] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Notifications — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); fetchApi('/api/notifications/events').then(r => r.json()).then(setAllEvents); }, []);
 
   async function load() {

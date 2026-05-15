@@ -68,6 +68,11 @@ export default function Firewall() {
     } catch {}
   }
 
+  useEffect(() => {
+    document.title = 'Firewall — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); loadGeo(); loadIpv6(); }, []);
 
   async function addPort(e: FormEvent) {

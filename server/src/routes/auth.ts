@@ -40,6 +40,12 @@ router.post('/login', async (req: Request, res: Response) => {
 
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
+  // Enforce global 2FA requirement
+  const tfaEnforced = (db.prepare("SELECT value FROM settings WHERE key = 'panel_2fa_required'").get() as any)?.value === '1';
+  if (tfaEnforced && !totpEnabled) {
+    return res.status(403).json({ error: 'Two-factor authentication is required for all admins. Enable 2FA in Security settings before logging in.' });
+  }
+
   // 2FA check
   if (totpEnabled && totpSecret) {
     if (!totp_token) {

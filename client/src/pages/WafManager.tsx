@@ -32,6 +32,11 @@ export default function WafManager() {
     setRulesLoaded(true);
   }
 
+  useEffect(() => {
+    document.title = 'WAF — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'rules') loadRules(); }, [tab]);
 

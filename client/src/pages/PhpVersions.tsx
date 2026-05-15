@@ -18,6 +18,11 @@ export default function PhpVersions() {
   const [removingAssign, setRemovingAssign] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'PHP Versions — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadPhp(); }, []);
 
   async function loadPhp() {

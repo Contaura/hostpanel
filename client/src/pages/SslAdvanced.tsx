@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Lock, CheckCircle, XCircle, RefreshCw, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
 
 export default function SslAdvanced() {
   const toast = useToast();
+  useEffect(() => {
+    document.title = 'SSL — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   const [tab, setTab] = useState<'ciphers' | 'wildcard' | 'test' | 'renew' | 'acme' | 'csr' | 'self-signed' | 'import'>('ciphers');
   const [ciphers, setCiphers] = useState<any>(null);
   const [ciphersLoaded, setCiphersLoaded] = useState(false);

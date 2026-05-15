@@ -53,6 +53,11 @@ export default function ProcessManager() {
     finally { setLoading(false); }
   }
 
+  useEffect(() => {
+    document.title = 'Process Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   function goToPage(p: number) {

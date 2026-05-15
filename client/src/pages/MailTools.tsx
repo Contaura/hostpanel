@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, AlertCircle, CheckCircle, XCircle, FileText } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
@@ -6,6 +6,11 @@ import { fetchApi } from '../lib/api';
 export default function MailTools() {
   const toast = useToast();
   const [tab, setTab] = useState<'mx' | 'dnsbl' | 'authlog'>('mx');
+
+  useEffect(() => {
+    document.title = 'Mail Tools — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   // MX Check
   const [mxDomain, setMxDomain] = useState('');

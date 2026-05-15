@@ -28,6 +28,11 @@ export default function FTPManager() {
     const { data } = await axios.get<FTPUser[]>('/api/ftp/users');
     setUsers(data);
   }
+  useEffect(() => {
+    document.title = 'FTP Accounts — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function saveLimits(username: string) {

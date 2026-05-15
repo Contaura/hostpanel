@@ -100,6 +100,11 @@ export default function Billing() {
     } catch { toast.error('Failed to load billing data'); }
   }
 
+  useEffect(() => {
+    document.title = 'Billing — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   // Handle return from Stripe Checkout
   useEffect(() => {
     const payment = searchParams.get('payment');

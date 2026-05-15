@@ -40,6 +40,11 @@ export default function TerminalPage() {
   const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => {
+    document.title = 'Terminal — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 

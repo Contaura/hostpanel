@@ -89,6 +89,11 @@ export default function BackupManager() {
     } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
   }
 
+  useEffect(() => {
+    document.title = 'Backups — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function createBackup() {

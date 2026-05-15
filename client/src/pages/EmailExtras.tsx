@@ -53,7 +53,13 @@ export default function EmailExtras() {
 
   // Delete tracking
   const [deleting, setDeleting] = useState<string | number | null>(null);
+  const [addingSpamRule, setAddingSpamRule] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Email Extras — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { loadTab(tab); }, [tab]);
 
@@ -347,10 +353,14 @@ export default function EmailExtras() {
                   <option value="blacklist">Blacklist</option>
                 </select>
                 <input className="input flex-1" placeholder="email@example.com or *@domain.com" value={dsForm.address} onChange={e => setDsForm(f => ({ ...f, address: e.target.value }))} />
-                <button className="btn-primary" onClick={async () => {
-                  await post(`/api/email-extras/spam-rules/${dsDomain}`, dsForm);
-                  setDsForm({ type: 'whitelist', address: '' });
-                  success('Rule added'); loadDomainSpam();
+                <button className="btn-primary" disabled={addingSpamRule} onClick={async () => {
+                  setAddingSpamRule(true);
+                  try {
+                    await post(`/api/email-extras/spam-rules/${dsDomain}`, dsForm);
+                    setDsForm({ type: 'whitelist', address: '' });
+                    success('Rule added'); loadDomainSpam();
+                  } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+                  finally { setAddingSpamRule(false); }
                 }}><Plus size={14} /> Add</button>
               </div>
 

@@ -37,6 +37,11 @@ export default function SecurityPlus() {
   const [removingIp, setRemovingIp] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Security — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadTab(tab); setPageLoading(false); }, [tab]);
 
   function loadTab(t: Tab) {

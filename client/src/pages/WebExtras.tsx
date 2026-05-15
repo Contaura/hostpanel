@@ -35,6 +35,11 @@ export default function WebExtras() {
   const [sslCerts, setSslCerts] = useState<any[]>([]);
   const [sslLoading, setSslLoading] = useState(false);
 
+  useEffect(() => {
+    document.title = 'Web Extras — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
@@ -80,6 +85,7 @@ export default function WebExtras() {
   const [newLeechDomain, setNewLeechDomain] = useState('');
   const [deletingMime, setDeletingMime] = useState<string | null>(null);
   const [removingLeech, setRemovingLeech] = useState<string | null>(null);
+  const [addingLeech, setAddingLeech] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
 
   const tabs = [
@@ -302,13 +308,17 @@ export default function WebExtras() {
             <p className="text-xs text-slate-500">Adds basic HTTP authentication to a domain's directory to limit credential sharing.</p>
             <div className="flex gap-3">
               <input className="input flex-1" placeholder="example.com" value={newLeechDomain} onChange={e => setNewLeechDomain(e.target.value)} />
-              <button className="btn-primary" onClick={async () => {
+              <button className="btn-primary" disabled={addingLeech} onClick={async () => {
                 if (!newLeechDomain) return;
-                await apost('/api/web/leech', { domain: newLeechDomain });
-                success(`Leech protection enabled for ${newLeechDomain}`);
-                setNewLeechDomain('');
-                loadTab('leech');
-              }}><Plus size={14} /> Enable</button>
+                setAddingLeech(true);
+                try {
+                  await apost('/api/web/leech', { domain: newLeechDomain });
+                  success(`Leech protection enabled for ${newLeechDomain}`);
+                  setNewLeechDomain('');
+                  loadTab('leech');
+                } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+                finally { setAddingLeech(false); }
+              }}><Plus size={14} /> {addingLeech ? 'Enabling…' : 'Enable'}</button>
             </div>
           </div>
           <div className="card overflow-hidden p-0">

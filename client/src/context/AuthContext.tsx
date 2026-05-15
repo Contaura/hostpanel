@@ -8,7 +8,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, totpToken?: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
 }
@@ -30,8 +30,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [auth.token]);
 
-  async function login(username: string, password: string) {
-    const { data } = await axios.post('/api/auth/login', { username, password });
+  async function login(username: string, password: string, totpToken?: string) {
+    const { data } = await axios.post('/api/auth/login', {
+      username,
+      password,
+      ...(totpToken ? { totp_token: totpToken } : {}),
+    });
+    if (data.requires2FA) {
+      const err: any = new Error('2FA required');
+      err.requires2FA = true;
+      throw err;
+    }
     const state = { token: data.token, username: data.username, role: data.role };
     setAuth(state);
     localStorage.setItem('hp_token', data.token);

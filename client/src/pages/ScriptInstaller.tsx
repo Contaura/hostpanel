@@ -34,6 +34,11 @@ export default function ScriptInstaller() {
   const [result, setResult] = useState<{ message: string; url: string } | null>(null);
 
   useEffect(() => {
+    document.title = 'Script Installer — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     axios.get<Script[]>('/api/scripts/available').then(r => setScripts(r.data));
     axios.get<string[]>('/api/domains/domains').then(r => setDomains(r.data));
   }, []);

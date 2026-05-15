@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldAlert, RefreshCw, Trash2, CheckCircle, XCircle, FileSearch } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
@@ -8,6 +8,11 @@ export default function SecurityScanner() {
   const toast = useToast();
   const confirm = useConfirm();
   const [tab, setTab] = useState<'scan' | 'integrity'>('scan');
+
+  useEffect(() => {
+    document.title = 'Security Scanner — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   // Malware scan
   const [scanPath, setScanPath] = useState('/var/www');

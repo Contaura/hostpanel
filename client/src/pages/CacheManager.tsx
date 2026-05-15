@@ -23,6 +23,11 @@ export default function CacheManager() {
     } finally { setPageLoading(false); }
   }
 
+  useEffect(() => {
+    document.title = 'Cache Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadAll(); }, []);
 
   async function flush(type: string) {

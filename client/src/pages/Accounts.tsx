@@ -63,6 +63,11 @@ export default function Accounts() {
       setClients(cRes.data);
     } catch { toast.error('Failed to load accounts'); }
   }
+  useEffect(() => {
+    document.title = 'Hosting Accounts — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function create(e: FormEvent) {

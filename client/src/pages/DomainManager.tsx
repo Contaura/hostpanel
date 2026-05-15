@@ -41,6 +41,11 @@ export default function DomainManager() {
     const { data } = await axios.get<string[]>('/api/domains/domains');
     setDomains(data);
   }
+  useEffect(() => {
+    document.title = 'Domains — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadDomains(); }, []);
 
   async function loadDNS(domain: string) {

@@ -43,6 +43,11 @@ export default function DatabaseManager() {
   const [slowLogToggling, setSlowLogToggling] = useState(false);
 
   useEffect(() => {
+    document.title = 'Databases — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
   }, []);
 

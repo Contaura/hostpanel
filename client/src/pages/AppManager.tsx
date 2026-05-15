@@ -35,6 +35,11 @@ export default function AppManager() {
   const [deletingStaging, setDeletingStaging] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'App Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function load() {

@@ -36,6 +36,11 @@ export default function Redirects() {
       setDomains(dRes.data);
     } catch { setRedirects([]); }
   }
+  useEffect(() => {
+    document.title = 'Redirects — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function add(e: FormEvent) {

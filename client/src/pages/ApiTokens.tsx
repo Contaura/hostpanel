@@ -43,6 +43,11 @@ export default function ApiTokens() {
   const [testingWh, setTestingWh] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'API Tokens — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'webhooks') loadWebhooks(); }, [tab]);
 

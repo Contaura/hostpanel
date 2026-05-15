@@ -15,6 +15,11 @@ export default function ParkedDomains() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Parked Domains — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function load() {

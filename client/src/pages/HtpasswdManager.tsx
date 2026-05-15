@@ -28,6 +28,11 @@ export default function HtpasswdManager() {
     try { const { data } = await axios.get<Protected[]>('/api/htpasswd/list'); setDirs(data); }
     catch { setDirs([]); }
   }
+  useEffect(() => {
+    document.title = 'Password Protection — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function protect(e: FormEvent) {

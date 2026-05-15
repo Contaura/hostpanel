@@ -121,6 +121,11 @@ export default function CronJobs() {
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
+  useEffect(() => {
+    document.title = 'Cron Jobs — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); loadFailureEmail(); }, []);
   useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab]);
 

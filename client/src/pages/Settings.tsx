@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
+import { fetchApi } from '../lib/api';
 import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock, X } from 'lucide-react';
 
 type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay' | 'password-policy';
@@ -28,8 +29,13 @@ export default function Settings() {
   const [pwPolicyLoaded, setPwPolicyLoaded] = useState(false);
 
   useEffect(() => {
+    document.title = 'Settings — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     api('/api/settings/').then(r => { setSettings(r.data); setLoading(false); }).catch(() => setLoading(false));
-    fetch('/api/settings/logo', { headers: auth() }).then(r => r.ok ? r.json() : null).then(d => { if (d?.url) setLogoPreview(d.url); }).catch(() => {});
+    fetchApi('/api/settings/logo').then(r => r.ok ? r.json() : null).then(d => { if (d?.url) setLogoPreview(d.url); }).catch(() => {});
   }, []);
 
   async function uploadLogo(file: File) {
@@ -78,7 +84,7 @@ export default function Settings() {
   async function loadRelay() {
     if (relayLoaded) return;
     try {
-      const r = await fetch('/api/settings/relay', { headers: auth() });
+      const r = await fetchApi('/api/settings/relay');
       const d = await r.json();
       setRelay(v => ({ ...v, relayhost: d.relayhost || '', sasl_user: d.sasl_user || '' }));
       setRelayLoaded(true);
@@ -88,7 +94,7 @@ export default function Settings() {
   async function loadPwPolicy() {
     if (pwPolicyLoaded) return;
     try {
-      const r = await fetch('/api/admin-users/password-policy', { headers: auth() });
+      const r = await fetchApi('/api/admin-users/password-policy');
       const d = await r.json();
       setPwPolicy({ min_length: d.min_length || 8, require_upper: !!d.require_upper, require_number: !!d.require_number, require_special: !!d.require_special });
       setPwPolicyLoaded(true);

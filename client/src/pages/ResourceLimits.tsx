@@ -20,6 +20,11 @@ export default function ResourceLimits() {
   const [deletingVhost, setDeletingVhost] = useState<string | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Resource Limits — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function load() {

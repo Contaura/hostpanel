@@ -34,6 +34,11 @@ export default function Subdomains() {
       setDomains(domsRes.data);
     } catch { setSubs([]); }
   }
+  useEffect(() => {
+    document.title = 'Subdomains — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function create(e: FormEvent) {

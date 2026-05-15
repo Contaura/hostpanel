@@ -26,6 +26,11 @@ export default function MailRouting() {
   const [removingMember, setRemovingMember] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Mail Routing — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadRules(); loadLists(); loadWebmail(); }, []);
 
   async function loadRules() {

@@ -30,6 +30,11 @@ export default function AdminUsers() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'Admin Users — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); loadPolicy(); }, []);
 
   async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} finally { setPageLoading(false); } }

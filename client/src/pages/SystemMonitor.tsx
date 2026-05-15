@@ -42,6 +42,11 @@ export default function SystemMonitor() {
   const [ruleSearch, setRuleSearch] = useState('');
   const [pageLoading, setPageLoading] = useState(true);
 
+  useEffect(() => {
+    document.title = 'System Monitor — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {

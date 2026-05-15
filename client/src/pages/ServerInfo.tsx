@@ -18,6 +18,11 @@ export default function ServerInfo() {
     finally { setLoading(false); }
   }
 
+  useEffect(() => {
+    document.title = 'Server Info — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   if (loading) return <div className="p-6 text-slate-400">Loading server information…</div>;

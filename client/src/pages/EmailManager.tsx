@@ -31,6 +31,11 @@ export default function EmailManager() {
     setForwarders(fwd.data);
   }
 
+  useEffect(() => {
+    document.title = 'Email Accounts — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function createAccount(e: FormEvent) {

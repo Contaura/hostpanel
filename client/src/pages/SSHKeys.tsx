@@ -42,6 +42,11 @@ export default function SSHKeys() {
       setKeys(data);
     } catch { setKeys([]); }
   }
+  useEffect(() => {
+    document.title = 'SSH Keys — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function addKey(e: FormEvent) {

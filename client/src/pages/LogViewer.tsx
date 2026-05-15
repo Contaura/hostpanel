@@ -31,6 +31,11 @@ export default function LogViewer() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    document.title = 'Log Viewer — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     if (autoRefresh > 0) {
       timerRef.current = setInterval(() => { if (mode === 'system') fetchLog(); else fetchDomainLog(); }, autoRefresh * 1000);

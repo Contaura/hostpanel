@@ -13,6 +13,7 @@ export default function MailQueue() {
   const [messages, setMessages] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [deliveryLog, setDeliveryLog] = useState<any[]>([]);
   const [logSearch, setLogSearch] = useState('');
   const [logLoading, setLogLoading] = useState(false);
@@ -27,7 +28,7 @@ export default function MailQueue() {
       const [q, s] = await Promise.all([fetchApi('/api/mail-queue/').then(r => r.json()), fetchApi('/api/mail-queue/stats').then(r => r.json())]);
       setMessages(Array.isArray(q) ? q : []);
       setStats(s);
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setPageLoading(false); }
   }
 
   async function loadDeliveryLog() {
@@ -45,6 +46,11 @@ export default function MailQueue() {
     setBounceLog(d.lines || []);
     setBounceLoading(false);
   }
+
+  useEffect(() => {
+    document.title = 'Mail Queue — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); if (tab === 'bounce-log') loadBounceLog(); }, [tab]);
@@ -112,6 +118,12 @@ export default function MailQueue() {
         </div>
       </div>
 
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
       <div className="tab-bar">
         <button className={tab === 'queue' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('queue')}><Send size={14} /> Mail Queue</button>
         <button className={tab === 'delivery-log' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('delivery-log')}><FileSearch size={14} /> Delivery Log</button>
@@ -212,6 +224,8 @@ export default function MailQueue() {
           </table>
         </div>
       </div></>}
+      </>
+      )}
     </div>
   );
 }

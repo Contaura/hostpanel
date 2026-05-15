@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useState, useEffect } from 'react';
+import { fetchApi } from '../lib/api';
 import {
   LayoutDashboard, FolderOpen, Archive,
   Globe, Network, ArrowRightLeft, AlertTriangle, Globe2,
@@ -132,7 +133,7 @@ export default function Sidebar() {
   const [panelName, setPanelName] = useState('HostPanel');
 
   useEffect(() => {
-    fetch('/api/settings/logo', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
+    fetchApi('/api/settings/logo')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.url) setLogoUrl(d.url); if (d?.name) setPanelName(d.name); })
       .catch(() => {});
