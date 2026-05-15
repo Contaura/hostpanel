@@ -31,6 +31,31 @@ export function setupTerminal(httpServer: HttpServer): void {
 
     const shell = process.env.SHELL || '/bin/bash';
 
+    // Strip HostPanel/server-internal secrets from the env handed to the shell.
+    // The terminal is admin-only and runs as the same uid as the panel, so
+    // leaking these doesn't expose anything the user couldn't read off disk —
+    // but propagating them needlessly puts them in every child process env,
+    // shell history, and `env`/`printenv` output. Keep the env a normal login
+    // shell would expect.
+    const SENSITIVE_ENV_KEYS = new Set([
+      'JWT_SECRET',
+      'ADMIN_PASS_HASH',
+      'ADMIN_USER',
+      'DB_ROOT_PASS',
+      'DB_ROOT_USER',
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      'PAYPAL_CLIENT_SECRET',
+      'CLOUDFLARE_API_TOKEN',
+      'MYSQL_PWD',
+    ]);
+    const sanitizedEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v === undefined) continue;
+      if (SENSITIVE_ENV_KEYS.has(k)) continue;
+      sanitizedEnv[k] = v;
+    }
+
     let ptyProcess: pty.IPty;
     try {
       ptyProcess = pty.spawn(shell, [], {
@@ -38,7 +63,7 @@ export function setupTerminal(httpServer: HttpServer): void {
         cols: 80,
         rows: 24,
         cwd: process.env.HOME ?? '/',
-        env: process.env as Record<string, string>,
+        env: sanitizedEnv,
       });
     } catch (err) {
       ws.send(`\r\nFailed to start shell: ${err}\r\n`);

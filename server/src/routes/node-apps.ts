@@ -1,11 +1,12 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
 const APP_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}$/;
@@ -54,10 +55,14 @@ router.post('/node', async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Invalid interpreter' });
   }
   try {
-    const envFlag = env ? `--env-file "${env}"` : '';
-    const interpFlag = interpreter !== 'node' ? `--interpreter "${interpreter}"` : '';
-    await execAsync(`pm2 start "${script}" --name "${name}" ${interpFlag} ${envFlag} --cwd "${cwd || WEBROOT}"`, { timeout: 30000 });
-    await execAsync('pm2 save');
+    // pm2 invocations use argv form so isSafePath's allowed-but-spaced paths
+    // can't break the command line. isSafePath() already blocks $`\!"…
+    const args = ['start', script, '--name', name];
+    if (interpreter !== 'node') args.push('--interpreter', interpreter);
+    if (env) args.push('--env-file', env);
+    args.push('--cwd', cwd || WEBROOT);
+    await execFileAsync('pm2', args, { timeout: 30000 });
+    await execFileAsync('pm2', ['save']);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -68,8 +73,8 @@ router.post('/node/:id/action', async (req: AuthRequest, res: Response) => {
   const allowed = ['start', 'stop', 'restart', 'delete'];
   if (!allowed.includes(action)) return res.status(400).json({ error: 'Invalid action' });
   try {
-    await execAsync(`pm2 ${action} ${req.params.id}`);
-    if (action !== 'delete') await execAsync('pm2 save');
+    await execFileAsync('pm2', [action, req.params.id]);
+    if (action !== 'delete') await execFileAsync('pm2', ['save']);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -110,8 +115,8 @@ router.post('/python', async (req: AuthRequest, res: Response) => {
   if (venv && !isSafePath(venv)) return res.status(400).json({ error: 'Invalid venv path' });
   const interpreter = venv ? `${venv}/bin/python` : 'python3';
   try {
-    await execAsync(`pm2 start "${script}" --name "${name}" --interpreter "${interpreter}" --cwd "${cwd || WEBROOT}"`);
-    await execAsync('pm2 save');
+    await execFileAsync('pm2', ['start', script, '--name', name, '--interpreter', interpreter, '--cwd', cwd || WEBROOT]);
+    await execFileAsync('pm2', ['save']);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -121,7 +126,7 @@ router.post('/python/create-venv', async (req: AuthRequest, res: Response) => {
   if (!venvPath) return res.status(400).json({ error: 'path required' });
   if (!isSafePath(venvPath)) return res.status(400).json({ error: 'Invalid venv path' });
   try {
-    await execAsync(`python3 -m venv "${venvPath}"`, { timeout: 60000 });
+    await execFileAsync('python3', ['-m', 'venv', venvPath], { timeout: 60000 });
     res.json({ success: true, path: venvPath });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

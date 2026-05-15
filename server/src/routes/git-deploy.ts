@@ -1,11 +1,33 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+async function resolveDeployPath(p: string): Promise<string> {
+  if (!p || typeof p !== 'string') throw new Error('deploy_path required');
+  const resolved = path.resolve(p);
+  if (resolved !== p) throw new Error('deploy_path must be an absolute, normalized path');
+  const stat = await fs.stat(resolved);
+  if (!stat.isDirectory()) throw new Error('deploy_path is not a directory');
+  return resolved;
+}
+
+async function runDeploy(deployPath: string, deployCommand: string) {
+  if (typeof deployCommand !== 'string' || !deployCommand.trim()) {
+    throw new Error('deploy_command is empty');
+  }
+  const cwd = await resolveDeployPath(deployPath);
+  // Pass cwd via execFile options rather than `cd "${path}" && …` so a malicious
+  // deploy_path can't break out of the quote and inject extra commands. The
+  // deploy_command itself remains an admin-authored shell script by design.
+  return execFileAsync('sh', ['-c', deployCommand], { cwd, timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+}
 
 /* ── List deployments ────────────────────────────────────── */
 
@@ -54,12 +76,12 @@ router.post('/:id/deploy', async (req: Request, res: Response) => {
   const dep = db.prepare('SELECT * FROM git_deployments WHERE id = ?').get(req.params.id) as any;
   if (!dep) return res.status(404).json({ error: 'Deployment not found' });
   try {
-    const { stdout, stderr } = await execAsync(`cd "${dep.deploy_path}" && ${dep.deploy_command}`, { timeout: 120000 });
+    const { stdout, stderr } = await runDeploy(dep.deploy_path, dep.deploy_command);
     db.prepare("UPDATE git_deployments SET last_deployed=datetime('now'), last_status='success' WHERE id=?").run(dep.id);
     res.json({ success: true, output: stdout + stderr });
   } catch (err: any) {
     db.prepare("UPDATE git_deployments SET last_deployed=datetime('now'), last_status='failed' WHERE id=?").run(dep.id);
-    res.status(500).json({ error: err.message, output: err.stdout + err.stderr });
+    res.status(500).json({ error: err.message, output: (err.stdout || '') + (err.stderr || '') });
   }
 });
 
@@ -93,7 +115,7 @@ router.post('/webhook/:name', async (req: Request, res: Response) => {
   if (ref && !ref.endsWith(dep.branch)) return res.json({ skipped: true, reason: 'Branch mismatch' });
 
   try {
-    await execAsync(`cd "${dep.deploy_path}" && ${dep.deploy_command}`, { timeout: 120000 });
+    await runDeploy(dep.deploy_path, dep.deploy_command);
     db.prepare("UPDATE git_deployments SET last_deployed=datetime('now'), last_status='success' WHERE id=?").run(dep.id);
     res.json({ success: true });
   } catch (err: any) {

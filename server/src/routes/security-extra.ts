@@ -21,6 +21,17 @@ router.get('/2fa', (req: AuthRequest, res: Response) => {
 
 router.post('/2fa/setup', async (req: AuthRequest, res: Response) => {
   const username = (req as any).user?.username || process.env.ADMIN_USER || 'admin';
+
+  // Refuse to clobber an already-verified secret. The previous implementation
+  // did `ON CONFLICT DO UPDATE SET totp_secret=..., totp_enabled=0`, which
+  // meant an authenticated request to /setup would silently disable an
+  // already-enabled 2FA and replace the secret. The user must disable 2FA
+  // first (DELETE /2fa) before generating a fresh secret.
+  const existing = db.prepare('SELECT totp_enabled FROM admin_users WHERE username = ?').get(username) as any;
+  if (existing?.totp_enabled) {
+    return res.status(409).json({ error: '2FA is already enabled. Disable it first before generating a new secret.' });
+  }
+
   const secretObj = speakeasy.generateSecret({ length: 20, name: username });
   const secret = secretObj.base32;
   const companyName = (db.prepare("SELECT value FROM settings WHERE key='company_name'").get() as any)?.value || 'HostPanel';
@@ -28,7 +39,7 @@ router.post('/2fa/setup', async (req: AuthRequest, res: Response) => {
 
   try {
     const qrDataUrl = await QRCode.toDataURL(otpauth);
-    // Store unconfirmed secret; only activate on verify
+    // Store unconfirmed secret; only activate on verify.
     db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_secret, totp_enabled) VALUES (?, ?, ?, 'superadmin', ?, 0) ON CONFLICT(username) DO UPDATE SET totp_secret=excluded.totp_secret, totp_enabled=0")
       .run(username, username + '@local', '', secret);
     res.json({ secret, qrDataUrl, otpauth });

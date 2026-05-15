@@ -197,8 +197,14 @@ router.post('/:id/export', async (req: AuthRequest, res: Response) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
+  // Defensive re-validation — usernames pass /^[a-zA-Z][a-zA-Z0-9_]{1,31}$/ at
+  // creation, but a row could have been inserted via another path. Refuse to
+  // interpolate anything weird into shell commands or db queries below.
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(account.username)) {
+    return res.status(400).json({ error: 'Stored account username is invalid; refusing to export' });
+  }
+
   const BACKUP_DIR = process.env.BACKUP_DIR || '/var/backups/hostpanel';
-  const { execSync } = await import('child_process');
   try {
     const { mkdirSync: mkdir, existsSync: exists } = await import('fs');
     if (!exists(BACKUP_DIR)) mkdir(BACKUP_DIR, { recursive: true });
@@ -206,21 +212,30 @@ router.post('/:id/export', async (req: AuthRequest, res: Response) => {
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const archiveName = `account_${account.username}_${ts}.tar.gz`;
     const archivePath = path.join(BACKUP_DIR, archiveName);
-    const tmpDir = `/tmp/hp_export_${account.username}_${Date.now()}`;
+    const tmpDir = await fs.mkdtemp(path.join('/tmp', `hp_export_${account.username}_`));
 
     // Collect files
     const webDir = path.join(WEBROOT, account.username);
-    await execAsync(`mkdir -p "${tmpDir}/files" "${tmpDir}/databases"`);
+    await fs.mkdir(path.join(tmpDir, 'files'), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, 'databases'), { recursive: true });
     if (exists(webDir)) {
       await execAsync(`tar -czf "${tmpDir}/files/files.tar.gz" -C "${path.dirname(webDir)}" "${account.username}" 2>/dev/null || true`, { timeout: 300000 });
     }
 
-    // Dump all databases owned by this account user
+    // Dump all databases owned by this account user. Pull the list via
+    // information_schema with the prefix passed through MYSQL_PWD/env so the
+    // username never lands in the shell-quoted -e argument.
     const user = process.env.DB_ROOT_USER || 'root';
     const pass = process.env.DB_ROOT_PASS || '';
     const dbEnv = { ...process.env, ...(pass ? { MYSQL_PWD: pass } : {}) };
     try {
-      const { stdout: dbs } = await execAsync(`mysql -u${user} -e "SHOW DATABASES LIKE '${account.username}%'" -N 2>/dev/null`, { env: dbEnv });
+      const { execFile: ef } = await import('child_process');
+      const efAsync = promisify(ef);
+      // SHOW DATABASES LIKE accepts SQL wildcards; build the pattern from the
+      // validated username — no quote injection possible since the regex above
+      // restricts to [A-Za-z0-9_].
+      const likePattern = account.username + '%';
+      const { stdout: dbs } = await efAsync('mysql', [`-u${user}`, '-N', '-B', '-e', `SHOW DATABASES LIKE '${likePattern}'`], { env: dbEnv });
       for (const dbName of dbs.split('\n').filter(Boolean)) {
         if (/^[a-zA-Z0-9_]+$/.test(dbName)) {
           await execAsync(`mysqldump -u${user} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000, env: dbEnv });

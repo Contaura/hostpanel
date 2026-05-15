@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
@@ -7,6 +7,7 @@ import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
@@ -125,7 +126,10 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
       const isZip = meta.url.endsWith('.zip');
       const isBz2 = meta.url.endsWith('.bz2');
       const tmpFile = `/tmp/${script}-latest.${isZip ? 'zip' : isBz2 ? 'tar.bz2' : 'tar.gz'}`;
-      await execAsync(`curl -L -o "${tmpFile}" '${meta.url}' 2>&1`, { timeout: 180000 });
+      // Pass the URL as an argv element rather than interpolating into a shell
+      // string. The SCRIPTS table is hardcoded today but this keeps a future
+      // dynamic-URL change from re-introducing command injection.
+      await execFileAsync('curl', ['-L', '-o', tmpFile, meta.url], { timeout: 180000 });
       await fs.mkdir(`/tmp/${script}-extract`, { recursive: true });
       if (isZip) {
         await execAsync(`unzip -q "${tmpFile}" -d /tmp/${script}-extract 2>/dev/null`);
@@ -163,12 +167,20 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
 
       await fs.writeFile(config, wpConfig);
 
-      // Run WP-CLI install if available
+      // Run WP-CLI install if available. Use argv form so the user-supplied
+      // site title, admin user/pass/email can't escape via quotes.
       try {
         const siteUrl = `http://${domain}`;
-        await execAsync(
-          `wp --path="${installPath}" core install --url='${siteUrl}' --title='${(siteTitle || 'My Site').replace(/'/g, "'\\''")}' --admin_user='${(adminUser || 'admin').replace(/'/g, "'\\''")}' --admin_password='${(adminPass || 'changeme').replace(/'/g, "'\\''")}' --admin_email='${(adminEmail || 'admin@example.com').replace(/'/g, "'\\''")}' --skip-email 2>/dev/null || true`
-        );
+        await execFileAsync('wp', [
+          `--path=${installPath}`,
+          'core', 'install',
+          `--url=${siteUrl}`,
+          `--title=${siteTitle || 'My Site'}`,
+          `--admin_user=${adminUser || 'admin'}`,
+          `--admin_password=${adminPass || 'changeme'}`,
+          `--admin_email=${adminEmail || 'admin@example.com'}`,
+          '--skip-email',
+        ]).catch(() => {});
       } catch {}
     }
 

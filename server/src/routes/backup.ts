@@ -1,13 +1,24 @@
 import { Router, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { readdirSync, statSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { readdirSync, statSync, existsSync, mkdirSync, unlinkSync, writeFileSync, mkdtempSync } from 'fs';
 import path from 'path';
+import os from 'os';
 import { AuthRequest } from '../middleware/auth';
 import db from '../db';
 
 const router = Router();
 const execAsync = promisify(exec);
+
+function writeTempCrontab(lines: string[]): string {
+  // Use mkdtempSync to avoid the predictable `/tmp/hp_*_${Date.now()}` race:
+  // two requests landing in the same millisecond can no longer collide on the
+  // same path, and an attacker can't pre-create the file to race the write.
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'hp_backup_cron_'));
+  const file = path.join(dir, 'crontab');
+  writeFileSync(file, lines.join('\n') + '\n');
+  return file;
+}
 
 function getBackupDir(): string {
   const dir = process.env.BACKUP_DIR || '/var/backups/hostpanel';
@@ -160,11 +171,9 @@ router.post('/schedules', async (req: AuthRequest, res: Response) => {
     const { stdout: existing } = await execAsync('crontab -l 2>/dev/null || echo ""');
     const lines = existing.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
     lines.push(cronLine);
-    const tmp = `/tmp/hp_backup_cron_${Date.now()}`;
-    const { writeFileSync: wf, unlinkSync: ul } = await import('fs');
-    wf(tmp, lines.join('\n') + '\n');
+    const tmp = writeTempCrontab(lines);
     await execAsync(`crontab ${tmp}`);
-    ul(tmp);
+    unlinkSync(tmp);
   } catch {}
 
   res.json(db.prepare('SELECT * FROM backup_schedules WHERE id = ?').get(id));
@@ -177,11 +186,9 @@ router.delete('/schedules/:id', async (req: AuthRequest, res: Response) => {
   try {
     const { stdout } = await execAsync('crontab -l 2>/dev/null || echo ""');
     const lines = stdout.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
-    const { writeFileSync: wf, unlinkSync: ul } = await import('fs');
-    const tmp = `/tmp/hp_backup_cron_rm_${Date.now()}`;
-    wf(tmp, lines.join('\n') + '\n');
+    const tmp = writeTempCrontab(lines);
     await execAsync(`crontab ${tmp}`);
-    ul(tmp);
+    unlinkSync(tmp);
   } catch {}
   res.json({ success: true });
 });

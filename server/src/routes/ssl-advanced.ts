@@ -64,9 +64,29 @@ ${cfg.hsts ? 'Header always set Strict-Transport-Security "max-age=63072000; inc
 
 router.post('/wildcard', async (req: Request, res: Response) => {
   const { domain, dns_plugin, credentials_file } = req.body;
-  if (!domain) return res.status(400).json({ error: 'domain required' });
-  const plugin = dns_plugin || 'cloudflare';
-  const credFlag = credentials_file ? `--${plugin}-credentials ${credentials_file}` : '';
+  if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const plugin = (dns_plugin || 'cloudflare').toString();
+  // certbot DNS plugins are named like "cloudflare", "route53", "digitalocean".
+  // Restrict to a lowercase-alphanumeric token before letting it land in the
+  // shell command line or anywhere it could affect argv parsing.
+  if (!/^[a-z0-9]+$/.test(plugin)) {
+    return res.status(400).json({ error: 'Invalid dns_plugin' });
+  }
+  // credentials_file must be an absolute, normalised path with no shell
+  // metacharacters. We don't enforce a fixed directory because operators
+  // legitimately keep these in /root, /etc/letsencrypt, /home/..., etc.
+  let credFlag = '';
+  if (credentials_file) {
+    const credStr = String(credentials_file);
+    const resolved = path.resolve(credStr);
+    if (resolved !== credStr || !/^[\w./@\-+]+$/.test(credStr)) {
+      return res.status(400).json({ error: 'Invalid credentials_file path' });
+    }
+    if (!existsSync(resolved)) {
+      return res.status(400).json({ error: 'credentials_file does not exist' });
+    }
+    credFlag = `--${plugin}-credentials "${resolved}"`;
+  }
   try {
     const { stdout, stderr } = await execAsync(
       `certbot certonly --dns-${plugin} ${credFlag} -d "${domain}" -d "*.${domain}" --non-interactive --agree-tos --email $(grep company_email /etc/hostpanel.env 2>/dev/null | cut -d= -f2) 2>&1`,

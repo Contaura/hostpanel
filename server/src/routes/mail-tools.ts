@@ -94,7 +94,11 @@ router.get('/smtp-auth-log', async (req: Request, res: Response) => {
     }
     if (!logPath) return res.json({ lines: [], note: 'No mail log found' });
 
-    const grepPart = search ? `| grep -i "${search.replace(/[^a-zA-Z0-9@._-]/g, '')}"` : '';
+    // Strip everything except a strict ASCII allowlist *before* interpolating
+    // into the shell command. Keep the allowlist narrow (alphanumerics plus
+    // @._-) so a future regex tweak can't widen it to shell metacharacters.
+    const cleanedSearch = String(search).replace(/[^a-zA-Z0-9@._-]/g, '');
+    const grepPart = cleanedSearch ? `| grep -i "${cleanedSearch}"` : '';
     const { stdout } = await execAsync(`grep -i "sasl\\|authentication\\|AUTH" "${logPath}" ${grepPart} | tail -300 2>/dev/null`, { timeout: 10000 });
     const lines = stdout.split('\n').filter(Boolean).map((l, i) => ({ id: i, line: l }));
     res.json({ lines, log_file: logPath });
