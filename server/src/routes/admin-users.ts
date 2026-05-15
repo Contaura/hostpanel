@@ -36,15 +36,22 @@ router.post('/', superadminOnly, async (req: AuthRequest, res: Response) => {
 /* ── Update admin ────────────────────────────────────────── */
 
 router.put('/:id', superadminOnly, async (req: AuthRequest, res: Response) => {
+  // Partial update: fetch current row and fall back per-field so an
+  // {role:'admin'} body doesn't blank email/role to NULL on NOT NULL
+  // columns. Same idiom as plans / autoresponders / recurring_schedules.
+  const current: any = db.prepare('SELECT * FROM admin_users WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Admin user not found' });
   const { email, password, role } = req.body;
+  const newEmail = email !== undefined ? email : current.email;
+  const newRole  = role  !== undefined ? role  : current.role;
   try {
     if (password) {
       const pwError = validatePassword(password);
       if (pwError) return res.status(400).json({ error: pwError });
       const hash = await bcrypt.hash(password, 12);
-      db.prepare('UPDATE admin_users SET email=?, password_hash=?, role=? WHERE id=?').run(email, hash, role, req.params.id);
+      db.prepare('UPDATE admin_users SET email=?, password_hash=?, role=? WHERE id=?').run(newEmail, hash, newRole, req.params.id);
     } else {
-      db.prepare('UPDATE admin_users SET email=?, role=? WHERE id=?').run(email, role, req.params.id);
+      db.prepare('UPDATE admin_users SET email=?, role=? WHERE id=?').run(newEmail, newRole, req.params.id);
     }
     res.json(db.prepare('SELECT id, username, email, role, totp_enabled, created_at FROM admin_users WHERE id = ?').get(req.params.id));
   } catch (err: any) { res.status(500).json({ error: err.message }); }

@@ -42,9 +42,13 @@ router.post('/rules', (req: Request, res: Response) => {
 });
 
 router.put('/rules/:id', (req: Request, res: Response) => {
-  const { threshold, notify_email, enabled } = req.body;
+  // Partial PUT: bound undefined to NOT NULL threshold/notify_email used to
+  // 500 with "NOT NULL constraint failed".
+  const current: any = db.prepare('SELECT * FROM alert_rules WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Alert rule not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   db.prepare('UPDATE alert_rules SET threshold=?, notify_email=?, enabled=? WHERE id=?')
-    .run(threshold, notify_email, enabled ? 1 : 0, req.params.id);
+    .run(pick('threshold', current.threshold), pick('notify_email', current.notify_email), pick('enabled', current.enabled) ? 1 : 0, req.params.id);
   res.json(db.prepare('SELECT * FROM alert_rules WHERE id = ?').get(req.params.id));
 });
 

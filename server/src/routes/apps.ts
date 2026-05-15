@@ -118,7 +118,12 @@ router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
       ...buildEnvArg(app.env_vars),
       '--cwd', app.working_dir,
     ]);
-    db.prepare("UPDATE managed_apps SET status='running', pm2_id=? WHERE name=?").run(app.name, app.name);
+    // pm2_id is the numeric process id pm2 assigns (see line ~48 where we
+    // populate it from `pm2 jlist`'s pm_id). The previous bind wrote the
+    // app *name* into pm2_id by accident, which made the column lie about
+    // the actual pm2 process. Leave it NULL here; the next `pm2 jlist`
+    // enrichment in the GET handler fills it with the real id.
+    db.prepare("UPDATE managed_apps SET status='running', pm2_id=NULL WHERE name=?").run(app.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

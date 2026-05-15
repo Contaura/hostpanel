@@ -54,9 +54,20 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
 /* ── Update reseller allocations ─────────────────────────── */
 
 router.put('/:id', adminOnly, (req: Request, res: Response) => {
-  const { company, alloc_disk, alloc_bandwidth, alloc_accounts, alloc_emails, alloc_dbs } = req.body;
+  // Partial PUT — all six fields are NOT NULL.
+  const current: any = db.prepare('SELECT * FROM resellers WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Reseller not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   db.prepare('UPDATE resellers SET company=?, alloc_disk=?, alloc_bandwidth=?, alloc_accounts=?, alloc_emails=?, alloc_dbs=? WHERE id=?')
-    .run(company, alloc_disk, alloc_bandwidth, alloc_accounts, alloc_emails, alloc_dbs, req.params.id);
+    .run(
+      pick('company',         current.company),
+      pick('alloc_disk',      current.alloc_disk),
+      pick('alloc_bandwidth', current.alloc_bandwidth),
+      pick('alloc_accounts',  current.alloc_accounts),
+      pick('alloc_emails',    current.alloc_emails),
+      pick('alloc_dbs',       current.alloc_dbs),
+      req.params.id,
+    );
   res.json(db.prepare('SELECT * FROM resellers WHERE id = ?').get(req.params.id));
 });
 

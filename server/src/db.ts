@@ -324,6 +324,12 @@ tryAlter("ALTER TABLE credit_notes ADD COLUMN currency TEXT NOT NULL DEFAULT 'US
 tryAlter('ALTER TABLE recurring_schedules DROP COLUMN "interval"');
 tryAlter('ALTER TABLE recurring_schedules DROP COLUMN next_due');
 
+// reseller.ts GET /:id/summary joins accounts to reseller by accounts.reseller_id
+// but the accounts table never had that column. Every summary call 500'd with
+// "no such column: reseller_id". Add the column on existing installs so the
+// route can populate / read it.
+tryAlter("ALTER TABLE accounts ADD COLUMN reseller_id INTEGER REFERENCES resellers(id) ON DELETE SET NULL");
+
 // Seed default plans if empty
 const planCount = (db.prepare('SELECT COUNT(*) as n FROM plans').get() as { n: number }).n;
 if (planCount === 0) {

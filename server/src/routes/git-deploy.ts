@@ -57,9 +57,18 @@ router.post('/', async (req: Request, res: Response) => {
 /* ── Update deployment ───────────────────────────────────── */
 
 router.put('/:id', (req: Request, res: Response) => {
-  const { repo_url, branch, deploy_path, deploy_command } = req.body;
+  // Partial PUT — every column we touch here is NOT NULL.
+  const current: any = db.prepare('SELECT * FROM git_deployments WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Deployment not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   db.prepare('UPDATE git_deployments SET repo_url=?, branch=?, deploy_path=?, deploy_command=? WHERE id=?')
-    .run(repo_url, branch, deploy_path, deploy_command, req.params.id);
+    .run(
+      pick('repo_url',       current.repo_url),
+      pick('branch',         current.branch),
+      pick('deploy_path',    current.deploy_path),
+      pick('deploy_command', current.deploy_command),
+      req.params.id,
+    );
   res.json(db.prepare('SELECT * FROM git_deployments WHERE id = ?').get(req.params.id));
 });
 

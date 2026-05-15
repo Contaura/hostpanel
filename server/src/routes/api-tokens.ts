@@ -104,13 +104,27 @@ router.post('/webhooks', adminOnly, async (req: Request, res: Response) => {
 });
 
 router.put('/webhooks/:id', adminOnly, async (req: Request, res: Response) => {
-  const { name, url, secret, events, enabled } = req.body;
-  if (url) {
-    try { await assertHttpTargetAllowed(url); }
+  // Partial PUT — name + url are NOT NULL.
+  const current: any = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Webhook not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
+  const newUrl = pick('url', current.url);
+  if (req.body.url) {
+    try { await assertHttpTargetAllowed(newUrl); }
     catch (e: any) { return res.status(400).json({ error: e.message }); }
   }
+  const newEvents = req.body.events !== undefined
+    ? JSON.stringify(Array.isArray(req.body.events) ? req.body.events : [])
+    : current.events;
   db.prepare('UPDATE webhooks SET name=?, url=?, secret=?, events=?, enabled=? WHERE id=?')
-    .run(name, url, secret || '', JSON.stringify(Array.isArray(events) ? events : []), enabled ? 1 : 0, req.params.id);
+    .run(
+      pick('name',    current.name),
+      newUrl,
+      pick('secret',  current.secret ?? ''),
+      newEvents,
+      pick('enabled', current.enabled) ? 1 : 0,
+      req.params.id,
+    );
   const row = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(req.params.id) as any;
   res.json(scrubWebhook(row));
 });

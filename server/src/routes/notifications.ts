@@ -50,13 +50,21 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
 });
 
 router.put('/:id', adminOnly, async (req: Request, res: Response) => {
-  const { name, url, type, events, secret, enabled } = req.body;
-  if (url && type !== 'email') {
-    try { await assertHttpTargetAllowed(url); }
+  // Partial PUT — fall back to existing values so name/url/type (all
+  // NOT NULL) don't blow up on a body that only toggles `enabled`.
+  const current: any = db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Notification not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
+  const newUrl  = pick('url',  current.url);
+  const newType = pick('type', current.type);
+  if (req.body.url && newType !== 'email') {
+    try { await assertHttpTargetAllowed(newUrl); }
     catch (e: any) { return res.status(400).json({ error: e.message }); }
   }
+  const eventsBody = req.body.events;
+  const newEvents = eventsBody !== undefined ? JSON.stringify(eventsBody) : current.events;
   db.prepare('UPDATE notification_webhooks SET name=?, url=?, type=?, events=?, secret=?, enabled=? WHERE id=?')
-    .run(name, url, type, JSON.stringify(events || []), secret || '', enabled ? 1 : 0, req.params.id);
+    .run(pick('name', current.name), newUrl, newType, newEvents, pick('secret', current.secret ?? ''), pick('enabled', current.enabled) ? 1 : 0, req.params.id);
   const row = db.prepare('SELECT * FROM notification_webhooks WHERE id = ?').get(req.params.id);
   res.json(scrubHook(row));
 });

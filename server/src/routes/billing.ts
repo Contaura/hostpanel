@@ -127,10 +127,24 @@ router.post('/clients', (req, res: Response) => {
 });
 
 router.put('/clients/:id', (req, res: Response) => {
-  const { name, email, phone, company, address, city, country, notes } = req.body;
+  // Partial PUT — name + email are NOT NULL. The rest had `|| ''` defaults
+  // that swallow empty strings, but name/email used to land as raw NULL.
+  const current: any = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Client not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   try {
     db.prepare('UPDATE clients SET name=?, email=?, phone=?, company=?, address=?, city=?, country=?, notes=? WHERE id=?')
-      .run(name, email, phone || '', company || '', address || '', city || '', country || '', notes || '', req.params.id);
+      .run(
+        pick('name',    current.name),
+        pick('email',   current.email),
+        pick('phone',   current.phone   ?? ''),
+        pick('company', current.company ?? ''),
+        pick('address', current.address ?? ''),
+        pick('city',    current.city    ?? ''),
+        pick('country', current.country ?? ''),
+        pick('notes',   current.notes   ?? ''),
+        req.params.id,
+      );
     res.json(db.prepare('SELECT id, name, email, phone, company, address, city, country, notes, portal_enabled, created_at FROM clients WHERE id = ?').get(req.params.id));
   } catch (err: any) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Email already exists' });
