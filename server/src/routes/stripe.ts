@@ -5,16 +5,20 @@ import db from '../db';
 
 const router = Router();
 
-// Lazy-initialize Stripe with the secret key at request time (same pattern as auth.ts env vars)
+function getSetting(key: string): string {
+  return (db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as any)?.value || '';
+}
+
+// Lazy-initialize Stripe — env takes precedence, falls back to DB settings
 function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) throw new Error('STRIPE_SECRET_KEY is not configured in .env');
+  const key = process.env.STRIPE_SECRET_KEY || getSetting('stripe_secret_key');
+  if (!key) throw new Error('Stripe secret key is not configured. Set it in Settings → Stripe.');
   return new StripeLib(key, { apiVersion: '2024-06-20' });
 }
 
 // ── Config ─────────────────────────────────────────────────
 router.get('/config', (_req: Request, res: Response) => {
-  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
+  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || getSetting('stripe_publishable_key');
   if (!publishableKey) return res.json({ configured: false });
   res.json({ configured: true, publishableKey });
 });
@@ -74,7 +78,7 @@ router.post('/checkout', async (req: Request, res: Response) => {
 // Registered in index.ts with express.raw() BEFORE express.json()
 router.post('/webhook', (req: Request, res: Response) => {
   const sig           = req.headers['stripe-signature'] as string | undefined;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || getSetting('stripe_webhook_secret');
 
   let event: any;
 

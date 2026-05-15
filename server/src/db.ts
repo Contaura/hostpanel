@@ -325,6 +325,10 @@ seedSetting('smtp_secure', '0');
 seedSetting('paypal_client_id', '');
 seedSetting('paypal_secret', '');
 seedSetting('paypal_mode', 'sandbox');
+seedSetting('stripe_secret_key', '');
+seedSetting('stripe_publishable_key', '');
+seedSetting('stripe_webhook_secret', '');
+seedSetting('stripe_price_id', '');
 seedSetting('panel_2fa_required', '0');
 
 export default db;

@@ -4,7 +4,7 @@ import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
 import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock, X } from 'lucide-react';
 
-type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay' | 'password-policy';
+type Tab = 'general' | 'smtp' | 'billing' | 'stripe' | 'paypal' | 'security' | 'relay' | 'password-policy';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const auth = () => ({ Authorization: 'Bearer ' + token() });
@@ -20,6 +20,8 @@ export default function Settings() {
   const [testEmail, setTestEmail] = useState('');
   const [testing, setTesting] = useState(false);
   const [smtpPass, setSmtpPass] = useState('');
+  const [stripeSecretKey, setStripeSecretKey] = useState('');
+  const [stripeWebhookSecret, setStripeWebhookSecret] = useState('');
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -63,6 +65,8 @@ export default function Settings() {
   async function save() {
     const payload = { ...settings };
     if (smtpPass) payload.smtp_pass = smtpPass;
+    if (stripeSecretKey) payload.stripe_secret_key = stripeSecretKey;
+    if (stripeWebhookSecret) payload.stripe_webhook_secret = stripeWebhookSecret;
     try { await aput('/api/settings/', payload); success('Settings saved'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed to save'); }
   }
@@ -120,6 +124,7 @@ export default function Settings() {
     { id: 'smtp'     as Tab, label: 'SMTP Email',    icon: Mail      },
     { id: 'relay'    as Tab, label: 'Mail Relay',    icon: Server    },
     { id: 'billing'  as Tab, label: 'Billing',       icon: CreditCard},
+    { id: 'stripe'   as Tab, label: 'Stripe',        icon: CreditCard},
     { id: 'paypal'   as Tab, label: 'PayPal',        icon: CreditCard},
     { id: 'security' as Tab, label: 'Security',      icon: Shield    },
     { id: 'password-policy' as Tab, label: 'Password Policy', icon: Lock },
@@ -284,6 +289,35 @@ export default function Settings() {
             ))}
           </div>
           <button className="btn-primary" onClick={savePwPolicy}><Save size={14} /> Save Password Policy</button>
+        </div>
+      )}
+
+      {/* Stripe */}
+      {tab === 'stripe' && (
+        <div className="card p-5 space-y-4 max-w-xl">
+          <h3 className="font-semibold text-sm flex items-center gap-2"><CreditCard size={15} /> Stripe Integration</h3>
+          <div>
+            <label className="label">Publishable Key</label>
+            <input className="input font-mono text-xs" placeholder="pk_live_..." value={settings.stripe_publishable_key || ''} onChange={e => set('stripe_publishable_key', e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Secret Key</label>
+            <input type="password" className="input font-mono text-xs" placeholder="(leave blank to keep current)" value={stripeSecretKey} onChange={e => setStripeSecretKey(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Webhook Secret</label>
+            <input type="password" className="input font-mono text-xs" placeholder="(leave blank to keep current)" value={stripeWebhookSecret} onChange={e => setStripeWebhookSecret(e.target.value)} />
+            <p className="text-xs text-slate-400 mt-1">Webhook endpoint: <span className="font-mono">{window.location.origin}/api/stripe/webhook</span></p>
+          </div>
+          <div>
+            <label className="label">Default Price ID <span className="text-slate-400 font-normal">(optional)</span></label>
+            <input className="input font-mono text-xs" placeholder="price_..." value={settings.stripe_price_id || ''} onChange={e => set('stripe_price_id', e.target.value)} />
+          </div>
+          <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-xs text-blue-700 dark:text-blue-300 space-y-1">
+            <p>Get your keys at <strong>dashboard.stripe.com</strong> → Developers → API keys.</p>
+            <p>Register the webhook at <strong>dashboard.stripe.com</strong> → Developers → Webhooks → Add endpoint.</p>
+          </div>
+          <button className="btn-primary" onClick={save}><Save size={14} /> Save Stripe Settings</button>
         </div>
       )}
 

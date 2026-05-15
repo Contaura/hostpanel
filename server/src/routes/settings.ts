@@ -34,6 +34,8 @@ router.get('/', (_req: Request, res: Response) => {
   // Never send secrets over the wire
   delete obj.smtp_pass;
   delete obj.paypal_secret;
+  delete obj.stripe_secret_key;
+  delete obj.stripe_webhook_secret;
   res.json(obj);
 });
 
@@ -44,6 +46,7 @@ const ALLOWED_KEYS = new Set([
   'currency', 'tax_rate', 'tax_name', 'invoice_prefix',
   'smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'smtp_secure',
   'paypal_client_id', 'paypal_secret', 'paypal_mode',
+  'stripe_secret_key', 'stripe_publishable_key', 'stripe_webhook_secret', 'stripe_price_id',
   'panel_2fa_required',
 ]);
 
