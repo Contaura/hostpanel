@@ -123,8 +123,10 @@ router.get('/webmail', async (_req: Request, res: Response) => {
   const webmailUrl = process.env.WEBMAIL_URL || '';
   const installed: string[] = [];
   try {
-    const { stdout } = await execAsync('which roundcube 2>/dev/null || find /var/www -name "index.php" -path "*/roundcube*" 2>/dev/null | head -1').catch(() => ({ stdout: '' }));
-    if (stdout.trim()) installed.push('Roundcube');
+    const { stdout } = await execAsync(
+      '(rpm -q roundcubemail 2>/dev/null || test -d /usr/share/roundcubemail) && echo found || true'
+    ).catch(() => ({ stdout: '' }));
+    if (stdout.trim() === 'found') installed.push('Roundcube');
   } catch (_) {}
   res.json({ webmailUrl, installed });
 });
