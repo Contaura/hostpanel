@@ -13,6 +13,9 @@ function safePath(userPath: string): string {
   if (!resolved.startsWith(path.resolve(BASE_DIR))) {
     throw new Error('Path traversal not allowed');
   }
+  if (/[$`"\\!]/.test(resolved)) {
+    throw new Error('Path contains invalid characters');
+  }
   return resolved;
 }
 
