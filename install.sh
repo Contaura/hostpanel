@@ -26,11 +26,24 @@ echo "[1/9] Node.js $(node -v) ready."
 # ── 2/9  System packages ─────────────────────────────────────────────────────
 echo "[2/9] Installing system packages..."
 dnf install -y epel-release 2>/dev/null || true
+# php-cli + php-mysqlnd + php-curl are needed for the Script Installer's
+# WordPress/Joomla/Drupal flows: roundcubemail pulls in php-fpm + a few
+# extensions, but not the CLI binary or the MySQL driver, so WordPress
+# would extract fine and then explode on first hit. Install them up front.
 dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
-               curl tar gzip openssl make gcc-c++ python3 roundcubemail
+               curl tar gzip openssl make gcc-c++ python3 roundcubemail \
+               php-cli php-mysqlnd php-curl php-gd
 
-systemctl enable --now httpd mariadb postfix dovecot named vsftpd
+# wp-cli — required by every endpoint in /api/wordpress/*. It's not in the
+# RHEL repos so pull the official phar release. Pinned to LATEST stable to
+# match what the WP team currently signs.
+if [[ ! -x /usr/local/bin/wp ]]; then
+  curl -fsSL -o /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+  chmod +x /usr/local/bin/wp
+fi
+
+systemctl enable --now httpd mariadb postfix dovecot named vsftpd php-fpm
 
 # ── 3/9  MariaDB ─────────────────────────────────────────────────────────────
 echo "[3/9] Configuring MariaDB..."
