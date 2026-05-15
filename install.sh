@@ -264,6 +264,54 @@ Alias /roundcube /usr/share/roundcubemail
     Require all granted
 </Directory>
 RCUBE
+
+  # The roundcubemail RPM ships /etc/roundcubemail with only .sample / .dist
+  # files — without a real config.inc.php the webmail page shows the
+  # "CONFIGURATION ERROR: config.inc.php was not found" message. Bootstrap
+  # the minimal viable config (random DB password + DES key, local Dovecot
+  # / Postfix) only when the file doesn't already exist so re-running the
+  # installer doesn't rotate working credentials.
+  if [[ ! -f /etc/roundcubemail/config.inc.php ]]; then
+    RC_DB=roundcubemail
+    RC_USER=roundcube
+    RC_PASS=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
+    DES_KEY=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
+    # mysql_secure_installation in step 3 may have set a root password; pass
+    # it through if we captured one, otherwise rely on socket auth.
+    MYSQL_ROOT_ARGS=()
+    [[ -n "${DB_ROOT_PASS}" ]] && MYSQL_ROOT_ARGS=(-p"${DB_ROOT_PASS}")
+
+    mysql -u root "${MYSQL_ROOT_ARGS[@]}" <<SQL
+CREATE DATABASE IF NOT EXISTS \`${RC_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${RC_USER}'@'localhost' IDENTIFIED BY '${RC_PASS}';
+GRANT ALL PRIVILEGES ON \`${RC_DB}\`.* TO '${RC_USER}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+    mysql -u "${RC_USER}" -p"${RC_PASS}" "${RC_DB}" </usr/share/roundcubemail/SQL/mysql.initial.sql
+
+    cat >/etc/roundcubemail/config.inc.php <<PHP
+<?php
+\$config = [];
+\$config['db_dsnw']      = 'mysql://${RC_USER}:${RC_PASS}@localhost/${RC_DB}';
+\$config['imap_host']    = 'localhost:143';
+\$config['smtp_host']    = 'localhost:587';
+\$config['smtp_user']    = '%u';
+\$config['smtp_pass']    = '%p';
+\$config['des_key']      = '${DES_KEY}';
+\$config['support_url']  = '';
+\$config['product_name'] = 'HostPanel Webmail';
+\$config['plugins']      = [];
+\$config['language']     = 'en_US';
+\$config['skin']         = 'elastic';
+PHP
+    chown root:apache /etc/roundcubemail/config.inc.php
+    chmod 640 /etc/roundcubemail/config.inc.php
+    mkdir -p /var/lib/roundcubemail /var/log/roundcubemail
+    chown apache:apache /var/lib/roundcubemail /var/log/roundcubemail
+    # Block the installer dir from being web-reachable now that setup is done.
+    echo "Require all denied" >/usr/share/roundcubemail/installer/.htaccess
+  fi
+
   # Roundcube needs PHP — make sure PHP-FPM is running so Apache can fcgi to it.
   systemctl enable --now php-fpm
   echo "  Roundcube webmail configured at /roundcube"
