@@ -39,7 +39,7 @@ export default function SSHKeys() {
 
   async function load() {
     try {
-      const { data } = await axios.get<SSHKey[]>('/api/sshkeys/list');
+      const { data } = await axios.get<SSHKey[]>('/api/ssh-keys/list');
       setKeys(data);
     } catch { setKeys([]); } finally { setPageLoading(false); }
   }
@@ -53,7 +53,7 @@ export default function SSHKeys() {
   async function addKey(e: FormEvent) {
     e.preventDefault(); setLoading(true);
     try {
-      await axios.post('/api/sshkeys/add', { key: newKey });
+      await axios.post('/api/ssh-keys/add', { key: newKey });
       toast.success('SSH key added');
       setNewKey(''); setShowForm(false); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to add key'); }
@@ -64,7 +64,7 @@ export default function SSHKeys() {
     if (!await confirm('Remove this SSH key? You may lose SSH access if it\'s the only key.')) return;
     setRemoving(id);
     try {
-      await axios.delete(`/api/sshkeys/${id}`);
+      await axios.delete(`/api/ssh-keys/${id}`);
       toast.success('SSH key removed'); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setRemoving(null); }
@@ -73,7 +73,7 @@ export default function SSHKeys() {
   async function loadAcctKeys() {
     if (!acctUsername.trim()) return;
     try {
-      const { data } = await axios.get<SSHKey[]>(`/api/sshkeys/account/${acctUsername.trim()}`);
+      const { data } = await axios.get<SSHKey[]>(`/api/ssh-keys/account/${acctUsername.trim()}`);
       setAcctKeys(data);
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); setAcctKeys([]); }
   }
@@ -81,7 +81,7 @@ export default function SSHKeys() {
   async function addAcctKey(e: FormEvent) {
     e.preventDefault(); setAcctLoading(true);
     try {
-      await axios.post(`/api/sshkeys/account/${acctUsername.trim()}/add`, { key: newAcctKey });
+      await axios.post(`/api/ssh-keys/account/${acctUsername.trim()}/add`, { key: newAcctKey });
       toast.success('Key added'); setNewAcctKey(''); setShowAcctForm(false); loadAcctKeys();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setAcctLoading(false); }
@@ -90,7 +90,7 @@ export default function SSHKeys() {
   async function removeAcctKey(id: number) {
     if (!await confirm('Remove this SSH key?')) return;
     setRemovingAcct(id);
-    try { await axios.delete(`/api/sshkeys/account/${acctUsername.trim()}/${id}`); toast.success('Removed'); loadAcctKeys(); }
+    try { await axios.delete(`/api/ssh-keys/account/${acctUsername.trim()}/${id}`); toast.success('Removed'); loadAcctKeys(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setRemovingAcct(null); }
   }
