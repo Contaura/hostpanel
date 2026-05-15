@@ -58,14 +58,28 @@ import serverInfoRoutes      from './routes/server-info';
 import mailToolsRoutes       from './routes/mail-tools';
 import securityScannerRoutes from './routes/security-scanner';
 import { authenticateToken } from './middleware/auth';
+import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
 
 dotenv.config();
+
+// Warn on insecure defaults in production
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'hostpanel-secret-change-in-production') {
+    console.warn('[SECURITY] JWT_SECRET is set to the insecure default. Set a strong random value in your .env file.');
+  }
+  if (!process.env.ADMIN_PASS_HASH || process.env.ADMIN_PASS_HASH === '$2b$12$examplehashhere') {
+    console.warn('[SECURITY] ADMIN_PASS_HASH is set to the example value. Change your admin password immediately.');
+  }
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+
+// IP whitelist — blocks non-listed IPs when any entries exist
+app.use('/api/', ipWhitelistMiddleware);
 
 // Global API rate limit — 300 req/min per IP
 app.use('/api/', rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, slow down.' } }));

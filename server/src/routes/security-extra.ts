@@ -6,6 +6,7 @@ const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
+import { validatePassword } from '../utils/password-policy';
 
 const router = Router();
 
@@ -78,9 +79,11 @@ router.post('/change-password', async (req: AuthRequest, res: Response) => {
   const username = (req as any).user?.username || process.env.ADMIN_USER || 'admin';
   const { currentPassword, newPassword } = req.body;
 
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' });
   }
+  const pwError = validatePassword(newPassword);
+  if (pwError) return res.status(400).json({ error: pwError });
 
   const dbUser = db.prepare('SELECT password_hash FROM admin_users WHERE username = ?').get(username) as any;
 
@@ -99,7 +102,7 @@ router.post('/change-password', async (req: AuthRequest, res: Response) => {
   db.prepare("INSERT INTO admin_users (username, email, password_hash, role) VALUES (?, ?, ?, 'superadmin') ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash")
     .run(username, username + '@local', newHash);
 
-  res.json({ success: true, message: 'Password updated. New hash: ' + newHash });
+  res.json({ success: true });
 });
 
 /* ── IP Whitelist ────────────────────────────────────────── */
