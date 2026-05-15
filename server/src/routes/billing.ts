@@ -185,17 +185,11 @@ router.delete('/invoices/:id', (req, res: Response) => {
 
 /* ─── Invoice PDF ────────────────────────────────────────── */
 
-router.get('/invoices/:id/pdf', (req, res: Response) => {
-  const row: any = db.prepare(`
-    SELECT i.*, c.name as client_name, c.email as client_email, c.company, c.address, c.city, c.country,
-           a.domain as account_domain
-    FROM invoices i
-    LEFT JOIN clients  c ON i.client_id  = c.id
-    LEFT JOIN accounts a ON i.account_id = a.id
-    WHERE i.id = ?
-  `).get(req.params.id);
-  if (!row) return res.status(404).json({ error: 'Invoice not found' });
-
+// Pulled out of the /invoices/:id/pdf handler so the client portal can reuse
+// the same renderer for its own /api/portal/invoices/:id/pdf endpoint (after
+// the portal's own client-ownership check on the row). Anything that lands a
+// fully-hydrated invoice row here gets a streamed PDF back.
+export function renderInvoicePdf(row: any, res: Response) {
   const company = getSetting('company_name') || 'HostPanel';
   const companyEmail = getSetting('company_email') || '';
   const companyAddr  = getSetting('company_address') || '';
@@ -282,6 +276,19 @@ router.get('/invoices/:id/pdf', (req, res: Response) => {
   doc.fontSize(10).font('Helvetica-Bold').fillColor('white').text(row.status.toUpperCase(), 55, y + 6);
 
   doc.end();
+}
+
+router.get('/invoices/:id/pdf', (req, res: Response) => {
+  const row: any = db.prepare(`
+    SELECT i.*, c.name as client_name, c.email as client_email, c.company, c.address, c.city, c.country,
+           a.domain as account_domain
+    FROM invoices i
+    LEFT JOIN clients  c ON i.client_id  = c.id
+    LEFT JOIN accounts a ON i.account_id = a.id
+    WHERE i.id = ?
+  `).get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Invoice not found' });
+  renderInvoicePdf(row, res);
 });
 
 /* ─── Email invoice ──────────────────────────────────────── */

@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload, Cloud, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
+import { openAuthenticatedDownload } from '../lib/api';
 
 interface Backup {
   name: string;
@@ -375,11 +376,12 @@ export default function BackupManager() {
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                          <a href={`/api/backup/download/${encodeURIComponent(b.name)}`}
+                          <button
+                            onClick={() => openAuthenticatedDownload(`/api/backup/download/${encodeURIComponent(b.name)}`, { filename: b.name }).catch(e => toast.error(e.message || 'Download failed'))}
                             className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30"
                             title="Download">
                             <Download size={13} />
-                          </a>
+                          </button>
                           <button onClick={() => pushToRemote(b.name)} disabled={pushingRemote === b.name}
                             className="btn-icon hover:!text-sky-600 dark:hover:!text-sky-400 hover:!bg-sky-50 dark:hover:!bg-sky-900/30"
                             title="Push to remote storage">

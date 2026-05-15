@@ -111,6 +111,23 @@ router.get('/invoices/:id', clientAuth, (req: Request, res: Response) => {
   res.json({ invoice, payments });
 });
 
+// Portal-scoped PDF download. The WHERE i.client_id = ? clause is the
+// authorization boundary — a client can only download invoices that belong
+// to them, never another client's. Shares the renderer with /api/billing.
+router.get('/invoices/:id/pdf', clientAuth, async (req: Request, res: Response) => {
+  const { renderInvoicePdf } = await import('./billing');
+  const row: any = db.prepare(`
+    SELECT i.*, c.name as client_name, c.email as client_email, c.company, c.address, c.city, c.country,
+           a.domain as account_domain
+    FROM invoices i
+    LEFT JOIN clients  c ON i.client_id  = c.id
+    LEFT JOIN accounts a ON i.account_id = a.id
+    WHERE i.id = ? AND i.client_id = ?
+  `).get(req.params.id, (req as any).clientId);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  renderInvoicePdf(row, res);
+});
+
 // Admin set-password is in billing.ts (POST /billing/clients/:id/portal-password) — protected by authenticateToken there
 
 /* ── Client 2FA management (authenticated) ───────────────── */

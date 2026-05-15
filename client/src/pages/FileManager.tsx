@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
+import { openAuthenticatedDownload } from '../lib/api';
 
 interface FileItem {
   name: string; type: 'file' | 'directory';
@@ -345,9 +346,11 @@ export default function FileManager() {
                     {item.type === 'file' && (
                       <>
                         <button onClick={() => openEditor(item)} className="btn-icon" title="Edit"><Edit3 size={13} /></button>
-                        <a href={`/api/files/download?path=${encodeURIComponent(`${currentPath}/${item.name}`)}`} className="btn-icon" title="Download">
+                        <button
+                          onClick={() => openAuthenticatedDownload(`/api/files/download?path=${encodeURIComponent(`${currentPath}/${item.name}`)}`, { filename: item.name }).catch(e => toast.error(e.message || 'Download failed'))}
+                          className="btn-icon" title="Download">
                           <Download size={13} />
-                        </a>
+                        </button>
                         {/\.(zip|tar\.gz|tgz|tar\.bz2|tar)$/i.test(item.name) && (
                           <button onClick={() => extractItem(item)} className="btn-icon text-amber-500" title="Extract"><PackageOpen size={13} /></button>
                         )}

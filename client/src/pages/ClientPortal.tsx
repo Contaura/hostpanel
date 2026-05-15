@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, QrCode, Lock } from 'lucide-react';
 import { useConfirm } from '../context/ConfirmContext';
 import { safeHttpUrl } from '../lib/safeUrl';
+import { openAuthenticatedDownload } from '../lib/api';
 
 interface Invoice { id: number; invoice_number: string; amount: number; currency: string; status: string; due_date: string; paid_date: string; created_at: string; account_domain: string; notes: string }
 
@@ -208,9 +209,11 @@ export default function ClientPortal() {
                     <div className="font-bold text-slate-900 dark:text-white">{inv.currency} {Number(inv.amount).toFixed(2)}</div>
 
                     <div className="flex items-center gap-2">
-                      <a href={`/api/billing/invoices/${inv.id}/pdf`} target="_blank" rel="noopener noreferrer" className="btn-ghost text-slate-500" title="Download PDF">
+                      <button
+                        onClick={() => openAuthenticatedDownload(`/api/portal/invoices/${inv.id}/pdf`, { tokenKey: 'hp_portal_token' }).catch(e => setToast({ type: 'error', msg: e.message || 'PDF failed' }))}
+                        className="btn-ghost text-slate-500" title="Download PDF">
                         <Download size={14} />
-                      </a>
+                      </button>
                       {canPay && (
                         <>
                           <button className="btn-primary text-xs px-3 py-1.5" onClick={() => payStripe(inv)} disabled={payingId === inv.id}>

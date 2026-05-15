@@ -5,6 +5,7 @@ import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCi
 import { useToast } from '../components/Toast';
 import { useConfirm } from '../context/ConfirmContext';
 import { safeHttpUrl } from '../lib/safeUrl';
+import { openAuthenticatedDownload } from '../lib/api';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() });
@@ -194,6 +195,11 @@ export default function Billing() {
       setShowClientForm(false); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
     finally { setLoading(false); }
+  }
+
+  async function downloadInvoicePdf(id: number) {
+    try { await openAuthenticatedDownload(`/api/billing/invoices/${id}/pdf`); }
+    catch (e: any) { toast.error(e.message || 'PDF failed'); }
   }
 
   async function addInvoice() {
@@ -464,10 +470,10 @@ export default function Billing() {
                         <td className="table-cell"><span className={STATUS_STYLE[inv.status] || 'badge-gray'}>{inv.status}</span></td>
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                            <a href={`/api/billing/invoices/${inv.id}/pdf`} target="_blank" rel="noopener noreferrer"
+                            <button onClick={() => downloadInvoicePdf(inv.id)}
                               className="btn-icon hover:!text-indigo-600 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30" title="Download PDF">
                               <Download size={13} />
-                            </a>
+                            </button>
                             <button onClick={() => emailInvoice(inv.id)} disabled={emailingId === inv.id}
                               className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Email invoice to client">
                               {emailingId === inv.id ? <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> : <Mail size={13} />}
