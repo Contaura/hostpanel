@@ -406,9 +406,23 @@ router.post('/recurring', (req, res: Response) => {
 });
 
 router.put('/recurring/:id', (req, res: Response) => {
-  const { amount, currency, cycle, next_run, status, notes } = req.body;
+  // Partial update: a PUT that omits a NOT NULL column (currency) used to
+  // 500 with "NOT NULL constraint failed". Fetch the row and fall back to
+  // its existing values — same pattern we already use for plans and
+  // autoresponders.
+  const current: any = db.prepare('SELECT * FROM recurring_schedules WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Recurring schedule not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   db.prepare('UPDATE recurring_schedules SET amount=?, currency=?, cycle=?, next_run=?, status=?, notes=? WHERE id=?')
-    .run(amount, currency, cycle, next_run, status, notes || '', req.params.id);
+    .run(
+      pick('amount',   current.amount),
+      pick('currency', current.currency),
+      pick('cycle',    current.cycle),
+      pick('next_run', current.next_run),
+      pick('status',   current.status),
+      pick('notes',    current.notes ?? ''),
+      req.params.id,
+    );
   res.json(db.prepare('SELECT * FROM recurring_schedules WHERE id = ?').get(req.params.id));
 });
 
@@ -466,8 +480,12 @@ router.post('/credit-notes', (req, res: Response) => {
 
 router.patch('/credit-notes/:id/apply', (req, res: Response) => {
   const { invoice_id } = req.body;
-  const cn = db.prepare('SELECT * FROM credit_notes WHERE id = ? AND status="active"').get(req.params.id) as any;
-  if (!cn) return res.status(404).json({ error: 'Active credit note not found' });
+  // The credit_notes schema's status default is 'issued' (not 'active'),
+  // so the prior `status="active"` filter never matched and every /apply
+  // call 404'd. An applied/used note is "used"; everything else is
+  // "issued" and applicable.
+  const cn = db.prepare("SELECT * FROM credit_notes WHERE id = ? AND status='issued'").get(req.params.id) as any;
+  if (!cn) return res.status(404).json({ error: 'Unapplied credit note not found' });
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoice_id) as any;
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
   const newAmount = Math.max(0, Number(invoice.amount) - Number(cn.amount));

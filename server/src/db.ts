@@ -307,6 +307,23 @@ tryAlter("ALTER TABLE recurring_schedules ADD COLUMN next_run TEXT");
 tryAlter("ALTER TABLE recurring_schedules ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
 tryAlter("ALTER TABLE recurring_schedules ADD COLUMN notes TEXT DEFAULT ''");
 
+// credit_notes route INSERTs credit_number + currency, but the original
+// schema only had id/client_id/invoice_id/amount/reason/status. Add the
+// missing columns so POST /billing/credit-notes stops 500'ing with
+// "no such column: credit_number".
+tryAlter("ALTER TABLE credit_notes ADD COLUMN credit_number TEXT");
+tryAlter("ALTER TABLE credit_notes ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'");
+
+// recurring_schedules originally had `interval` + `next_due` as NOT NULL
+// columns. A later migration added `cycle` + `next_run` as their
+// replacements, but the route handlers only set the new columns — so
+// every POST /billing/recurring 500'd with "NOT NULL constraint failed:
+// recurring_schedules.next_due". Drop the dead columns (SQLite 3.35+
+// supports DROP COLUMN, this box runs 3.53). tryAlter swallows the
+// "no such column" error on already-migrated installs.
+tryAlter('ALTER TABLE recurring_schedules DROP COLUMN "interval"');
+tryAlter('ALTER TABLE recurring_schedules DROP COLUMN next_due');
+
 // Seed default plans if empty
 const planCount = (db.prepare('SELECT COUNT(*) as n FROM plans').get() as { n: number }).n;
 if (planCount === 0) {

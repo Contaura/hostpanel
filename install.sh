@@ -35,7 +35,7 @@ dnf config-manager --set-enabled crb 2>/dev/null || true
 # would extract fine and then explode on first hit. Install them up front.
 dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
-               curl tar gzip openssl make gcc-c++ python3 roundcubemail \
+               curl tar gzip zip unzip openssl make gcc-c++ python3 roundcubemail \
                php-cli php-mysqlnd php-curl php-gd \
                opendkim opendkim-tools
 

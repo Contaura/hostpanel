@@ -200,6 +200,15 @@ router.post('/account/:user', adminOnly, async (req: AuthRequest, res: Response)
   const { schedule, command } = req.body;
   if (!schedule || !command) return res.status(400).json({ error: 'schedule and command required' });
   if (!CRON_RE.test(schedule.trim())) return res.status(400).json({ error: 'Invalid cron schedule' });
+  // crontab -u <user> requires <user> to be a real OS account. HostPanel's
+  // "accounts" are DB rows backed by Apache vhosts, not necessarily Linux
+  // users, so check id <user> first and surface a clear 404 instead of the
+  // raw 500 "user 'foo' unknown" that crontab spits out.
+  try {
+    await execAsync(`id "${user}" 2>/dev/null`);
+  } catch {
+    return res.status(404).json({ error: `No OS user named '${user}'. Create the user (useradd ${user}) before adding a per-account cron job.` });
+  }
   try {
     const lines = await getUserCrontab(user);
     const newLine = `${schedule.trim()} ${command.trim()}`;
