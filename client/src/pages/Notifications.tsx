@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Bell, Send, Pencil } from 'lucide-react';
+import { Plus, Trash2, Bell, Send, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/notifications${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -14,6 +14,9 @@ export default function Notifications() {
   const [adding, setAdding] = useState(false);
   const [editingHookId, setEditingHookId] = useState<number | null>(null);
   const [editHookForm, setEditHookForm] = useState({ name: '', url: '', type: 'webhook', events: [] as string[], secret: '' });
+  const [hookSearch, setHookSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [testing, setTesting] = useState<number | null>(null);
 
   useEffect(() => { load(); api('/events').then(r => r.json()).then(setAllEvents); }, []);
 
@@ -32,15 +35,21 @@ export default function Notifications() {
   }
 
   async function del(id: number) {
-    await api(`/${id}`, { method: 'DELETE' });
-    setHooks(h => h.filter(x => x.id !== id));
+    setDeleting(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      setHooks(h => h.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
   }
 
   async function test(id: number) {
-    const r = await api(`/${id}/test`, { method: 'POST' });
-    const d = await r.json();
-    if (d.error) toast.error(d.error);
-    else toast.success('Test notification sent');
+    setTesting(id);
+    try {
+      const r = await api(`/${id}/test`, { method: 'POST' });
+      const d = await r.json();
+      if (d.error) toast.error(d.error);
+      else toast.success('Test notification sent');
+    } finally { setTesting(null); }
   }
 
   async function toggleEnabled(hook: any) {
@@ -133,8 +142,18 @@ export default function Notifications() {
       )}
 
       <div className="space-y-3">
-        {hooks.length === 0 && <p className="text-sm text-slate-500">No notification channels configured.</p>}
-        {hooks.map((h: any) => (
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search webhooks…" value={hookSearch} onChange={e => setHookSearch(e.target.value)} />
+          </div>
+        </div>
+        {(() => {
+          const q = hookSearch.trim().toLowerCase();
+          const visible = q ? hooks.filter((h: any) => h.name.toLowerCase().includes(q) || h.url.toLowerCase().includes(q) || (h.events || []).some((e: string) => e.toLowerCase().includes(q))) : hooks;
+          if (hooks.length === 0) return <p className="text-sm text-slate-500">No notification channels configured.</p>;
+          if (visible.length === 0) return <p className="text-sm text-slate-400">No webhooks match "{hookSearch}".</p>;
+          return <>{visible.map((h: any) => (
           <div key={h.id} className="card space-y-3">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
@@ -156,8 +175,8 @@ export default function Notifications() {
                   setEditingHookId(h.id);
                   setEditHookForm({ name: h.name, url: h.url, type: h.type, events: Array.isArray(h.events) ? h.events : [], secret: '' });
                 }}><Pencil size={13} /></button>
-                <button className="btn-icon" title="Send test" onClick={() => test(h.id)}><Send size={13} /></button>
-                <button className="btn-icon text-red-500" onClick={() => del(h.id)}><Trash2 size={13} /></button>
+                <button className="btn-icon" title="Send test" disabled={testing === h.id} onClick={() => test(h.id)}><Send size={13} /></button>
+                <button className="btn-icon text-red-500" disabled={deleting === h.id} onClick={() => del(h.id)}><Trash2 size={13} /></button>
               </div>
             </div>
 
@@ -213,7 +232,8 @@ export default function Notifications() {
               </div>
             )}
           </div>
-        ))}
+        ))}</>;
+        })()}
       </div>
     </div>
   );

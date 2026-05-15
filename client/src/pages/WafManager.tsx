@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Shield, Ban, FileText, Power } from 'lucide-react';
+import { RefreshCw, Shield, Ban, FileText, Power, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 
 const api = (p: string, o?: RequestInit) => fetch(`/api/waf${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
@@ -16,6 +16,7 @@ export default function WafManager() {
   const [unbanIp, setUnbanIp] = useState('');
   const [banJail, setBanJail] = useState('');
   const [banIp, setBanIp] = useState('');
+  const [ruleSearch, setRuleSearch] = useState('');
 
   async function load() {
     const [w, f] = await Promise.all([api('/modsec').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
@@ -120,33 +121,47 @@ export default function WafManager() {
       {tab === 'rules' && (
         <div className="space-y-4">
           <div className="card overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
+            <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between gap-3">
               <p className="text-sm font-medium">ModSecurity Rule Files</p>
-              <button className="btn-secondary text-xs" onClick={() => { setRulesLoaded(false); loadRules(); }}><RefreshCw size={12} /> Reload</button>
-            </div>
-            {rules.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 text-sm">
-                <FileText size={28} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
-                No rule files found
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search rules…" value={ruleSearch} onChange={e => setRuleSearch(e.target.value)} />
+                </div>
+                <button className="btn-secondary text-xs" onClick={() => { setRulesLoaded(false); loadRules(); }}><RefreshCw size={12} /> Reload</button>
               </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700">
-                  <tr>
-                    <th className="table-header-cell">Rule File</th>
-                    <th className="table-header-cell">Path</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rules.map((r: any, i: number) => (
-                    <tr key={i} className="border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30">
-                      <td className="table-cell font-mono text-xs font-medium">{r.name}</td>
-                      <td className="table-cell font-mono text-xs text-slate-500 truncate max-w-xs">{r.file}</td>
+            </div>
+            {(() => {
+              if (rules.length === 0) return (
+                <div className="p-8 text-center text-slate-400 text-sm">
+                  <FileText size={28} className="mx-auto mb-2 text-slate-300 dark:text-slate-600" />
+                  No rule files found
+                </div>
+              );
+              const q = ruleSearch.trim().toLowerCase();
+              const visible = q ? rules.filter((r: any) => r.name.toLowerCase().includes(q) || r.file.toLowerCase().includes(q)) : rules;
+              if (visible.length === 0) return (
+                <div className="p-8 text-center text-slate-400 text-sm">No rules match "{ruleSearch}"</div>
+              );
+              return (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700">
+                    <tr>
+                      <th className="table-header-cell">Rule File</th>
+                      <th className="table-header-cell">Path</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {visible.map((r: any, i: number) => (
+                      <tr key={i} className="border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                        <td className="table-cell font-mono text-xs font-medium">{r.name}</td>
+                        <td className="table-cell font-mono text-xs text-slate-500 truncate max-w-xs">{r.file}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              );
+            })()}
           </div>
           <p className="text-xs text-slate-400">Rule files are loaded from the ModSecurity rules directory. {rules.length > 0 && `${rules.length} file${rules.length !== 1 ? 's' : ''} found.`}</p>
         </div>
