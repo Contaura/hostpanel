@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, QrCode, Lock } from 'lucide-react';
+import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, Lock, Server, Globe, Mail, Plus, Trash2, KeyRound } from 'lucide-react';
 import { useConfirm } from '../context/ConfirmContext';
 import { safeHttpUrl } from '../lib/safeUrl';
 import { openAuthenticatedDownload } from '../lib/api';
 
 interface Invoice { id: number; invoice_number: string; amount: number; currency: string; status: string; due_date: string; paid_date: string; created_at: string; account_domain: string; notes: string }
+interface PortalAccount { id: number; username: string; domain: string; status: string; expires_at: string | null; created_at: string; plan_name?: string; plan_price?: number; disk_quota?: number; email_accts?: number }
+interface DnsRecord { name: string; type: string; value: string; ttl: string }
+interface EmailAcct { email: string }
 
 function portalAuth() { return { Authorization: 'Bearer ' + (localStorage.getItem('hp_portal_token') || '') }; }
 const api   = (p: string) => axios.get(p, { headers: portalAuth() });
@@ -24,18 +27,34 @@ export default function ClientPortal() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const [params] = useSearchParams();
-  const [tab, setTab] = useState<'invoices' | 'security'>('invoices');
+  const [tab, setTab] = useState<'invoices' | 'hosting' | 'security'>('invoices');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [client, setClient]     = useState<any>(null);
   const [loading, setLoading]   = useState(true);
   const [toast, setToast]       = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [payingId, setPayingId] = useState<number | null>(null);
 
+  // Hosting state
+  const [accounts, setAccounts]                 = useState<PortalAccount[]>([]);
+  const [accountsLoaded, setAccountsLoaded]     = useState(false);
+  const [selectedAccount, setSelectedAccount]   = useState<PortalAccount | null>(null);
+  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'dns' | 'email'>('details');
+  const [usage, setUsage]                       = useState<{ disk_bytes: number } | null>(null);
+  const [dnsRecords, setDnsRecords]             = useState<DnsRecord[]>([]);
+  const [dnsForm, setDnsForm]                   = useState({ name: '', type: 'A', value: '', ttl: '3600' });
+  const [emailAccts, setEmailAccts]             = useState<EmailAcct[]>([]);
+  const [emailForm, setEmailForm]               = useState({ user: '', password: '' });
+  const [hostingBusy, setHostingBusy]           = useState(false);
+
   // 2FA state
   const [totpStatus, setTotpStatus]     = useState<{ enabled: boolean } | null>(null);
   const [totpSetup, setTotpSetup]       = useState<{ qr: string; secret: string } | null>(null);
   const [totpCode, setTotpCode]         = useState('');
   const [totpLoading, setTotpLoading]   = useState(false);
+
+  // Password change
+  const [pwForm, setPwForm]   = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [pwBusy, setPwBusy]   = useState(false);
 
   const portalName = localStorage.getItem('hp_portal_name') || 'Client';
 
@@ -50,6 +69,18 @@ export default function ClientPortal() {
   }, []);
 
   useEffect(() => { if (tab === 'security') loadTotpStatus(); }, [tab]);
+  useEffect(() => { if (tab === 'hosting' && !accountsLoaded) loadAccounts(); }, [tab]);
+  useEffect(() => {
+    // When the user picks an account, refresh its sub-tab data based on
+    // which sub-tab is currently active. Switching sub-tabs lazily fetches
+    // the matching slice — no point loading DNS for an account whose user
+    // only wants to see the details pane.
+    if (!selectedAccount) return;
+    setUsage(null); setDnsRecords([]); setEmailAccts([]);
+    if (accountSubtab === 'details') loadUsage(selectedAccount.id);
+    if (accountSubtab === 'dns')     loadDns(selectedAccount.domain);
+    if (accountSubtab === 'email')   loadEmailAccts(selectedAccount.domain);
+  }, [selectedAccount, accountSubtab]);
 
   async function load() {
     setLoading(true);
@@ -94,6 +125,93 @@ export default function ClientPortal() {
     setTotpLoading(false);
   }
 
+  /* ── Hosting tab actions ───────────────────────────────────── */
+
+  async function loadAccounts() {
+    try { const r = await api('/api/portal/accounts'); setAccounts(r.data); setAccountsLoaded(true); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed to load hosting accounts' }); }
+  }
+
+  async function loadUsage(accountId: number) {
+    try { const r = await api(`/api/portal/accounts/${accountId}/usage`); setUsage(r.data); }
+    catch { /* leave null */ }
+  }
+
+  async function loadDns(domain: string) {
+    try { const r = await api(`/api/portal/domains/${domain}/dns`); setDnsRecords(r.data.records || []); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed to load DNS records' }); }
+  }
+
+  async function addDnsRecord() {
+    if (!selectedAccount) return;
+    if (!dnsForm.name || !dnsForm.value) { setToast({ type: 'error', msg: 'Name and value are required' }); return; }
+    setHostingBusy(true);
+    try {
+      await apost(`/api/portal/domains/${selectedAccount.domain}/dns`, dnsForm);
+      setToast({ type: 'success', msg: 'DNS record added' });
+      setDnsForm({ name: '', type: 'A', value: '', ttl: '3600' });
+      await loadDns(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function deleteDnsRecord(index: number) {
+    if (!selectedAccount) return;
+    if (!await confirm('Delete this DNS record?')) return;
+    setHostingBusy(true);
+    try {
+      await adel(`/api/portal/domains/${selectedAccount.domain}/dns/${index}`);
+      setToast({ type: 'success', msg: 'DNS record removed' });
+      await loadDns(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadEmailAccts(domain: string) {
+    try { const r = await api(`/api/portal/email/accounts?domain=${encodeURIComponent(domain)}`); setEmailAccts(r.data); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed to load mailboxes' }); }
+  }
+
+  async function addEmailAcct() {
+    if (!selectedAccount) return;
+    if (!emailForm.user || !emailForm.password) { setToast({ type: 'error', msg: 'Username and password are required' }); return; }
+    if (emailForm.password.length < 8) { setToast({ type: 'error', msg: 'Password must be at least 8 characters' }); return; }
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/email/accounts', { email: `${emailForm.user}@${selectedAccount.domain}`, password: emailForm.password });
+      setToast({ type: 'success', msg: 'Mailbox created' });
+      setEmailForm({ user: '', password: '' });
+      await loadEmailAccts(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function deleteEmailAcct(email: string) {
+    if (!await confirm(`Delete mailbox ${email}? All mail will be lost.`)) return;
+    setHostingBusy(true);
+    try {
+      await adel(`/api/portal/email/accounts/${encodeURIComponent(email)}`);
+      setToast({ type: 'success', msg: 'Mailbox deleted' });
+      if (selectedAccount) await loadEmailAccts(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  /* ── Password change ───────────────────────────────────────── */
+
+  async function changePassword() {
+    if (!pwForm.currentPassword || !pwForm.newPassword) { setToast({ type: 'error', msg: 'Both fields are required' }); return; }
+    if (pwForm.newPassword.length < 8) { setToast({ type: 'error', msg: 'New password must be at least 8 characters' }); return; }
+    if (pwForm.newPassword !== pwForm.confirmPassword) { setToast({ type: 'error', msg: 'New password and confirmation do not match' }); return; }
+    setPwBusy(true);
+    try {
+      await apost('/api/portal/change-password', { currentPassword: pwForm.currentPassword, newPassword: pwForm.newPassword });
+      setToast({ type: 'success', msg: 'Password updated' });
+      setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setPwBusy(false);
+  }
+
   async function payStripe(invoice: Invoice) {
     setPayingId(invoice.id);
     try {
@@ -134,6 +252,9 @@ export default function ClientPortal() {
           <nav className="flex items-center gap-1">
             <button onClick={() => setTab('invoices')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'invoices' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
               <FileText size={13} className="inline mr-1" />Invoices
+            </button>
+            <button onClick={() => setTab('hosting')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'hosting' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
+              <Server size={13} className="inline mr-1" />Hosting
             </button>
             <button onClick={() => setTab('security')} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === 'security' ? 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
               <Shield size={13} className="inline mr-1" />Security
@@ -242,8 +363,169 @@ export default function ClientPortal() {
           </>
         )}
 
+        {tab === 'hosting' && (
+          <div className="space-y-4">
+            {!accountsLoaded && <div className="card p-8 text-center text-slate-400">Loading hosting accounts…</div>}
+            {accountsLoaded && accounts.length === 0 && (
+              <div className="card p-8 text-center text-slate-400 text-sm">
+                You don't have any hosting accounts yet. Contact your hosting provider to get set up.
+              </div>
+            )}
+            {accountsLoaded && accounts.length > 0 && (
+              <>
+                {/* Account picker */}
+                <div className="card overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <Server size={15} className="text-slate-500" />
+                    <h2 className="font-semibold text-sm text-slate-900 dark:text-white">Your Hosting Accounts</h2>
+                  </div>
+                  {accounts.map(a => (
+                    <button
+                      key={a.id}
+                      onClick={() => { setSelectedAccount(a); setAccountSubtab('details'); }}
+                      className={`w-full text-left border-b border-slate-100 dark:border-slate-800 last:border-0 p-4 flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 ${selectedAccount?.id === a.id ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-slate-900 dark:text-white text-sm">{a.domain}</div>
+                        <div className="text-xs text-slate-500 mt-0.5 flex gap-3">
+                          {a.plan_name && <span>{a.plan_name}</span>}
+                          <span className={a.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}>{a.status}</span>
+                          {a.expires_at && <span>Expires {a.expires_at}</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Selected account panel */}
+                {selectedAccount && (
+                  <div className="card p-5 space-y-4">
+                    <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+                      <Globe size={15} className="text-slate-500" />
+                      <h3 className="font-semibold text-sm text-slate-900 dark:text-white">{selectedAccount.domain}</h3>
+                      <nav className="ml-auto flex items-center gap-1">
+                        {(['details', 'dns', 'email'] as const).map(t => (
+                          <button key={t} onClick={() => setAccountSubtab(t)}
+                            className={`px-2.5 py-1 rounded text-xs font-medium ${accountSubtab === t ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
+                            {t.charAt(0).toUpperCase() + t.slice(1)}
+                          </button>
+                        ))}
+                      </nav>
+                    </div>
+
+                    {accountSubtab === 'details' && (
+                      <div className="space-y-2 text-sm">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div><div className="text-xs text-slate-500">Plan</div><div className="font-medium">{selectedAccount.plan_name || '—'}</div></div>
+                          <div><div className="text-xs text-slate-500">Status</div><div className="font-medium">{selectedAccount.status}</div></div>
+                          <div><div className="text-xs text-slate-500">Created</div><div className="font-medium">{selectedAccount.created_at}</div></div>
+                          <div><div className="text-xs text-slate-500">Expires</div><div className="font-medium">{selectedAccount.expires_at || 'Never'}</div></div>
+                          {selectedAccount.disk_quota != null && (
+                            <div>
+                              <div className="text-xs text-slate-500">Disk quota</div>
+                              <div className="font-medium">{selectedAccount.disk_quota} MB</div>
+                            </div>
+                          )}
+                          {usage && (
+                            <div>
+                              <div className="text-xs text-slate-500">Disk used</div>
+                              <div className="font-medium">{(usage.disk_bytes / 1024 / 1024).toFixed(2)} MB</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'dns' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">A, AAAA, CNAME, MX, and TXT records only. NS / SRV records are managed by your hosting provider.</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <input className="input col-span-3" placeholder="name (e.g. @ or www)" value={dnsForm.name} onChange={e => setDnsForm(f => ({ ...f, name: e.target.value }))} />
+                          <select className="input col-span-2" value={dnsForm.type} onChange={e => setDnsForm(f => ({ ...f, type: e.target.value }))}>
+                            {['A','AAAA','CNAME','MX','TXT'].map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                          <input className="input col-span-4" placeholder="value" value={dnsForm.value} onChange={e => setDnsForm(f => ({ ...f, value: e.target.value }))} />
+                          <input className="input col-span-1" placeholder="ttl" value={dnsForm.ttl} onChange={e => setDnsForm(f => ({ ...f, ttl: e.target.value.replace(/\D/g, '') }))} />
+                          <button className="btn-primary col-span-2 text-xs" onClick={addDnsRecord} disabled={hostingBusy}>
+                            <Plus size={12} /> Add
+                          </button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                            <th className="text-left py-2 px-1">Name</th><th className="text-left">Type</th><th className="text-left">Value</th><th className="text-left">TTL</th><th></th>
+                          </tr></thead>
+                          <tbody>
+                            {dnsRecords.length === 0 && <tr><td colSpan={5} className="py-4 text-center text-slate-400 text-xs">No records</td></tr>}
+                            {dnsRecords.map((r, i) => (
+                              <tr key={i} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{r.name}</td>
+                                <td className="text-xs">{r.type}</td>
+                                <td className="font-mono text-xs truncate max-w-[200px]">{r.value}</td>
+                                <td className="text-xs text-slate-500">{r.ttl}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteDnsRecord(i)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'email' && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-4">
+                            <label className="label text-xs">Mailbox</label>
+                            <div className="flex items-center">
+                              <input className="input rounded-r-none" placeholder="user" value={emailForm.user} onChange={e => setEmailForm(f => ({ ...f, user: e.target.value.replace(/[^a-zA-Z0-9._+-]/g, '') }))} />
+                              <span className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border border-l-0 border-slate-300 dark:border-slate-700 rounded-r text-xs text-slate-500">@{selectedAccount.domain}</span>
+                            </div>
+                          </div>
+                          <div className="col-span-5">
+                            <label className="label text-xs">Password</label>
+                            <input className="input" type="password" placeholder="min 8 characters" value={emailForm.password} onChange={e => setEmailForm(f => ({ ...f, password: e.target.value }))} />
+                          </div>
+                          <button className="btn-primary col-span-3 text-xs" onClick={addEmailAcct} disabled={hostingBusy}>
+                            <Plus size={12} /> Create
+                          </button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                            <th className="text-left py-2 px-1">Mailbox</th><th></th>
+                          </tr></thead>
+                          <tbody>
+                            {emailAccts.length === 0 && <tr><td colSpan={2} className="py-4 text-center text-slate-400 text-xs">No mailboxes</td></tr>}
+                            {emailAccts.map(e => (
+                              <tr key={e.email} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{e.email}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteEmailAcct(e.email)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {tab === 'security' && (
           <div className="space-y-4 max-w-md">
+            <div className="card p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <KeyRound size={15} className="text-slate-500" />
+                <h2 className="font-semibold text-sm text-slate-900 dark:text-white">Change Password</h2>
+              </div>
+              <p className="text-xs text-slate-500">Rotate your portal password. Requires your current password.</p>
+              <input type="password" className="input" placeholder="Current password" value={pwForm.currentPassword} onChange={e => setPwForm(f => ({ ...f, currentPassword: e.target.value }))} />
+              <input type="password" className="input" placeholder="New password (min 8 chars)" value={pwForm.newPassword} onChange={e => setPwForm(f => ({ ...f, newPassword: e.target.value }))} />
+              <input type="password" className="input" placeholder="Confirm new password" value={pwForm.confirmPassword} onChange={e => setPwForm(f => ({ ...f, confirmPassword: e.target.value }))} />
+              <button className="btn-primary text-sm" onClick={changePassword} disabled={pwBusy || !pwForm.currentPassword || !pwForm.newPassword}>
+                {pwBusy ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
+
             <div className="card p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <Lock size={15} className="text-slate-500" />
