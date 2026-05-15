@@ -81,7 +81,10 @@ router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Respons
       `find "${safePath}" -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -5000 | xargs sha256sum 2>/dev/null`,
       { timeout: 300000 }
     );
-    const upsert = db.prepare('INSERT INTO file_hashes (file_path, sha256, last_checked) VALUES (?, ?, datetime("now")) ON CONFLICT(file_path) DO UPDATE SET sha256=excluded.sha256, last_checked=excluded.last_checked');
+    // datetime("now") with double quotes is interpreted as an identifier
+    // ("now" treated as a column name) — SQLite returns "no such column:
+    // now" instead of the current timestamp. Use single quotes.
+    const upsert = db.prepare("INSERT INTO file_hashes (file_path, sha256, last_checked) VALUES (?, ?, datetime('now')) ON CONFLICT(file_path) DO UPDATE SET sha256=excluded.sha256, last_checked=excluded.last_checked");
     const tx = db.transaction(() => {
       for (const line of stdout.split('\n').filter(Boolean)) {
         const parts = line.trim().split(/\s{2,}/);

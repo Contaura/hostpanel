@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
 import db from '../db';
 
 const router = Router();
@@ -130,6 +131,13 @@ router.get('/spam', (_req: Request, res: Response) => {
 });
 
 router.put('/spam', async (req: Request, res: Response) => {
+  // Writing /etc/mail/spamassassin/local.cf on a host that doesn't have
+  // SpamAssassin installed used to surface as a 500 with the raw ENOENT
+  // path — confusing if you don't know spamassassin owns that directory.
+  // Bail with a clear 503 instead.
+  if (!existsSync(path.dirname(SA_CONFIG))) {
+    return res.status(503).json({ error: `SpamAssassin is not installed (${path.dirname(SA_CONFIG)} missing). Install spamassassin to use this feature.` });
+  }
   const allowed = new Set(['required_score', 'rewrite_header', 'report_safe', 'use_bayes', 'bayes_auto_learn', 'skip_rbl_checks', 'whitelist_from', 'blacklist_from']);
   try {
     const lines = Object.entries(req.body)

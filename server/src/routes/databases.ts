@@ -186,7 +186,10 @@ router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), asy
   const user = DB_ROOT_USER;
   const dbEnv = { ...process.env, ...(DB_ROOT_PASS ? { MYSQL_PWD: DB_ROOT_PASS } : {}) };
   try {
-    await execAsync(`mysql -u${user} ${name} < "${tmpPath}"`, { timeout: 300000, env: dbEnv });
+    // -h127.0.0.1 forces TCP so the dedicated hostpanel@127.0.0.1 user the
+    // installer creates matches the host in MariaDB's ACL. Without it,
+    // mysql picks the unix socket and presents @localhost → access denied.
+    await execAsync(`mysql -u${user} -h${DB_HOST} ${name} < "${tmpPath}"`, { timeout: 300000, env: dbEnv });
     res.json({ success: true, message: `Imported into ${name}` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

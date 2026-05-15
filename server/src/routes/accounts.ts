@@ -282,10 +282,14 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
       // validated username — no quote injection possible since the regex above
       // restricts to [A-Za-z0-9_].
       const likePattern = account.username + '%';
-      const { stdout: dbs } = await efAsync('mysql', [`-u${user}`, '-N', '-B', '-e', `SHOW DATABASES LIKE '${likePattern}'`], { env: dbEnv });
+      // -h127.0.0.1 forces TCP so the dedicated hostpanel@127.0.0.1 user
+      // matches the host part of MariaDB's ACL (a socket connection would
+      // be rejected as @localhost).
+      const dbHost = process.env.DB_HOST || '127.0.0.1';
+      const { stdout: dbs } = await efAsync('mysql', [`-u${user}`, `-h${dbHost}`, '-N', '-B', '-e', `SHOW DATABASES LIKE '${likePattern}'`], { env: dbEnv });
       for (const dbName of dbs.split('\n').filter(Boolean)) {
         if (/^[a-zA-Z0-9_]+$/.test(dbName)) {
-          await execAsync(`mysqldump -u${user} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000, env: dbEnv });
+          await execAsync(`mysqldump -u${user} -h${dbHost} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000, env: dbEnv });
         }
       }
     } catch {}

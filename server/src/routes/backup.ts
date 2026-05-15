@@ -74,8 +74,19 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
       const out = path.join(dir, filename);
       const user = process.env.DB_ROOT_USER || 'root';
       const pass = process.env.DB_ROOT_PASS || '';
-      const passArg = pass ? `-p${pass}` : '';
-      await execAsync(`mysqldump -u${user} ${passArg} ${target} | gzip > "${out}"`, { timeout: 300000 });
+      // Pass the password via MYSQL_PWD instead of `-p<pass>` on the
+      // command line. The `-p` form lands in `ps`, in the panel's audit
+      // logs, and (more importantly) in `err.message` if the command
+      // fails — which is exactly what was happening for the restore
+      // route below, leaking the DB password into JSON 500 responses.
+      const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
+      // -h127.0.0.1 is required: without -h the mysql client picks the unix
+      // socket and presents the user as <user>@localhost. The dedicated
+      // panel user is hostpanel@127.0.0.1 (see install.sh step 3), so a
+      // socket connection gets "Access denied" even though the password is
+      // correct. Force TCP so the host part of the ACL matches.
+      const host = process.env.DB_HOST || '127.0.0.1';
+      await execAsync(`mysqldump -u${user} -h${host} ${target} | gzip > "${out}"`, { timeout: 300000, env: dbEnv });
     } else {
       return res.status(400).json({ error: 'type must be files or database' });
     }
@@ -106,8 +117,9 @@ router.post('/restore/:name', async (req: AuthRequest, res: Response) => {
       if (!/^[a-zA-Z0-9_]+$/.test(dbName)) return res.status(400).json({ error: 'Cannot determine database name from filename' });
       const user = process.env.DB_ROOT_USER || 'root';
       const pass = process.env.DB_ROOT_PASS || '';
-      const passArg = pass ? `-p${pass}` : '';
-      await execAsync(`gunzip -c "${file}" | mysql -u${user} ${passArg} ${dbName}`, { timeout: 300000 });
+      const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
+      const host = process.env.DB_HOST || '127.0.0.1';
+      await execAsync(`gunzip -c "${file}" | mysql -u${user} -h${host} ${dbName}`, { timeout: 300000, env: dbEnv });
       res.json({ success: true, message: `Database ${dbName} restored` });
     } else if (name.endsWith('.tar.gz')) {
       // Files restore — extract back to webroot
