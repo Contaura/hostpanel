@@ -4,9 +4,13 @@ import db from '../db';
 const router = Router();
 
 function getPayPalConfig() {
-  const clientId = process.env.PAYPAL_CLIENT_ID || (db.prepare("SELECT value FROM settings WHERE key='paypal_client_id'").get() as any)?.value || '';
-  const secret   = process.env.PAYPAL_SECRET     || (db.prepare("SELECT value FROM settings WHERE key='paypal_secret'").get() as any)?.value || '';
-  const mode     = process.env.PAYPAL_MODE       || (db.prepare("SELECT value FROM settings WHERE key='paypal_mode'").get() as any)?.value || 'sandbox';
+  // Settings table is the source of truth — PAYPAL_* env vars are no longer
+  // consulted at request time. Existing installs are migrated env → settings
+  // on first boot of this build (see migrateEnvToSetting in db.ts).
+  const setting = (key: string) => (db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as any)?.value || '';
+  const clientId = setting('paypal_client_id');
+  const secret   = setting('paypal_secret');
+  const mode     = setting('paypal_mode') || 'sandbox';
   return { clientId, secret, mode, baseUrl: mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com' };
 }
 

@@ -9,16 +9,19 @@ function getSetting(key: string): string {
   return (db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as any)?.value || '';
 }
 
-// Lazy-initialize Stripe — env takes precedence, falls back to DB settings
+// Lazy-initialize Stripe. The settings table is the source of truth — env
+// vars for STRIPE_* are no longer consulted at request time. Existing
+// installs are migrated env → settings on first boot of this build (see
+// migrateEnvToSetting in db.ts) so config doesn't get lost in the cutover.
 function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY || getSetting('stripe_secret_key');
+  const key = getSetting('stripe_secret_key');
   if (!key) throw new Error('Stripe secret key is not configured. Set it in Settings → Stripe.');
   return new StripeLib(key, { apiVersion: '2024-06-20' });
 }
 
 // ── Config ─────────────────────────────────────────────────
 router.get('/config', (_req: Request, res: Response) => {
-  const publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || getSetting('stripe_publishable_key');
+  const publishableKey = getSetting('stripe_publishable_key');
   if (!publishableKey) return res.json({ configured: false });
   res.json({ configured: true, publishableKey });
 });
@@ -78,7 +81,7 @@ router.post('/checkout', async (req: Request, res: Response) => {
 // Registered in index.ts with express.raw() BEFORE express.json()
 router.post('/webhook', (req: Request, res: Response) => {
   const sig           = req.headers['stripe-signature'] as string | undefined;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || getSetting('stripe_webhook_secret');
+  const webhookSecret = getSetting('stripe_webhook_secret');
 
   let event: any;
 

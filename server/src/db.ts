@@ -342,4 +342,31 @@ seedSetting('stripe_webhook_secret', '');
 seedSetting('stripe_price_id', '');
 seedSetting('panel_2fa_required', '0');
 
+// One-shot env → settings migration. Existing installs that booted with
+// STRIPE_*/PAYPAL_*/SMTP_* env vars get those values copied into the
+// settings table the first time this build comes up, so the Settings page
+// becomes the source of truth without admins having to re-enter everything.
+// Only fires when the matching DB row is empty — so once the admin edits
+// the value in the UI, env changes are ignored.
+const migrateEnvToSetting = (envKey: string, settingKey: string) => {
+  const envVal = process.env[envKey];
+  if (!envVal) return;
+  const cur = (db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey) as any)?.value;
+  if (cur) return;
+  db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").run(settingKey, envVal);
+};
+migrateEnvToSetting('SMTP_HOST',              'smtp_host');
+migrateEnvToSetting('SMTP_PORT',              'smtp_port');
+migrateEnvToSetting('SMTP_USER',              'smtp_user');
+migrateEnvToSetting('SMTP_PASS',              'smtp_pass');
+migrateEnvToSetting('SMTP_FROM',              'smtp_from');
+migrateEnvToSetting('SMTP_SECURE',            'smtp_secure');
+migrateEnvToSetting('STRIPE_SECRET_KEY',      'stripe_secret_key');
+migrateEnvToSetting('STRIPE_PUBLISHABLE_KEY', 'stripe_publishable_key');
+migrateEnvToSetting('STRIPE_WEBHOOK_SECRET',  'stripe_webhook_secret');
+migrateEnvToSetting('STRIPE_PRICE_ID',        'stripe_price_id');
+migrateEnvToSetting('PAYPAL_CLIENT_ID',       'paypal_client_id');
+migrateEnvToSetting('PAYPAL_SECRET',          'paypal_secret');
+migrateEnvToSetting('PAYPAL_MODE',            'paypal_mode');
+
 export default db;
