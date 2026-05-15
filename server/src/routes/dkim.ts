@@ -9,10 +9,14 @@ const execAsync = promisify(exec);
 const NAMED_DIR = process.env.NAMED_DIR || '/var/named';
 const DKIM_DIR  = process.env.DKIM_DIR  || '/etc/opendkim/keys';
 
+const DOMAIN_RE   = /^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/;
+const SELECTOR_RE = /^[a-zA-Z0-9_-]+$/;
+
 /* ── DKIM key generation & status ───────────────────────── */
 
 router.get('/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const selector = 'default';
   const pubKeyPath = path.join(DKIM_DIR, domain, `${selector}.txt`);
 
@@ -37,12 +41,14 @@ router.get('/:domain', async (req: Request, res: Response) => {
 
 router.post('/:domain/generate-dkim', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const selector = req.body.selector || 'default';
+  if (!SELECTOR_RE.test(selector)) return res.status(400).json({ error: 'Invalid selector' });
   const keyDir = path.join(DKIM_DIR, domain);
   try {
-    await execAsync(`mkdir -p ${keyDir}`);
-    await execAsync(`opendkim-genkey -b 2048 -d ${domain} -s ${selector} -D ${keyDir}`);
-    await execAsync(`chown opendkim:opendkim ${keyDir}/${selector}.private`);
+    await execAsync(`mkdir -p "${keyDir}"`);
+    await execAsync(`opendkim-genkey -b 2048 -d "${domain}" -s "${selector}" -D "${keyDir}"`);
+    await execAsync(`chown opendkim:opendkim "${keyDir}/${selector}.private"`);
     const pubKey = readFileSync(path.join(keyDir, `${selector}.txt`), 'utf8');
     // Extract the p= value for DNS TXT record
     const match = pubKey.match(/p=([A-Za-z0-9+/=]+)/);
@@ -80,11 +86,12 @@ router.post('/:domain/dmarc', async (req: Request, res: Response) => {
 
 router.get('/:domain/verify', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const results: Record<string, any> = {};
   try {
-    const { stdout: spf } = await execAsync(`dig +short TXT ${domain} 2>/dev/null | grep spf`).catch(() => ({ stdout: '' }));
-    const { stdout: dmarc } = await execAsync(`dig +short TXT _dmarc.${domain} 2>/dev/null`).catch(() => ({ stdout: '' }));
-    const { stdout: dkim } = await execAsync(`dig +short TXT default._domainkey.${domain} 2>/dev/null`).catch(() => ({ stdout: '' }));
+    const { stdout: spf } = await execAsync(`dig +short TXT "${domain}" 2>/dev/null | grep spf`).catch(() => ({ stdout: '' }));
+    const { stdout: dmarc } = await execAsync(`dig +short TXT "_dmarc.${domain}" 2>/dev/null`).catch(() => ({ stdout: '' }));
+    const { stdout: dkim } = await execAsync(`dig +short TXT "default._domainkey.${domain}" 2>/dev/null`).catch(() => ({ stdout: '' }));
     results.spf   = { value: spf.trim(), found: spf.includes('v=spf1') };
     results.dmarc = { value: dmarc.trim(), found: dmarc.includes('v=DMARC1') };
     results.dkim  = { value: dkim.trim(), found: dkim.includes('v=DKIM1') };
