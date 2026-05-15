@@ -649,4 +649,629 @@ router.post('/ssl/:domain', clientAuth, async (req: Request, res: Response) => {
   }
 });
 
+/* ── Subdomains (under owned parent domain) ─────────────────── */
+
+const PORTAL_VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
+const PORTAL_SUBDOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+router.get('/subdomains', clientAuth, async (_req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((_req as any).clientId);
+  const ownedDomains = db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((_req as any).clientId) as { domain: string }[];
+  // Subdomains are stored as Apache vhosts named <fqdn>.conf. Filter to
+  // those whose ServerName is a subdomain of one of the client's domains.
+  const files = await fs.readdir(PORTAL_VHOST_DIR).catch(() => [] as string[]);
+  const subs: { fqdn: string; parent: string; docroot: string }[] = [];
+  for (const f of files) {
+    if (!f.endsWith('.conf')) continue;
+    const fqdn = f.replace('.conf', '');
+    const parent = ownedDomains.find(d => fqdn !== d.domain && fqdn.endsWith('.' + d.domain));
+    if (!parent) continue;
+    try {
+      const conf = await fs.readFile(path.join(PORTAL_VHOST_DIR, f), 'utf-8');
+      const m = conf.match(/DocumentRoot\s+(\S+)/);
+      subs.push({ fqdn, parent: parent.domain, docroot: m?.[1] || '' });
+    } catch { /* skip */ }
+  }
+  void usernames;
+  res.json(subs);
+});
+
+router.post('/subdomains', clientAuth, async (req: Request, res: Response) => {
+  const { subdomain, domain } = req.body;
+  if (!subdomain || !domain) return res.status(400).json({ error: 'subdomain and domain required' });
+  if (!PORTAL_SUBDOMAIN_RE.test(subdomain)) return res.status(400).json({ error: 'Subdomain must be lowercase letters/digits/hyphen' });
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid parent domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const fqdn = `${subdomain}.${domain}`;
+  const docRoot = path.join(PORTAL_WEBROOT, domain, fqdn);
+  const confFile = path.join(PORTAL_VHOST_DIR, `${fqdn}.conf`);
+  if (existsSync(confFile)) return res.status(409).json({ error: 'Subdomain already exists' });
+  await fs.mkdir(docRoot, { recursive: true });
+  await fs.writeFile(path.join(docRoot, 'index.html'), `<html><body><h1>${fqdn}</h1></body></html>`);
+  await fs.writeFile(confFile, `<VirtualHost *:80>\n  ServerName ${fqdn}\n  DocumentRoot ${docRoot}\n  <Directory ${docRoot}>\n    AllowOverride All\n    Require all granted\n  </Directory>\n</VirtualHost>\n`);
+  await execAsync('systemctl reload httpd 2>/dev/null || true');
+  res.json({ message: 'Subdomain created', fqdn, docroot: docRoot });
+});
+
+router.delete('/subdomains/:fqdn', clientAuth, async (req: Request, res: Response) => {
+  const { fqdn } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(fqdn)) return res.status(400).json({ error: 'Invalid subdomain' });
+  // Verify the fqdn belongs to one of the client's parent domains.
+  const owned = db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[];
+  if (!owned.some(d => fqdn === d.domain || fqdn.endsWith('.' + d.domain))) return res.status(403).json({ error: 'Not your subdomain' });
+  if (owned.some(d => d.domain === fqdn)) return res.status(400).json({ error: 'Refusing to delete the parent account domain — use the admin panel' });
+  await fs.unlink(path.join(PORTAL_VHOST_DIR, `${fqdn}.conf`)).catch(() => {});
+  await execAsync('systemctl reload httpd 2>/dev/null || true');
+  res.json({ success: true });
+});
+
+/* ── Redirects (per owned domain) ───────────────────────────── */
+
+db.exec(`CREATE TABLE IF NOT EXISTS portal_redirects (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain TEXT NOT NULL,
+  source TEXT NOT NULL,
+  target TEXT NOT NULL,
+  type   TEXT NOT NULL DEFAULT '301',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(domain, source)
+)`);
+
+router.get('/redirects', clientAuth, (req: Request, res: Response) => {
+  const owned = (db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[]).map(d => d.domain);
+  if (!owned.length) return res.json([]);
+  const placeholders = owned.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT * FROM portal_redirects WHERE domain IN (${placeholders}) ORDER BY created_at DESC`).all(...owned);
+  res.json(rows);
+});
+
+router.post('/redirects', clientAuth, async (req: Request, res: Response) => {
+  const { domain, source, target, type } = req.body;
+  if (!domain || !source || !target) return res.status(400).json({ error: 'domain, source, target required' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!/^\/[^\s]*$/.test(source)) return res.status(400).json({ error: 'source must be an absolute path' });
+  if (!/^https?:\/\//.test(target)) return res.status(400).json({ error: 'target must be an http(s) URL' });
+  if (type && !['301', '302'].includes(String(type))) return res.status(400).json({ error: 'type must be 301 or 302' });
+  // Persist in our portal-side table AND write a .htaccess entry under
+  // the domain's public_html so Apache actually serves the redirect.
+  const docRoot = path.join(PORTAL_WEBROOT, domain, 'public_html');
+  if (!existsSync(docRoot)) return res.status(400).json({ error: 'public_html does not exist for this domain' });
+  let inserted: any;
+  try {
+    const r = db.prepare('INSERT INTO portal_redirects (domain, source, target, type) VALUES (?, ?, ?, ?)').run(domain, source, target, type || '301');
+    inserted = db.prepare('SELECT * FROM portal_redirects WHERE id = ?').get(r.lastInsertRowid);
+  } catch (e: any) {
+    if (e.message?.includes('UNIQUE')) return res.status(409).json({ error: 'A redirect for that source already exists' });
+    throw e;
+  }
+  const htaccess = path.join(docRoot, '.htaccess');
+  const block = `# portal-redirect:${source}\nRedirect ${type || '301'} ${source} ${target}\n`;
+  await fs.appendFile(htaccess, block).catch(() => {});
+  res.json(inserted);
+});
+
+router.delete('/redirects/:id', clientAuth, async (req: Request, res: Response) => {
+  const row = db.prepare('SELECT * FROM portal_redirects WHERE id = ?').get(req.params.id) as any;
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  if (!clientOwnsDomain((req as any).clientId, row.domain)) return res.status(403).json({ error: 'Not your domain' });
+  db.prepare('DELETE FROM portal_redirects WHERE id = ?').run(req.params.id);
+  // Remove the matching block from .htaccess so Apache stops redirecting.
+  const htaccess = path.join(PORTAL_WEBROOT, row.domain, 'public_html', '.htaccess');
+  try {
+    const content = await fs.readFile(htaccess, 'utf-8');
+    const cleaned = content
+      .split('\n')
+      .reduce<string[]>((acc, line, i, lines) => {
+        if (line === `# portal-redirect:${row.source}`) {
+          // skip this marker AND the next line (the Redirect directive)
+          lines[i + 1] = '__SKIP__';
+          return acc;
+        }
+        if (line === '__SKIP__') return acc;
+        acc.push(line); return acc;
+      }, [])
+      .join('\n');
+    await fs.writeFile(htaccess, cleaned);
+  } catch { /* htaccess missing — fine */ }
+  res.json({ success: true });
+});
+
+/* ── Cron (per-OS-user, only if the user is prefixed) ───────── */
+
+const PORTAL_CRON_RE = /^(@(reboot|hourly|daily|weekly|monthly)|(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+))$/;
+
+async function osUserExists(name: string): Promise<boolean> {
+  try { await execAsync(`id "${name}" 2>/dev/null`); return true; } catch { return false; }
+}
+
+router.get('/cron', clientAuth, async (req: Request, res: Response) => {
+  // List crontabs for every OS user that's prefixed with one of the
+  // client's account usernames (e.g. `marcos_web`'s crontab).
+  const usernames = clientAccountUsernames((req as any).clientId);
+  const out: { user: string; jobs: { id: number; line: string }[] }[] = [];
+  for (const base of usernames) {
+    // Match exact account-username and prefix-only OS users we created via
+    // /api/portal/ftp/users (which prepends <base>_).
+    const { stdout } = await execAsync(`getent passwd | awk -F: '{print $1}'`).catch(() => ({ stdout: '' }));
+    const candidates = stdout.split('\n').filter(u => u === base || u.startsWith(base + '_'));
+    for (const u of candidates) {
+      const { stdout: tab } = await execAsync(`crontab -u "${u}" -l 2>/dev/null || true`);
+      const lines = tab.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+      if (lines.length) out.push({ user: u, jobs: lines.map((line, id) => ({ id, line })) });
+    }
+  }
+  res.json(out);
+});
+
+router.post('/cron', clientAuth, async (req: Request, res: Response) => {
+  const { user, schedule, command } = req.body;
+  if (!user || !schedule || !command) return res.status(400).json({ error: 'user, schedule, command required' });
+  if (!PORTAL_CRON_RE.test(String(schedule).trim())) return res.status(400).json({ error: 'Invalid cron schedule' });
+  if (!clientPrefixOwner((req as any).clientId, user)) return res.status(403).json({ error: 'Not your OS user' });
+  if (!await osUserExists(user)) return res.status(404).json({ error: `No OS user named '${user}'` });
+  // Append to the user's crontab via a temp file in mkdtemp so we don't
+  // race against the cron-account write paths in cron.ts.
+  const { tmpdir } = await import('os');
+  const { mkdtempSync, writeFileSync, unlinkSync } = await import('fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'portal-cron-'));
+  try {
+    const { stdout: existing } = await execAsync(`crontab -u "${user}" -l 2>/dev/null || true`);
+    const next = (existing.replace(/\n+$/, '') + '\n' + `${schedule.trim()} ${command.trim()}\n`).replace(/^\n+/, '');
+    const tmp = path.join(dir, 'crontab');
+    writeFileSync(tmp, next);
+    await execAsync(`crontab -u "${user}" "${tmp}"`);
+    unlinkSync(tmp);
+  } finally {
+    try { await fs.rmdir(dir); } catch { /* best-effort */ }
+  }
+  res.json({ message: 'Cron job added' });
+});
+
+router.delete('/cron/:user/:index', clientAuth, async (req: Request, res: Response) => {
+  const { user } = req.params;
+  const idx = parseInt(req.params.index);
+  if (!clientPrefixOwner((req as any).clientId, user)) return res.status(403).json({ error: 'Not your OS user' });
+  if (!Number.isFinite(idx) || idx < 0) return res.status(400).json({ error: 'Invalid index' });
+  const { stdout: existing } = await execAsync(`crontab -u "${user}" -l 2>/dev/null || true`);
+  const lines = existing.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+  if (idx >= lines.length) return res.status(404).json({ error: 'Job not found' });
+  lines.splice(idx, 1);
+  const { tmpdir } = await import('os');
+  const { mkdtempSync, writeFileSync, unlinkSync } = await import('fs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'portal-cron-rm-'));
+  try {
+    const tmp = path.join(dir, 'crontab');
+    writeFileSync(tmp, lines.join('\n') + (lines.length ? '\n' : ''));
+    await execAsync(`crontab -u "${user}" "${tmp}"`);
+    unlinkSync(tmp);
+  } finally {
+    try { await fs.rmdir(dir); } catch { /* best-effort */ }
+  }
+  res.json({ success: true });
+});
+
+/* ── Email autoresponders (per address on owned domain) ─────── */
+
+router.get('/email/autoresponders', clientAuth, (req: Request, res: Response) => {
+  const owned = (db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[]).map(d => '@' + d.domain);
+  if (!owned.length) return res.json([]);
+  const rows = db.prepare('SELECT * FROM autoresponders ORDER BY created_at DESC').all() as any[];
+  res.json(rows.filter(r => owned.some(suffix => r.email?.toLowerCase().endsWith(suffix))));
+});
+
+router.post('/email/autoresponders', clientAuth, (req: Request, res: Response) => {
+  const { email, subject, body, start_date, end_date } = req.body;
+  if (!email || !subject || !body) return res.status(400).json({ error: 'email, subject, body required' });
+  if (!PORTAL_EMAIL_RE.test(email)) return res.status(400).json({ error: 'Invalid email' });
+  const domain = email.split('@')[1];
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  try {
+    const r = db.prepare('INSERT INTO autoresponders (email, subject, body, start_date, end_date, enabled) VALUES (?, ?, ?, ?, ?, 1)')
+      .run(email, subject, body, start_date || null, end_date || null);
+    res.json(db.prepare('SELECT * FROM autoresponders WHERE id = ?').get(r.lastInsertRowid));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/email/autoresponders/:id', clientAuth, (req: Request, res: Response) => {
+  const row: any = db.prepare('SELECT email FROM autoresponders WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Not found' });
+  const domain = row.email.split('@')[1];
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your autoresponder' });
+  db.prepare('DELETE FROM autoresponders WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
+/* ── Catch-all email (per owned domain) ─────────────────────── */
+
+router.get('/email/catch-all', clientAuth, async (req: Request, res: Response) => {
+  const domain = req.query.domain as string;
+  if (!domain || !PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'domain required' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const content = await fs.readFile(path.join(PORTAL_VMAIL_DIR, 'aliases'), 'utf-8').catch(() => '');
+  const m = content.split('\n').find(l => l.startsWith(`@${domain}`));
+  if (!m) return res.json({ destination: null });
+  const dest = m.split(/\s+/)[1] || null;
+  res.json({ destination: dest });
+});
+
+router.post('/email/catch-all', clientAuth, async (req: Request, res: Response) => {
+  const { domain, destination } = req.body;
+  if (!domain || !destination) return res.status(400).json({ error: 'domain and destination required' });
+  if (!PORTAL_EMAIL_RE.test(destination)) return res.status(400).json({ error: 'Invalid destination email' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const aliasesPath = path.join(PORTAL_VMAIL_DIR, 'aliases');
+  const content = await fs.readFile(aliasesPath, 'utf-8').catch(() => '');
+  const filtered = content.split('\n').filter(l => l && !l.startsWith(`@${domain}`)).join('\n');
+  const next = filtered.replace(/\n+$/, '') + `\n@${domain}    ${destination}\n`;
+  await fs.writeFile(aliasesPath, next);
+  await execAsync(`postmap ${aliasesPath} 2>/dev/null || true`);
+  res.json({ success: true });
+});
+
+router.delete('/email/catch-all/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const aliasesPath = path.join(PORTAL_VMAIL_DIR, 'aliases');
+  const content = await fs.readFile(aliasesPath, 'utf-8').catch(() => '');
+  await fs.writeFile(aliasesPath, content.split('\n').filter(l => !l.startsWith(`@${domain}`)).join('\n'));
+  await execAsync(`postmap ${aliasesPath} 2>/dev/null || true`);
+  res.json({ success: true });
+});
+
+/* ── DKIM / SPF / DMARC for owned domain ────────────────────── */
+
+router.get('/mail-auth/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const dkimPub = await fs.readFile(`/etc/opendkim/keys/${domain}/default.txt`, 'utf-8').catch(() => '');
+  const dkimMatch = dkimPub.match(/"v=DKIM1[^"]*"/);
+  const zoneContent = await fs.readFile(path.join(PORTAL_NAMED_DIR, `${domain}.zone`), 'utf-8').catch(() => '');
+  const spf   = zoneContent.match(/v=spf1[^"]*/)?.[0]   || '';
+  const dmarc = zoneContent.match(/v=DMARC1[^"]*/)?.[0] || '';
+  res.json({ domain, dkim: dkimMatch?.[0] || null, spf, dmarc });
+});
+
+router.post('/mail-auth/:domain/dkim', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!existsSync('/usr/sbin/opendkim-genkey') && !existsSync('/usr/bin/opendkim-genkey')) {
+    return res.status(503).json({ error: 'opendkim-tools not installed on this server' });
+  }
+  await fs.mkdir(`/etc/opendkim/keys/${domain}`, { recursive: true });
+  await execAsync(`opendkim-genkey -b 2048 -d "${domain}" -s default -D "/etc/opendkim/keys/${domain}"`);
+  const txt = await fs.readFile(`/etc/opendkim/keys/${domain}/default.txt`, 'utf-8');
+  res.json({ success: true, dnsRecord: txt });
+});
+
+router.post('/mail-auth/:domain/spf', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const include: string[] = Array.isArray(req.body.include) ? req.body.include : [];
+  const includePart = include.filter(i => /^[a-zA-Z0-9._:-]+$/.test(i)).map(i => `include:${i}`).join(' ');
+  const spf = `v=spf1 ${includePart ? includePart + ' ' : ''}~all`;
+  // Write into the bind zone so DNS lookups answer correctly. The record
+  // landing in the zone is just a TXT — actual delivery still happens
+  // through whichever MX is in DNS.
+  const zonePath = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
+  const content = await fs.readFile(zonePath, 'utf-8').catch(() => '');
+  const stripped = content.split('\n').filter(l => !l.includes('v=spf1')).join('\n');
+  await fs.writeFile(zonePath, stripped.replace(/\n+$/, '') + `\n@\t3600\tIN\tTXT\t"${spf}"\n`);
+  await execAsync('rndc reload 2>/dev/null || true');
+  res.json({ success: true, spf });
+});
+
+router.post('/mail-auth/:domain/dmarc', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { policy, rua } = req.body;
+  if (!['none', 'quarantine', 'reject'].includes(String(policy || 'none'))) return res.status(400).json({ error: 'policy must be none|quarantine|reject' });
+  const parts = [`v=DMARC1`, `p=${policy || 'none'}`];
+  if (rua) {
+    if (!PORTAL_EMAIL_RE.test(rua)) return res.status(400).json({ error: 'Invalid rua email' });
+    parts.push(`rua=mailto:${rua}`);
+  }
+  const dmarc = parts.join('; ');
+  const zonePath = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
+  const content = await fs.readFile(zonePath, 'utf-8').catch(() => '');
+  const stripped = content.split('\n').filter(l => !(l.startsWith('_dmarc') && l.includes('v=DMARC1'))).join('\n');
+  await fs.writeFile(zonePath, stripped.replace(/\n+$/, '') + `\n_dmarc\t3600\tIN\tTXT\t"${dmarc}"\n`);
+  await execAsync('rndc reload 2>/dev/null || true');
+  res.json({ success: true, dmarc });
+});
+
+/* ── SSH keys (per-account-username OS user) ────────────────── */
+
+const PORTAL_ACCT_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/;
+async function readPortalAccountKeys(username: string): Promise<{ id: number; raw: string; comment: string }[]> {
+  const content = await fs.readFile(path.join('/home', username, '.ssh', 'authorized_keys'), 'utf-8').catch(() => '');
+  return content.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).map((raw, id) => {
+    const parts = raw.trim().split(/\s+/);
+    return { id, raw: raw.trim(), comment: parts[2] || '' };
+  });
+}
+
+router.get('/sshkeys', clientAuth, async (req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((req as any).clientId);
+  const out: { user: string; keys: any[] }[] = [];
+  for (const u of usernames) {
+    if (await osUserExists(u)) out.push({ user: u, keys: await readPortalAccountKeys(u) });
+  }
+  res.json(out);
+});
+
+router.post('/sshkeys', clientAuth, async (req: Request, res: Response) => {
+  const { user, key } = req.body;
+  if (!user || !key) return res.status(400).json({ error: 'user and key required' });
+  if (!PORTAL_ACCT_RE.test(user)) return res.status(400).json({ error: 'Invalid user' });
+  if (!clientPrefixOwner((req as any).clientId, user)) return res.status(403).json({ error: 'Not your OS user' });
+  if (!await osUserExists(user)) return res.status(404).json({ error: `No OS user '${user}'` });
+  const trimmed = String(key).trim();
+  const valid = ['ssh-rsa', 'ssh-ed25519', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521'];
+  if (!valid.includes(trimmed.split(/\s+/)[0])) return res.status(400).json({ error: 'Invalid SSH key type' });
+  const sshDir = path.join('/home', user, '.ssh');
+  await fs.mkdir(sshDir, { recursive: true, mode: 0o700 });
+  const file = path.join(sshDir, 'authorized_keys');
+  const existing = await fs.readFile(file, 'utf-8').catch(() => '');
+  await fs.writeFile(file, existing.replace(/\n+$/, '') + (existing ? '\n' : '') + trimmed + '\n', { mode: 0o600 });
+  await execAsync(`chown -R "${user}:${user}" "${sshDir}" 2>/dev/null || true`);
+  res.json({ success: true });
+});
+
+router.delete('/sshkeys/:user/:id', clientAuth, async (req: Request, res: Response) => {
+  const { user } = req.params;
+  const id = parseInt(req.params.id);
+  if (!clientPrefixOwner((req as any).clientId, user)) return res.status(403).json({ error: 'Not your OS user' });
+  const keys = await readPortalAccountKeys(user);
+  if (id < 0 || id >= keys.length) return res.status(404).json({ error: 'Key not found' });
+  keys.splice(id, 1);
+  const sshDir = path.join('/home', user, '.ssh');
+  await fs.writeFile(path.join(sshDir, 'authorized_keys'), keys.map(k => k.raw).join('\n') + (keys.length ? '\n' : ''), { mode: 0o600 });
+  await execAsync(`chown -R "${user}:${user}" "${sshDir}" 2>/dev/null || true`);
+  res.json({ success: true });
+});
+
+/* ── Backups (scoped to owned domain dirs) ──────────────────── */
+
+const PORTAL_BACKUP_DIR = process.env.BACKUP_DIR || '/var/backups/hostpanel';
+
+router.get('/backups', clientAuth, async (req: Request, res: Response) => {
+  const owned = (db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[]).map(d => d.domain);
+  const files = await fs.readdir(PORTAL_BACKUP_DIR).catch(() => [] as string[]);
+  // Convention: per-domain files-backups are named files_<domain-with-dots-as-underscores>_<ts>.tar.gz
+  // (see admin /api/backup/create). Filter by domain prefix.
+  const filtered: any[] = [];
+  for (const f of files) {
+    const m = f.match(/^files_(.+?)_\d{4}-/);
+    if (!m) continue;
+    const tag = m[1];
+    if (owned.some(d => tag === d.replace(/\./g, '_'))) {
+      const st = await fs.stat(path.join(PORTAL_BACKUP_DIR, f));
+      filtered.push({ name: f, size: st.size, created: st.mtime.toISOString() });
+    }
+  }
+  filtered.sort((a, b) => b.created.localeCompare(a.created));
+  res.json(filtered);
+});
+
+router.post('/backups/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!existsSync(PORTAL_BACKUP_DIR)) await fs.mkdir(PORTAL_BACKUP_DIR, { recursive: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const filename = `files_${domain.replace(/\./g, '_')}_${ts}.tar.gz`;
+  const out = path.join(PORTAL_BACKUP_DIR, filename);
+  const src = path.join(PORTAL_WEBROOT, domain);
+  if (!existsSync(src)) return res.status(404).json({ error: `${src} does not exist` });
+  await execAsync(`tar -czf "${out}" -C "${path.dirname(src)}" "${path.basename(src)}" 2>/dev/null || true`, { timeout: 300000 });
+  const st = await fs.stat(out);
+  res.json({ name: filename, size: st.size, created: new Date().toISOString() });
+});
+
+router.delete('/backups/:name', clientAuth, async (req: Request, res: Response) => {
+  const name = path.basename(req.params.name);
+  if (!/^files_[a-zA-Z0-9_.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ error: 'Invalid backup name' });
+  // Reconstruct the domain from the filename and verify ownership.
+  const tag = name.match(/^files_(.+?)_\d{4}-/)?.[1];
+  if (!tag) return res.status(400).json({ error: 'Unrecognized backup name' });
+  const owned = (db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[]).map(d => d.domain);
+  if (!owned.some(d => tag === d.replace(/\./g, '_'))) return res.status(403).json({ error: 'Not your backup' });
+  await fs.unlink(path.join(PORTAL_BACKUP_DIR, name)).catch(() => {});
+  res.json({ success: true });
+});
+
+router.get('/backups/:name/download', clientAuth, async (req: Request, res: Response) => {
+  const name = path.basename(req.params.name);
+  if (!/^files_[a-zA-Z0-9_.-]+\.tar\.gz$/.test(name)) return res.status(400).json({ error: 'Invalid backup name' });
+  const tag = name.match(/^files_(.+?)_\d{4}-/)?.[1];
+  if (!tag) return res.status(400).json({ error: 'Unrecognized backup name' });
+  const owned = (db.prepare("SELECT domain FROM accounts WHERE client_id = ? AND status != 'terminated'").all((req as any).clientId) as { domain: string }[]).map(d => d.domain);
+  if (!owned.some(d => tag === d.replace(/\./g, '_'))) return res.status(403).json({ error: 'Not your backup' });
+  const file = path.join(PORTAL_BACKUP_DIR, name);
+  if (!existsSync(file)) return res.status(404).json({ error: 'Backup not found' });
+  res.download(file);
+});
+
+/* ── Scripts installer (WordPress for now) ──────────────────── */
+
+router.post('/scripts/install', clientAuth, async (req: Request, res: Response) => {
+  const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail } = req.body;
+  if (script !== 'wordpress') return res.status(400).json({ error: 'Only wordpress is supported for client self-install right now' });
+  if (!domain || !PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!dbName || !dbUser || !dbPass) return res.status(400).json({ error: 'dbName, dbUser, dbPass required' });
+  if (!clientPrefixOwner((req as any).clientId, dbName)) return res.status(403).json({ error: 'dbName must start with your account username' });
+  if (!clientPrefixOwner((req as any).clientId, dbUser)) return res.status(403).json({ error: 'dbUser must start with your account username' });
+  // Delegate to the admin /scripts/install logic via an internal http call.
+  // We don't have a clean way to call the admin handler programmatically;
+  // mint a short-lived admin-equivalent JWT scoped to this single request
+  // and replay it. Safer alternative would be to extract the install
+  // function into a shared module — but for now, do the install inline.
+  const installPath = path.join(PORTAL_WEBROOT, domain, 'public_html');
+  await fs.mkdir(installPath, { recursive: true });
+  // Download WordPress
+  await execAsync(`curl -L -o /tmp/wp-portal.tar.gz https://wordpress.org/latest.tar.gz`, { timeout: 180000 });
+  await fs.mkdir('/tmp/wp-portal-extract', { recursive: true });
+  await execAsync(`tar -xzf /tmp/wp-portal.tar.gz -C /tmp/wp-portal-extract --strip-components=1`);
+  await execAsync(`cp -r /tmp/wp-portal-extract/. "${installPath}/"`);
+  await execAsync(`rm -rf /tmp/wp-portal-extract /tmp/wp-portal.tar.gz`);
+  // wp-config + wp core install via wp-cli
+  await execAsync(`/usr/local/bin/wp config create --path="${installPath}" --dbname="${dbName}" --dbuser="${dbUser}" --dbpass="${dbPass}" --dbhost=localhost --skip-check --allow-root --force`);
+  if (siteTitle && adminUser && adminPass && adminEmail) {
+    await execAsync(`/usr/local/bin/wp core install --allow-root --path="${installPath}" --url="http://${domain}" --title="${siteTitle.replace(/"/g, '')}" --admin_user="${String(adminUser).replace(/[^a-zA-Z0-9_]/g, '')}" --admin_password="${String(adminPass).replace(/"/g, '')}" --admin_email="${adminEmail}" --skip-email`);
+  }
+  await execAsync(`chown -R apache:apache "${installPath}" 2>/dev/null || true`);
+  res.json({ message: 'WordPress installed', url: `http://${domain}` });
+});
+
+/* ── Error pages (per owned domain) ─────────────────────────── */
+
+const PORTAL_ERR_DIR = '.errpages';
+
+router.get('/errpages/:domain/:code', clientAuth, async (req: Request, res: Response) => {
+  const { domain, code } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!/^(400|401|403|404|500|502|503)$/.test(code)) return res.status(400).json({ error: 'Unsupported code' });
+  const file = path.join(PORTAL_WEBROOT, domain, 'public_html', PORTAL_ERR_DIR, `${code}.html`);
+  const content = await fs.readFile(file, 'utf-8').catch(() => '');
+  res.json({ content });
+});
+
+router.post('/errpages/:domain/:code', clientAuth, async (req: Request, res: Response) => {
+  const { domain, code } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!/^(400|401|403|404|500|502|503)$/.test(code)) return res.status(400).json({ error: 'Unsupported code' });
+  const { content } = req.body;
+  if (typeof content !== 'string') return res.status(400).json({ error: 'content required' });
+  const dir = path.join(PORTAL_WEBROOT, domain, 'public_html', PORTAL_ERR_DIR);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, `${code}.html`), content);
+  // Wire ErrorDocument in .htaccess
+  const htaccess = path.join(PORTAL_WEBROOT, domain, 'public_html', '.htaccess');
+  const directive = `ErrorDocument ${code} /${PORTAL_ERR_DIR}/${code}.html`;
+  const existing = await fs.readFile(htaccess, 'utf-8').catch(() => '');
+  if (!existing.includes(directive)) {
+    await fs.writeFile(htaccess, existing.replace(/\n+$/, '') + (existing ? '\n' : '') + directive + '\n');
+  }
+  res.json({ success: true });
+});
+
+/* ── File manager (scoped strictly to /var/www/<owned-domain>) ── */
+
+import multer from 'multer';
+const portalFileUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const clientId = (req as any).clientId;
+      const targetDomain = (req as any).portalTargetDomain;
+      const targetSub = (req.query.subpath as string) || '';
+      try {
+        const base = path.resolve(path.join(PORTAL_WEBROOT, targetDomain));
+        const dest = path.resolve(base, targetSub.replace(/^\/+/, ''));
+        if (dest !== base && !dest.startsWith(base + path.sep)) throw new Error('Path traversal');
+        cb(null, dest);
+      } catch (e: any) { cb(e, ''); }
+      void clientId;
+    },
+    filename: (_req, file, cb) => cb(null, path.basename(file.originalname || 'upload').replace(/^\.+/, '_').slice(0, 255) || 'upload'),
+  }),
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+function portalResolveOwnedPath(clientId: number, domain: string, sub: string): string {
+  if (!clientOwnsDomain(clientId, domain)) throw new Error('Not your domain');
+  const base = path.resolve(path.join(PORTAL_WEBROOT, domain));
+  const resolved = path.resolve(base, (sub || '').replace(/^\/+/, ''));
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) throw new Error('Path traversal not allowed');
+  if (/[$`"\\!]/.test(resolved)) throw new Error('Path contains invalid characters');
+  return resolved;
+}
+
+router.get('/files/:domain/list', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const dir = portalResolveOwnedPath((req as any).clientId, req.params.domain, (req.query.path as string) || '');
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const items = await Promise.all(entries.map(async e => {
+      try {
+        const st = await fs.stat(path.join(dir, e.name));
+        return { name: e.name, type: e.isDirectory() ? 'directory' : 'file', size: st.size, modified: st.mtime, permissions: (st.mode & 0o777).toString(8) };
+      } catch { return { name: e.name, type: 'file', size: 0, modified: new Date(), permissions: '000' }; }
+    }));
+    items.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : (a.type === 'directory' ? -1 : 1));
+    res.json({ path: dir.replace(path.resolve(path.join(PORTAL_WEBROOT, req.params.domain)), '') || '/', items });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get('/files/:domain/read', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const file = portalResolveOwnedPath((req as any).clientId, req.params.domain, (req.query.path as string) || '');
+    const st = await fs.stat(file);
+    if (st.size > 2 * 1024 * 1024) return res.status(413).json({ error: 'File too large to edit (> 2 MB)' });
+    res.json({ content: await fs.readFile(file, 'utf-8') });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/files/:domain/write', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const file = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '');
+    await fs.writeFile(file, String(req.body.content ?? ''), 'utf-8');
+    res.json({ message: 'File saved' });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/files/:domain/mkdir', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const dir = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '');
+    await fs.mkdir(dir, { recursive: true });
+    res.json({ message: 'Directory created' });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.delete('/files/:domain/delete', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const target = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '');
+    await fs.rm(target, { recursive: true, force: true });
+    res.json({ message: 'Deleted' });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/files/:domain/rename', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const from = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.from || '');
+    const to   = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.to   || '');
+    await fs.rename(from, to);
+    res.json({ message: 'Renamed' });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// Upload stamps req.portalTargetDomain before multer destination resolver
+// kicks in so the upload can't escape the client's owned-domain root.
+router.post('/files/:domain/upload', clientAuth,
+  (req: Request, res: Response, next: NextFunction) => {
+    if (!PORTAL_DOMAIN_RE.test(req.params.domain)) return res.status(400).json({ error: 'Invalid domain' });
+    if (!clientOwnsDomain((req as any).clientId, req.params.domain)) return res.status(403).json({ error: 'Not your domain' });
+    (req as any).portalTargetDomain = req.params.domain;
+    next();
+  },
+  portalFileUpload.array('files'),
+  (req: Request, res: Response) => {
+    const files = (req.files as Express.Multer.File[]) || [];
+    res.json({ message: `Uploaded ${files.length} file(s)` });
+  },
+);
+
+router.get('/files/:domain/download', clientAuth, async (req: Request, res: Response) => {
+  try {
+    const file = portalResolveOwnedPath((req as any).clientId, req.params.domain, (req.query.path as string) || '');
+    res.download(file);
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
 export default router;

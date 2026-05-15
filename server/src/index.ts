@@ -99,8 +99,12 @@ app.use('/api/', ipWhitelistMiddleware);
 app.use('/api/', rateLimit({ windowMs: 60_000, max: 300, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, slow down.' } }));
 // Strict limit on auth endpoints — 20 req/min
 app.use('/api/auth/', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts.' } }));
-// Client portal login also rate-limited — 20 req/min
-app.use('/api/portal/', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts.' } }));
+// Client portal *login* paths only — 20 req/min. The portal also exposes
+// data routes (/portal/accounts, /portal/files/..., etc.) under the same
+// prefix and those should fall under the regular /api/ limiter, not the
+// stricter login budget. Without this narrow path the file manager would
+// burn the 20-req budget on a single page load.
+app.use(['/api/portal/login', '/api/portal/login/totp'], rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many login attempts.' } }));
 
 // Stripe webhook needs the raw body BEFORE json parsing
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
