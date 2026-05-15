@@ -32,14 +32,18 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
   }
 
   const homeDir = directory || path.join(WEBROOT, username);
+  if (!/^\/[a-zA-Z0-9_./-]+$/.test(homeDir)) {
+    res.status(400).json({ error: 'Invalid directory path' });
+    return;
+  }
   const maxRate = req.body.max_rate ? Number(req.body.max_rate) : 0;
 
   try {
     // Create system user locked to FTP only
-    await execAsync(`useradd -m -d ${homeDir} -s /sbin/nologin ${username} 2>/dev/null || true`);
+    await execAsync(`useradd -m -d "${homeDir}" -s /sbin/nologin ${username} 2>/dev/null || true`);
     await execAsync(`echo '${username}:${password.replace(/'/g, "'\\''")}' | chpasswd`);
-    await execAsync(`mkdir -p ${homeDir}`);
-    await execAsync(`chown ${username}:${username} ${homeDir}`);
+    await execAsync(`mkdir -p "${homeDir}"`);
+    await execAsync(`chown ${username}:${username} "${homeDir}"`);
 
     // Add to vsftpd user list
     await fs.appendFile('/etc/vsftpd/user_list', `${username}\n`);
@@ -61,6 +65,7 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
 router.put('/users/:username/password', async (req: AuthRequest, res: Response) => {
   const { username } = req.params;
   const { password } = req.body;
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
   if (!password || password.length < 6) {
     res.status(400).json({ error: 'Password must be at least 6 characters' });
     return;

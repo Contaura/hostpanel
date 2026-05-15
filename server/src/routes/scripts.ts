@@ -107,6 +107,10 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Domain is required' });
     return;
   }
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/.test(domain)) {
+    res.status(400).json({ error: 'Invalid domain' });
+    return;
+  }
 
   const installPath = path.join(WEBROOT, domain, 'public_html');
   const meta = SCRIPTS[script];
@@ -163,13 +167,13 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
       try {
         const siteUrl = `http://${domain}`;
         await execAsync(
-          `wp --path=${installPath} core install --url='${siteUrl}' --title='${(siteTitle || 'My Site').replace(/'/g, "'\\''")}' --admin_user='${adminUser || 'admin'}' --admin_password='${(adminPass || 'changeme').replace(/'/g, "'\\''")}' --admin_email='${adminEmail || 'admin@example.com'}' --skip-email 2>/dev/null || true`
+          `wp --path="${installPath}" core install --url='${siteUrl}' --title='${(siteTitle || 'My Site').replace(/'/g, "'\\''")}' --admin_user='${(adminUser || 'admin').replace(/'/g, "'\\''")}' --admin_password='${(adminPass || 'changeme').replace(/'/g, "'\\''")}' --admin_email='${adminEmail || 'admin@example.com'}' --skip-email 2>/dev/null || true`
         );
       } catch {}
     }
 
-    await execAsync(`chown -R apache:apache ${installPath} 2>/dev/null || chown -R www-data:www-data ${installPath} 2>/dev/null || true`);
-    await execAsync(`find ${installPath} -type d -exec chmod 755 {} \\; && find ${installPath} -type f -exec chmod 644 {} \\;`);
+    await execAsync(`chown -R apache:apache "${installPath}" 2>/dev/null || chown -R www-data:www-data "${installPath}" 2>/dev/null || true`);
+    await execAsync(`find "${installPath}" -type d -exec chmod 755 {} \\; && find "${installPath}" -type f -exec chmod 644 {} \\;`);
 
     res.json({ message: `${meta.name} installed at ${installPath}`, url: `http://${domain}` });
   } catch (err: any) {
