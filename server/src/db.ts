@@ -1,3 +1,8 @@
+// Load .env first thing — db.ts runs its env→settings migration at module
+// scope, and index.ts's `dotenv.config()` doesn't fire until after every
+// import has resolved, so without this `process.env.STRIPE_*` etc. are still
+// undefined when the migration block below executes. dotenv is idempotent.
+import 'dotenv/config';
 import Database from 'better-sqlite3';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
@@ -348,9 +353,15 @@ seedSetting('panel_2fa_required', '0');
 // becomes the source of truth without admins having to re-enter everything.
 // Only fires when the matching DB row is empty — so once the admin edits
 // the value in the UI, env changes are ignored.
+// Patterns that match obvious placeholder values from .env.example so we
+// don't migrate "sk_test_..." or "noreply@yourdomain.com" into the live
+// settings table on first boot. Real Stripe keys never end in "...".
+const PLACEHOLDER_RE = /(\.{3}\s*$|^sk_test_\.\.\.|^pk_test_\.\.\.|^whsec_\.\.\.|^noreply@yourdomain\.com$|^your-smtp-username$|^your-smtp-password$|^smtp\.yourprovider\.com$|^examplehashhere$)/i;
+
 const migrateEnvToSetting = (envKey: string, settingKey: string) => {
   const envVal = process.env[envKey];
   if (!envVal) return;
+  if (PLACEHOLDER_RE.test(envVal)) return;
   const cur = (db.prepare('SELECT value FROM settings WHERE key = ?').get(settingKey) as any)?.value;
   if (cur) return;
   db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").run(settingKey, envVal);
