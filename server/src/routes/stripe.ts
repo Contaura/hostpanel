@@ -87,7 +87,13 @@ router.post('/webhook', (req: Request, res: Response) => {
     if (webhookSecret && sig) {
       event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
     } else {
-      // Development: no signature verification
+      // In production we refuse to process unsigned events — otherwise anyone
+      // who reaches /api/stripe/webhook can mark invoices paid by POSTing a
+      // synthetic checkout.session.completed body. The unsigned path stays
+      // available in dev for local stripe-cli testing.
+      if (process.env.NODE_ENV === 'production') {
+        return res.status(400).json({ error: 'Webhook signature missing or webhook secret not configured' });
+      }
       event = JSON.parse((req.body as Buffer).toString());
     }
   } catch (err: any) {

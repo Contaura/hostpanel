@@ -63,10 +63,13 @@ import { setupTerminal } from './terminal';
 
 dotenv.config();
 
-// Warn on insecure defaults in production
+// Fail closed on insecure defaults in production. A warning isn't enough —
+// running with the example JWT_SECRET means every JWT can be forged by anyone
+// who has read the README, and a warning in stderr won't stop that.
 if (process.env.NODE_ENV === 'production') {
   if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'hostpanel-secret-change-in-production') {
-    console.warn('[SECURITY] JWT_SECRET is set to the insecure default. Set a strong random value in your .env file.');
+    console.error('[SECURITY] Refusing to start: JWT_SECRET is missing or set to the example value. Set a strong random value in /etc/hostpanel.env.');
+    process.exit(1);
   }
   if (!process.env.ADMIN_PASS_HASH || process.env.ADMIN_PASS_HASH === '$2b$12$examplehashhere') {
     console.warn('[SECURITY] ADMIN_PASS_HASH is set to the example value. Change your admin password immediately.');
@@ -94,6 +97,9 @@ app.use('/api/portal/', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: 
 
 // Stripe webhook needs the raw body BEFORE json parsing
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
+// Git-deploy webhooks also need the raw body so HMAC can verify the exact bytes
+// GitHub / GitLab signed. The route handler parses the JSON itself.
+app.use('/api/git-deploy/webhook', express.raw({ type: '*/*', limit: '1mb' }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

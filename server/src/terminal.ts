@@ -19,7 +19,7 @@ export function setupTerminal(httpServer: HttpServer): void {
     }
     let payload: any;
     try {
-      payload = jwt.verify(token, JWT_SECRET);
+      payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     } catch {
       ws.close(4001, 'Unauthorized: invalid token');
       return;

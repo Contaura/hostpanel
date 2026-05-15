@@ -22,7 +22,7 @@ function clientAuth(req: Request, res: Response, next: NextFunction) {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const payload = jwt.verify(auth.slice(7), jwtSecret()) as any;
+    const payload = jwt.verify(auth.slice(7), jwtSecret(), { algorithms: ['HS256'] }) as any;
     if (payload.role !== 'client') return res.status(403).json({ error: 'Forbidden' });
     (req as any).clientId = payload.clientId;
     next();
@@ -37,12 +37,20 @@ router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
-  const client: any = db.prepare('SELECT * FROM clients WHERE email = ? AND portal_enabled = 1').get(email);
-  if (!client) return res.status(401).json({ error: 'Invalid credentials or portal access not enabled' });
-  if (!client.password_hash) return res.status(401).json({ error: 'Password not set. Contact your hosting provider.' });
+  // Use a single generic message for every failure path below so that an
+  // attacker can't tell "no such email" from "portal disabled" from "wrong
+  // password" from "password not set". The dummy bcrypt.compare against a
+  // valid-shaped hash keeps the timing roughly constant when the email is
+  // unknown or the password row is empty.
+  const GENERIC_ERR = { error: 'Invalid credentials' };
+  const DUMMY_HASH = '$2a$12$0000000000000000000000000000000000000000000000000000';
 
-  const valid = await bcrypt.compare(password, client.password_hash);
-  if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+  const client: any = db.prepare('SELECT * FROM clients WHERE email = ? AND portal_enabled = 1').get(email);
+  const hashToTest = client?.password_hash || DUMMY_HASH;
+  const valid = await bcrypt.compare(password, hashToTest);
+  if (!client || !client.password_hash || !valid) {
+    return res.status(401).json(GENERIC_ERR);
+  }
 
   const totp = db.prepare('SELECT * FROM client_totp WHERE client_id = ?').get(client.id) as any;
   if (totp?.enabled) {
@@ -60,7 +68,7 @@ router.post('/login/totp', async (req: Request, res: Response) => {
   const { temp_token, code } = req.body;
   if (!temp_token || !code) return res.status(400).json({ error: 'temp_token and code required' });
   let payload: any;
-  try { payload = jwt.verify(temp_token, jwtSecret()); } catch { return res.status(401).json({ error: 'Invalid or expired token' }); }
+  try { payload = jwt.verify(temp_token, jwtSecret(), { algorithms: ['HS256'] }); } catch { return res.status(401).json({ error: 'Invalid or expired token' }); }
   if (payload.role !== 'client_pending_2fa') return res.status(401).json({ error: 'Invalid token' });
   const totp = db.prepare('SELECT * FROM client_totp WHERE client_id = ?').get(payload.clientId) as any;
   if (!totp?.enabled) return res.status(400).json({ error: '2FA not enabled' });
@@ -135,8 +143,18 @@ router.post('/totp/verify', clientAuth, (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-router.delete('/totp', clientAuth, (req: Request, res: Response) => {
-  db.prepare('DELETE FROM client_totp WHERE client_id=?').run((req as any).clientId);
+router.delete('/totp', clientAuth, async (req: Request, res: Response) => {
+  // Require re-authentication with the current password to disable 2FA — a
+  // stolen session token shouldn't be enough to strip the second factor off
+  // the account.
+  const { password } = req.body || {};
+  if (!password) return res.status(400).json({ error: 'Current password is required to disable 2FA' });
+  const clientId = (req as any).clientId;
+  const client: any = db.prepare('SELECT password_hash FROM clients WHERE id = ?').get(clientId);
+  if (!client?.password_hash) return res.status(401).json({ error: 'Invalid credentials' });
+  const ok = await bcrypt.compare(password, client.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+  db.prepare('DELETE FROM client_totp WHERE client_id=?').run(clientId);
   res.json({ success: true });
 });
 

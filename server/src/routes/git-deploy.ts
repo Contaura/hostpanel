@@ -87,22 +87,34 @@ router.post('/:id/deploy', async (req: Request, res: Response) => {
 
 /* ── Webhook receiver (public — no auth) ─────────────────── */
 
+function timingSafeStrEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 router.post('/webhook/:name', async (req: Request, res: Response) => {
   const dep = db.prepare('SELECT * FROM git_deployments WHERE name = ?').get(req.params.name) as any;
   if (!dep) return res.status(404).json({ error: 'Deployment not found' });
 
-  // Verify HMAC signature — always required when secret is set
+  // index.ts mounts express.raw for /api/git-deploy/webhook so req.body is a
+  // Buffer here. HMAC verification has to run over those exact bytes; using
+  // JSON.stringify(parsed) would re-serialize with different key order and
+  // whitespace, so the signature would never validate.
+  const rawBody: Buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body ?? {}));
+
   if (dep.webhook_secret) {
-    const hubSig    = req.headers['x-hub-signature-256'] as string || '';
-    const gitlabTok = req.headers['x-gitlab-token']      as string || '';
+    const hubSig    = (req.headers['x-hub-signature-256'] as string) || '';
+    const gitlabTok = (req.headers['x-gitlab-token']      as string) || '';
 
     if (hubSig) {
-      const expected = 'sha256=' + crypto.createHmac('sha256', dep.webhook_secret).update(JSON.stringify(req.body)).digest('hex');
-      if (!hubSig.startsWith('sha256=') || hubSig !== expected) {
+      const expected = 'sha256=' + crypto.createHmac('sha256', dep.webhook_secret).update(rawBody).digest('hex');
+      if (!hubSig.startsWith('sha256=') || !timingSafeStrEqual(hubSig, expected)) {
         return res.status(401).json({ error: 'Invalid signature' });
       }
     } else if (gitlabTok) {
-      if (gitlabTok !== dep.webhook_secret) {
+      if (!timingSafeStrEqual(gitlabTok, dep.webhook_secret)) {
         return res.status(401).json({ error: 'Invalid token' });
       }
     } else {
@@ -110,9 +122,17 @@ router.post('/webhook/:name', async (req: Request, res: Response) => {
     }
   }
 
-  // Only deploy on the configured branch
-  const ref = req.body?.ref || req.body?.object_attributes?.ref || '';
-  if (ref && !ref.endsWith(dep.branch)) return res.json({ skipped: true, reason: 'Branch mismatch' });
+  // Parse the body ourselves now that signature verification has passed.
+  let payload: any = {};
+  try { payload = JSON.parse(rawBody.toString('utf8')); } catch { /* empty/non-json body — fine */ }
+
+  // Only deploy on the configured branch. The previous `ref.endsWith(branch)`
+  // would accept refs/heads/feature-main when branch=main, so we exact-match
+  // against the GitHub/GitLab ref form.
+  const ref: string = payload?.ref || payload?.object_attributes?.ref || '';
+  if (ref && dep.branch && ref !== `refs/heads/${dep.branch}` && ref !== `refs/tags/${dep.branch}`) {
+    return res.json({ skipped: true, reason: 'Branch mismatch' });
+  }
 
   try {
     await runDeploy(dep.deploy_path, dep.deploy_command);

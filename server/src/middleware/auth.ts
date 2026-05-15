@@ -19,7 +19,11 @@ export function authenticateToken(req: AuthRequest, res: Response, next: NextFun
   }
 
   try {
-    const decoded = jwt.verify(token, jwtSecret()) as { username: string; role: string };
+    // Pin HS256 — without this, an attacker who can supply a forged token gets
+    // to choose the algorithm (e.g. alg:none, or RS256 with the secret as the
+    // public key) on older jsonwebtoken versions. jsonwebtoken@9 defaults to
+    // HS256 when the secret is a string, but being explicit is cheap.
+    const decoded = jwt.verify(token, jwtSecret(), { algorithms: ['HS256'] }) as { username: string; role: string };
     req.user = decoded;
     next();
   } catch {
@@ -43,7 +47,7 @@ export function readonlyGuard(req: Request, res: Response, next: NextFunction): 
   const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
   if (!tok) { next(); return; }
   try {
-    const payload = jwt.verify(tok, jwtSecret()) as { role?: string };
+    const payload = jwt.verify(tok, jwtSecret(), { algorithms: ['HS256'] }) as { role?: string };
     if (payload.role === 'readonly') {
       res.status(403).json({ error: 'Readonly users cannot perform write operations' });
       return;
