@@ -10,12 +10,19 @@ const router = Router();
 const execAsync = promisify(exec);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
+const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}$/;
+const SLUG_RE   = /^[a-zA-Z0-9_-]+$/;
+
 function wpPath(domain: string) {
   return path.join(WEBROOT, domain, 'public_html');
 }
 
 function wp(domain: string, cmd: string) {
   return execAsync(`wp --path="${wpPath(domain)}" --allow-root ${cmd} 2>&1`, { timeout: 60000 });
+}
+
+function validateDomain(domain: string): boolean {
+  return DOMAIN_RE.test(domain);
 }
 
 /* ── Detect WP installs ──────────────────────────────────────── */
@@ -37,6 +44,7 @@ router.get('/sites', async (_req: Request, res: Response) => {
 
 router.get('/:domain/info', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const [core, url] = await Promise.all([
       wp(domain, 'core version').catch(() => ({ stdout: 'unknown' })),
@@ -51,6 +59,7 @@ router.get('/:domain/info', async (req: Request, res: Response) => {
 
 router.post('/:domain/core-update', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const { stdout } = await wp(domain, 'core update');
     res.json({ output: stdout });
@@ -61,6 +70,7 @@ router.post('/:domain/core-update', async (req: Request, res: Response) => {
 
 router.get('/:domain/plugins', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const { stdout } = await wp(domain, 'plugin list --format=json');
     res.json(JSON.parse(stdout.trim()));
@@ -69,6 +79,8 @@ router.get('/:domain/plugins', async (req: Request, res: Response) => {
 
 router.post('/:domain/plugins/:slug/toggle', async (req: Request, res: Response) => {
   const { domain, slug } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
   const { active } = req.body;
   try {
     const action = active ? 'deactivate' : 'activate';
@@ -79,6 +91,8 @@ router.post('/:domain/plugins/:slug/toggle', async (req: Request, res: Response)
 
 router.post('/:domain/plugins/:slug/update', async (req: Request, res: Response) => {
   const { domain, slug } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
   try {
     const { stdout } = await wp(domain, `plugin update ${slug}`);
     res.json({ output: stdout });
@@ -87,6 +101,8 @@ router.post('/:domain/plugins/:slug/update', async (req: Request, res: Response)
 
 router.post('/:domain/plugins/:slug/delete', async (req: Request, res: Response) => {
   const { domain, slug } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
   try {
     await wp(domain, `plugin deactivate ${slug}`);
     const { stdout } = await wp(domain, `plugin delete ${slug}`);
@@ -98,6 +114,7 @@ router.post('/:domain/plugins/:slug/delete', async (req: Request, res: Response)
 
 router.get('/:domain/themes', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const { stdout } = await wp(domain, 'theme list --format=json');
     res.json(JSON.parse(stdout.trim()));
@@ -106,6 +123,8 @@ router.get('/:domain/themes', async (req: Request, res: Response) => {
 
 router.post('/:domain/themes/:slug/activate', async (req: Request, res: Response) => {
   const { domain, slug } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid theme slug' });
   try {
     const { stdout } = await wp(domain, `theme activate ${slug}`);
     res.json({ output: stdout });
@@ -114,6 +133,8 @@ router.post('/:domain/themes/:slug/activate', async (req: Request, res: Response
 
 router.post('/:domain/themes/:slug/update', async (req: Request, res: Response) => {
   const { domain, slug } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid theme slug' });
   try {
     const { stdout } = await wp(domain, `theme update ${slug}`);
     res.json({ output: stdout });
@@ -124,6 +145,7 @@ router.post('/:domain/themes/:slug/update', async (req: Request, res: Response) 
 
 router.post('/:domain/update-all', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const [core, plugins, themes] = await Promise.all([
       wp(domain, 'core update').catch(e => ({ stdout: e.message })),
@@ -138,6 +160,7 @@ router.post('/:domain/update-all', async (req: Request, res: Response) => {
 
 router.post('/:domain/search-replace', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const { search, replace } = req.body;
   if (!search || !replace) return res.status(400).json({ error: 'search and replace required' });
   try {
@@ -152,6 +175,7 @@ const zipUpload = multer({ dest: '/tmp/', limits: { fileSize: 100 * 1024 * 1024 
 
 router.post('/:domain/plugins/upload', zipUpload.single('zip'), async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
   try {
     const { stdout } = await wp(domain, `plugin install "${req.file.path}" --activate`);
@@ -165,6 +189,7 @@ router.post('/:domain/plugins/upload', zipUpload.single('zip'), async (req: Requ
 
 router.post('/:domain/themes/upload', zipUpload.single('zip'), async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
   try {
     const { stdout } = await wp(domain, `theme install "${req.file.path}"`);

@@ -80,8 +80,9 @@ router.post('/wildcard', async (req: Request, res: Response) => {
 
 router.get('/test/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
+  if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    const { stdout } = await execAsync(`echo | openssl s_client -connect ${domain}:443 -servername ${domain} 2>/dev/null | openssl x509 -noout -subject -dates -issuer 2>/dev/null`);
+    const { stdout } = await execAsync(`echo | openssl s_client -connect "${domain}:443" -servername "${domain}" 2>/dev/null | openssl x509 -noout -subject -dates -issuer 2>/dev/null`);
     const notAfter  = stdout.match(/notAfter=(.+)/)?.[1]?.trim() || '';
     const notBefore = stdout.match(/notBefore=(.+)/)?.[1]?.trim() || '';
     const issuer    = stdout.match(/issuer=(.+)/)?.[1]?.trim() || '';
@@ -159,10 +160,16 @@ router.post('/renew-all', async (_req: Request, res: Response) => {
 router.post('/csr', async (req: Request, res: Response) => {
   const { domain, country = 'US', state = 'CA', city = 'San Francisco', org = 'My Company', email = '' } = req.body;
   if (!domain || /[^a-zA-Z0-9._*-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const stripSubj = (s: string) => String(s).replace(/["\\\/]/g, '').slice(0, 64);
+  const safeCountry = stripSubj(country).slice(0, 2);
+  const safeState   = stripSubj(state);
+  const safeCity    = stripSubj(city);
+  const safeOrg     = stripSubj(org);
+  const safeEmail   = String(email).replace(/[^a-zA-Z0-9.@_+-]/g, '').slice(0, 64);
   const safe = domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
   const keyFile = `/tmp/hp_${safe}.key`;
   const csrFile = `/tmp/hp_${safe}.csr`;
-  const subject = `/C=${country}/ST=${state}/L=${city}/O=${org}/CN=${domain}${email ? `/emailAddress=${email}` : ''}`;
+  const subject = `/C=${safeCountry}/ST=${safeState}/L=${safeCity}/O=${safeOrg}/CN=${domain}${safeEmail ? `/emailAddress=${safeEmail}` : ''}`;
   try {
     await execAsync(`openssl req -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${csrFile}" -subj "${subject}" 2>/dev/null`);
     const { stdout: csr } = await execAsync(`cat "${csrFile}"`);
@@ -177,11 +184,14 @@ router.post('/csr', async (req: Request, res: Response) => {
 router.post('/self-signed', async (req: Request, res: Response) => {
   const { domain, days = 365, country = 'US', org = 'My Company' } = req.body;
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const stripSubj = (s: string) => String(s).replace(/["\\\/]/g, '').slice(0, 64);
+  const safeCountry = stripSubj(country).slice(0, 2);
+  const safeOrg     = stripSubj(org);
   const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '_');
   const keyFile = `/tmp/hp_ss_${safe}.key`;
   const crtFile = `/tmp/hp_ss_${safe}.crt`;
   try {
-    await execAsync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${crtFile}" -days ${parseInt(String(days)) || 365} -subj "/C=${country}/O=${org}/CN=${domain}" 2>/dev/null`);
+    await execAsync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${crtFile}" -days ${parseInt(String(days)) || 365} -subj "/C=${safeCountry}/O=${safeOrg}/CN=${domain}" 2>/dev/null`);
     const { stdout: cert } = await execAsync(`cat "${crtFile}"`);
     const { stdout: key } = await execAsync(`cat "${keyFile}"`);
     await execAsync(`rm -f "${keyFile}" "${crtFile}"`).catch(() => {});

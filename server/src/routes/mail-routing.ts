@@ -61,8 +61,11 @@ router.post('/lists', async (req: Request, res: Response) => {
   const { name, domain, description, admin_email, admin_password } = req.body;
   if (!name || !domain || !admin_email) return res.status(400).json({ error: 'name, domain, admin_email required' });
   if (!/^[a-z0-9_-]+$/i.test(name)) return res.status(400).json({ error: 'Invalid list name' });
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(admin_email)) return res.status(400).json({ error: 'Invalid admin email' });
+  const safePass = (admin_password || 'changeme').replace(/[^a-zA-Z0-9!@#%^&*_+=.,-]/g, '');
   try {
-    await execAsync(`newlist -q ${name}@${domain} ${admin_email} ${admin_password || 'changeme'} 2>/dev/null`).catch(() => {});
+    await execAsync(`newlist -q "${name}@${domain}" "${admin_email}" "${safePass}" 2>/dev/null`).catch(() => {});
     const r = db.prepare('INSERT INTO mailing_lists (name, domain, description, admin_email) VALUES (?, ?, ?, ?)').run(name, domain, description || '', admin_email);
     res.json(db.prepare('SELECT * FROM mailing_lists WHERE id = ?').get(r.lastInsertRowid));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -72,7 +75,7 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
   const list = db.prepare('SELECT * FROM mailing_lists WHERE id = ?').get(req.params.id) as any;
   if (!list) return res.status(404).json({ error: 'Not found' });
   try {
-    await execAsync(`rmlist -a ${list.name}@${list.domain} 2>/dev/null`).catch(() => {});
+    await execAsync(`rmlist -a "${list.name}@${list.domain}" 2>/dev/null`).catch(() => {});
     db.prepare('DELETE FROM mailing_lists WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
