@@ -67,7 +67,7 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   // Update last_login
-  if (dbUser) db.prepare('UPDATE admin_users SET last_login = datetime("now") WHERE id = ?').run(dbUser.id);
+  if (dbUser) db.prepare("UPDATE admin_users SET last_login = datetime('now') WHERE id = ?").run(dbUser.id);
 
   const token = jwt.sign({ username, role }, jwtSecret(), { expiresIn: '8h' });
   res.json({ token, username, role });

@@ -51,7 +51,7 @@ router.post('/', async (req: Request, res: Response) => {
       writeFileSync(vhostFile, conf);
     }
 
-    db.prepare('INSERT INTO php_domain_versions (domain, php_version) VALUES (?, ?) ON CONFLICT(domain) DO UPDATE SET php_version=excluded.php_version, updated_at=datetime("now")')
+    db.prepare("INSERT INTO php_domain_versions (domain, php_version) VALUES (?, ?) ON CONFLICT(domain) DO UPDATE SET php_version=excluded.php_version, updated_at=datetime('now')")
       .run(domain, php_version);
     await execAsync('apachectl graceful').catch(() => {});
     res.json({ success: true, domain, php_version });

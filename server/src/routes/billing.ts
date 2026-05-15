@@ -448,7 +448,7 @@ router.post('/recurring/:id/run', async (req, res: Response) => {
     if (schedule.cycle === 'monthly') next.setMonth(next.getMonth() + 1);
     else if (schedule.cycle === 'yearly') next.setFullYear(next.getFullYear() + 1);
     else if (schedule.cycle === 'weekly') next.setDate(next.getDate() + 7);
-    db.prepare('UPDATE recurring_schedules SET next_run=?, last_run=date("now") WHERE id=?').run(next.toISOString().slice(0, 10), schedule.id);
+    db.prepare("UPDATE recurring_schedules SET next_run=?, last_run=date('now') WHERE id=?").run(next.toISOString().slice(0, 10), schedule.id);
 
     res.json({ success: true, invoice_id: r.lastInsertRowid });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

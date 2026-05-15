@@ -163,8 +163,18 @@ async function deliverWebhook(webhook: any, event: string, payload: string): Pro
       res2.on('data', d => { body += d; });
       res2.on('end', () => {
         const status = res2.statusCode || 0;
-        db.prepare('UPDATE webhooks SET last_delivery=datetime("now"), last_status=? WHERE id=?').run(status, webhook.id);
-        db.prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, status, response) VALUES (?, ?, ?, ?, ?)').run(webhook.id, event, payload, status, body.slice(0, 2000));
+        // A thrown SqliteError from here used to crash the entire Node
+        // process — this callback runs in its own event-loop tick, not
+        // inside the Express request chain, so Express's error middleware
+        // never sees it and Node's default uncaughtException handler
+        // exits. Swallow DB write failures: the webhook delivery itself
+        // succeeded, so still resolve the outer Promise.
+        try {
+          db.prepare("UPDATE webhooks SET last_delivery=datetime('now'), last_status=? WHERE id=?").run(status, webhook.id);
+          db.prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, status, response) VALUES (?, ?, ?, ?, ?)').run(webhook.id, event, payload, status, body.slice(0, 2000));
+        } catch (e) {
+          console.error('[webhook] failed to record delivery for', webhook.id, e);
+        }
         resolve({ status, response: body.slice(0, 500) });
       });
     });

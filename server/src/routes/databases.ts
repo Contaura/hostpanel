@@ -221,8 +221,13 @@ router.get('/users/:user/grants', async (req: AuthRequest, res: Response) => {
   let conn;
   try {
     conn = await getConn();
+    // USER_PRIVILEGES is the global (server-wide) privilege table — its rows
+    // have no TABLE_SCHEMA column, so the previous SELECT 500'd with
+    // "Unknown column 'TABLE_SCHEMA' in 'field list'". Emit NULL for the
+    // db_name so the response shape stays uniform between global and
+    // per-database rows.
     const [rows] = await conn.query<mysql.RowDataPacket[]>(
-      `SELECT PRIVILEGE_TYPE, TABLE_SCHEMA as db_name, IS_GRANTABLE
+      `SELECT PRIVILEGE_TYPE, NULL AS db_name, IS_GRANTABLE
        FROM information_schema.USER_PRIVILEGES
        WHERE GRANTEE = ?`,
       [`'${user}'@'${host}'`]

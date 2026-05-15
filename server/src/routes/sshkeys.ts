@@ -103,15 +103,31 @@ async function writeAccountKeys(username: string, keys: SSHKey[]): Promise<void>
   }).catch(() => {});
 }
 
+// Resolve a username to its uid via `id -u`; rejects unknown users. Same
+// pattern as the cron-account check — without this, writeAccountKeys was
+// happily creating /home/<nosuchuser>/.ssh/authorized_keys owned by root
+// (the chown -R falls back silently when the user doesn't exist), which
+// would then leak any keys back to a future OS user with that name.
+async function osUserExists(username: string): Promise<boolean> {
+  const { exec } = await import('child_process');
+  const { promisify } = await import('util');
+  try { await promisify(exec)(`id -u "${username}"`); return true; }
+  catch { return false; }
+}
+
 router.get('/account/:username', async (req: AuthRequest, res: Response) => {
   const { username } = req.params;
   if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (!await osUserExists(username)) return res.status(404).json({ error: `No OS user named '${username}'` });
   res.json(await readAccountKeys(username));
 });
 
 router.post('/account/:username/add', async (req: AuthRequest, res: Response) => {
   const { username } = req.params;
   if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (!await osUserExists(username)) {
+    return res.status(404).json({ error: `No OS user named '${username}'. Create the user (useradd ${username}) before managing per-account SSH keys.` });
+  }
   const { key } = req.body;
   if (!key?.trim()) return res.status(400).json({ error: 'Key is required' });
   const trimmed = key.trim();
@@ -131,6 +147,7 @@ router.delete('/account/:username/:id', async (req: AuthRequest, res: Response) 
   const { username } = req.params;
   const id = parseInt(req.params.id);
   if (!ACCT_RE.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (!await osUserExists(username)) return res.status(404).json({ error: `No OS user named '${username}'` });
   try {
     const keys = await readAccountKeys(username);
     if (id < 0 || id >= keys.length) return res.status(404).json({ error: 'Key not found' });
