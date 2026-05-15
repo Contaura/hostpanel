@@ -13,6 +13,7 @@ export default function AddonDomains() {
   const [form, setForm] = useState({ account_id: '', domain: '', subdomain: '', document_root: '' });
   const [adding, setAdding] = useState(false);
   const [addonSearch, setAddonSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => {
     api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : []));
@@ -33,8 +34,11 @@ export default function AddonDomains() {
 
   async function del(id: number, domain: string) {
     if (!confirm(`Remove addon domain ${domain}?`)) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    setAddons(a => a.filter(x => x.id !== id));
+    setDeleting(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      setAddons(a => a.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
   }
 
   return (
@@ -108,7 +112,7 @@ export default function AddonDomains() {
                     <td className="table-cell font-mono text-xs text-slate-500 truncate max-w-[200px]">{a.document_root}</td>
                     <td className="table-cell text-xs text-slate-500">{a.created_at ? new Date(a.created_at).toLocaleDateString() : '—'}</td>
                     <td className="table-cell">
-                      <button className="btn-icon text-red-500" onClick={() => del(a.id, a.domain)}><Trash2 size={13} /></button>
+                      <button className="btn-icon text-red-500" disabled={deleting === a.id} onClick={() => del(a.id, a.domain)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ));

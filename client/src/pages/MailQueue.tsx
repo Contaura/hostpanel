@@ -18,6 +18,7 @@ export default function MailQueue() {
   const [bounceLog, setBounceLog] = useState<string[]>([]);
   const [bounceLoading, setBounceLoading] = useState(false);
   const [queueSearch, setQueueSearch] = useState('');
+  const [actioning, setActioning] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -54,8 +55,11 @@ export default function MailQueue() {
   }
 
   async function deleteMsg(id: string) {
-    await api(`/${id}`, { method: 'DELETE' });
-    setMessages(m => m.filter(x => x.id !== id));
+    setActioning(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      setMessages(m => m.filter(x => x.id !== id));
+    } finally { setActioning(null); }
   }
 
   async function deleteAll() {
@@ -66,21 +70,30 @@ export default function MailQueue() {
   }
 
   async function retryMsg(id: string) {
-    await api(`/retry/${id}`, { method: 'POST' });
-    toast.success('Retry queued');
-    load();
+    setActioning(id);
+    try {
+      await api(`/retry/${id}`, { method: 'POST' });
+      toast.success('Retry queued');
+      load();
+    } finally { setActioning(null); }
   }
 
   async function holdMsg(id: string) {
-    await api(`/hold/${id}`, { method: 'POST' });
-    toast.success('Message held');
-    load();
+    setActioning(id);
+    try {
+      await api(`/hold/${id}`, { method: 'POST' });
+      toast.success('Message held');
+      load();
+    } finally { setActioning(null); }
   }
 
   async function unholdMsg(id: string) {
-    await api(`/unhold/${id}`, { method: 'POST' });
-    toast.success('Message released');
-    load();
+    setActioning(id);
+    try {
+      await api(`/unhold/${id}`, { method: 'POST' });
+      toast.success('Message released');
+      load();
+    } finally { setActioning(null); }
   }
 
   return (
@@ -183,12 +196,12 @@ export default function MailQueue() {
                     </td>
                     <td className="table-cell">
                       <div className="flex gap-1">
-                        <button className="btn-icon text-blue-500" title="Retry" onClick={() => retryMsg(m.id)}><RotateCcw size={13} /></button>
+                        <button className="btn-icon text-blue-500" title="Retry" disabled={actioning === m.id} onClick={() => retryMsg(m.id)}><RotateCcw size={13} /></button>
                         {m.status === 'held'
-                          ? <button className="btn-icon text-emerald-500" title="Unhold" onClick={() => unholdMsg(m.id)}><PlayCircle size={13} /></button>
-                          : <button className="btn-icon text-amber-500" title="Hold" onClick={() => holdMsg(m.id)}><PauseCircle size={13} /></button>
+                          ? <button className="btn-icon text-emerald-500" title="Unhold" disabled={actioning === m.id} onClick={() => unholdMsg(m.id)}><PlayCircle size={13} /></button>
+                          : <button className="btn-icon text-amber-500" title="Hold" disabled={actioning === m.id} onClick={() => holdMsg(m.id)}><PauseCircle size={13} /></button>
                         }
-                        <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
+                        <button className="btn-icon text-red-500" title="Delete" disabled={actioning === m.id} onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>

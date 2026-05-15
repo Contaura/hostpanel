@@ -25,6 +25,7 @@ export default function AdminUsers() {
   const [policy, setPolicy] = useState<PasswordPolicy>({ min_length: 8, require_upper: false, require_number: false, require_special: false });
   const [policySaving, setPolicySaving] = useState(false);
   const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => { load(); loadPolicy(); }, []);
 
@@ -52,8 +53,10 @@ export default function AdminUsers() {
 
   async function remove(id: number, username: string) {
     if (!confirm(`Delete admin user "${username}"?`)) return;
+    setDeleting(id);
     try { await adel(`/api/admin-users/${id}`); success('User deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   function startEdit(u: AdminUser) {
@@ -162,7 +165,7 @@ export default function AdminUsers() {
                     <td className="table-cell">
                       <div className="flex gap-1">
                         <button className="btn-icon" onClick={() => startEdit(u)}><Edit2 size={13} /></button>
-                        <button className="btn-icon text-red-500" onClick={() => remove(u.id, u.username)}><Trash2 size={13} /></button>
+                        <button className="btn-icon text-red-500" disabled={deleting === u.id} onClick={() => remove(u.id, u.username)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>

@@ -22,6 +22,7 @@ export default function Redirects() {
   const [form, setForm] = useState({ domain: '', from: '/', to: '', type: '301' as '301' | '302' });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   async function load() {
     try {
@@ -48,8 +49,10 @@ export default function Redirects() {
 
   async function remove(id: number) {
     if (!confirm('Remove this redirect?')) return;
+    setDeleting(id);
     try { await axios.delete(`/api/redirects/${id}`); toast.success('Redirect removed'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   return (
@@ -149,7 +152,7 @@ export default function Redirects() {
                       <span className={r.type === '301' ? 'badge-blue' : 'badge-yellow'}>{r.type}</span>
                     </td>
                     <td className="px-3 py-3">
-                      <button onClick={() => remove(r.id)}
+                      <button onClick={() => remove(r.id)} disabled={deleting === r.id}
                         className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                         <Trash2 size={13} />
                       </button>

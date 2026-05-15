@@ -20,6 +20,7 @@ export default function Subdomains() {
   const [form, setForm] = useState({ subdomain: '', domain: '', docRoot: '' });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -46,10 +47,12 @@ export default function Subdomains() {
 
   async function remove(fqdn: string) {
     if (!confirm(`Remove subdomain ${fqdn}?`)) return;
+    setDeleting(fqdn);
     try {
       await axios.delete(`/api/subdomains/${fqdn}`);
       toast.success(`${fqdn} removed`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   return (
@@ -139,7 +142,7 @@ export default function Subdomains() {
                     </td>
                     <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{s.domain}</td>
                     <td className="px-3 py-3">
-                      <button onClick={() => remove(s.fqdn)}
+                      <button onClick={() => remove(s.fqdn)} disabled={deleting === s.fqdn}
                         className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                         <Trash2 size={13} />
                       </button>

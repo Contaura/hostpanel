@@ -13,6 +13,7 @@ export default function ParkedDomains() {
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ domain: '', primary_domain: '' });
   const [parkedSearch, setParkedSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   useEffect(() => {
     api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : []));
@@ -33,9 +34,12 @@ export default function ParkedDomains() {
 
   async function del(id: number, domain: string) {
     if (!confirm(`Remove parked domain ${domain}?`)) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    setParked(p => p.filter(x => x.id !== id));
-    toast.success('Removed');
+    setDeleting(id);
+    try {
+      await api(`/${id}`, { method: 'DELETE' });
+      setParked(p => p.filter(x => x.id !== id));
+      toast.success('Removed');
+    } finally { setDeleting(null); }
   }
 
   return (
@@ -105,7 +109,7 @@ export default function ParkedDomains() {
                     </td>
                     <td className="table-cell text-xs text-slate-500">{p.created_at ? new Date(p.created_at).toLocaleDateString() : '—'}</td>
                     <td className="table-cell">
-                      <button className="btn-icon text-red-500" onClick={() => del(p.id, p.domain)}><Trash2 size={13} /></button>
+                      <button className="btn-icon text-red-500" disabled={deleting === p.id} onClick={() => del(p.id, p.domain)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ));

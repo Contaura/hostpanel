@@ -27,6 +27,8 @@ export default function RecurringBilling() {
   const [scheduleSearch, setScheduleSearch] = useState('');
   const [creditSearch, setCreditSearch] = useState('');
   const [promoSearch, setPromoSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [runningId, setRunningId] = useState<number | null>(null);
 
   useEffect(() => {
     api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
@@ -46,10 +48,37 @@ export default function RecurringBilling() {
   }
 
   async function runNow(id: number) {
-    const r = await api(`/recurring/${id}/run`, { method: 'POST' });
-    const d = await r.json();
-    if (d.error) toast.error(d.error);
-    else { toast.success('Invoice generated'); api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])); }
+    setRunningId(id);
+    try {
+      const r = await api(`/recurring/${id}/run`, { method: 'POST' });
+      const d = await r.json();
+      if (d.error) toast.error(d.error);
+      else { toast.success('Invoice generated'); api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])); }
+    } finally { setRunningId(null); }
+  }
+
+  async function deleteSchedule(id: number) {
+    setDeleting(id);
+    try {
+      await api(`/recurring/${id}`, { method: 'DELETE' });
+      setSchedules(ss => ss.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
+  }
+
+  async function deleteCredit(id: number) {
+    setDeleting(id);
+    try {
+      await api(`/credit-notes/${id}`, { method: 'DELETE' });
+      setCredits(cc => cc.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
+  }
+
+  async function deletePromo(id: number) {
+    setDeleting(id);
+    try {
+      await api(`/promo-codes/${id}`, { method: 'DELETE' });
+      setPromos(pp => pp.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
   }
 
   async function savePromo() {
@@ -214,12 +243,12 @@ export default function RecurringBilling() {
                     <td className="table-cell"><span className={`badge-${s.status === 'active' ? 'success' : 'warning'}`}>{s.status}</span></td>
                     <td className="table-cell">
                       <div className="flex gap-1">
-                        <button className="btn-icon text-indigo-500" title="Generate invoice now" onClick={() => runNow(s.id)}><Play size={13} /></button>
+                        <button className="btn-icon text-indigo-500" title="Generate invoice now" disabled={runningId === s.id} onClick={() => runNow(s.id)}><Play size={13} /></button>
                         <button className="btn-icon text-sky-500" title="Edit schedule" onClick={() => {
                           setEditingScheduleId(editingScheduleId === s.id ? null : s.id);
                           setEditScheduleForm({ amount: String(s.amount), cycle: s.cycle, next_run: s.next_run || '', notes: s.notes || '' });
                         }}><Pencil size={13} /></button>
-                        <button className="btn-icon text-red-500" onClick={() => { api(`/recurring/${s.id}`, { method: 'DELETE' }); setSchedules(ss => ss.filter(x => x.id !== s.id)); }}><Trash2 size={13} /></button>
+                        <button className="btn-icon text-red-500" disabled={deleting === s.id} onClick={() => deleteSchedule(s.id)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
@@ -297,7 +326,7 @@ export default function RecurringBilling() {
                               <CreditCard size={13} />
                             </button>
                           )}
-                          <button className="btn-icon text-red-500" onClick={() => { api(`/credit-notes/${c.id}`, { method: 'DELETE' }); setCredits(cc => cc.filter(x => x.id !== c.id)); }}><Trash2 size={13} /></button>
+                          <button className="btn-icon text-red-500" disabled={deleting === c.id} onClick={() => deleteCredit(c.id)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -365,7 +394,7 @@ export default function RecurringBilling() {
                             setEditingPromoId(p.id);
                             setEditPromoForm({ max_uses: p.max_uses ? String(p.max_uses) : '', expires_at: p.expires_at || '' });
                           }}><Pencil size={13} /></button>
-                          <button className="btn-icon text-red-500" onClick={() => { api(`/promo-codes/${p.id}`, { method: 'DELETE' }); setPromos(pp => pp.filter(x => x.id !== p.id)); }}><Trash2 size={13} /></button>
+                          <button className="btn-icon text-red-500" disabled={deleting === p.id} onClick={() => deletePromo(p.id)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
