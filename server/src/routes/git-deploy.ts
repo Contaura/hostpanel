@@ -69,12 +69,22 @@ router.post('/webhook/:name', async (req: Request, res: Response) => {
   const dep = db.prepare('SELECT * FROM git_deployments WHERE name = ?').get(req.params.name) as any;
   if (!dep) return res.status(404).json({ error: 'Deployment not found' });
 
-  // Verify HMAC signature if secret is set
+  // Verify HMAC signature — always required when secret is set
   if (dep.webhook_secret) {
-    const sig = req.headers['x-hub-signature-256'] as string || req.headers['x-gitlab-token'] as string || '';
-    if (sig.startsWith('sha256=')) {
+    const hubSig    = req.headers['x-hub-signature-256'] as string || '';
+    const gitlabTok = req.headers['x-gitlab-token']      as string || '';
+
+    if (hubSig) {
       const expected = 'sha256=' + crypto.createHmac('sha256', dep.webhook_secret).update(JSON.stringify(req.body)).digest('hex');
-      if (sig !== expected) return res.status(401).json({ error: 'Invalid signature' });
+      if (!hubSig.startsWith('sha256=') || hubSig !== expected) {
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } else if (gitlabTok) {
+      if (gitlabTok !== dep.webhook_secret) {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+    } else {
+      return res.status(401).json({ error: 'Missing webhook signature' });
     }
   }
 
