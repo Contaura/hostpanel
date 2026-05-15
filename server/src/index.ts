@@ -147,9 +147,11 @@ app.use('/api/billing',  authenticateToken, billingRoutes);
 // Client portal — public routes (login uses clientAuth internally; me/invoices use clientAuth inside the router)
 app.use('/api/portal', clientPortalRoutes);
 
-// Stripe
-app.use('/api/stripe/webhook', stripeRoutes);
-app.use('/api/stripe',         authenticateToken, stripeRoutes);
+// Stripe — POST /webhook is public (Stripe-signature authenticated); all other routes require JWT
+app.use('/api/stripe', (req, res, next) => {
+  if (req.path === '/webhook' && req.method === 'POST') return next();
+  return (authenticateToken as any)(req, res, next);
+}, stripeRoutes);
 
 // PayPal
 app.use('/api/paypal', authenticateToken, paypalRoutes);
@@ -164,8 +166,11 @@ app.use('/api/mail-routing', authenticateToken, mailRoutingRoutes);
 
 // Web / CDN / Deploy
 app.use('/api/cloudflare',      authenticateToken, cloudflareRoutes);
-app.use('/api/git-deploy',      authenticateToken, gitDeployRoutes);
-app.use('/api/git-deploy/webhook', gitDeployRoutes); // public webhook endpoint
+// Git deploy — POST /webhook/* is public (HMAC authenticated); all other routes require JWT
+app.use('/api/git-deploy', (req, res, next) => {
+  if (req.method === 'POST' && req.path.startsWith('/webhook/')) return next();
+  return (authenticateToken as any)(req, res, next);
+}, gitDeployRoutes);
 app.use('/api/cache',           authenticateToken, cacheRoutes);
 
 // Security extras
