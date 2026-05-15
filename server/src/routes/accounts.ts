@@ -43,6 +43,34 @@ router.get('/', (_req: AuthRequest, res: Response) => {
   }
 });
 
+// /check-expiry must be declared BEFORE the /:id route below. Express matches
+// routes in declaration order, so with the previous ordering the string
+// "check-expiry" was being captured as :id and the handler 404'd looking up
+// account id="check-expiry".
+router.get('/check-expiry', async (_req: AuthRequest, res: Response) => {
+  const now = new Date().toISOString().split('T')[0];
+  const expired = db.prepare(`
+    SELECT id, username, domain, expires_at, status
+    FROM accounts
+    WHERE expires_at IS NOT NULL AND expires_at <= ? AND status != 'suspended'
+  `).all(now) as any[];
+
+  const suspended: string[] = [];
+  for (const acc of expired) {
+    db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(acc.id);
+    try {
+      await execAsync(`mv "${path.join(VHOST_DIR, `${acc.domain}.conf`)}" "${path.join(VHOST_DIR, `${acc.domain}.conf.disabled`)}" 2>/dev/null || true`);
+    } catch {}
+    suspended.push(acc.username);
+  }
+
+  if (suspended.length > 0) {
+    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+  }
+
+  res.json({ checked: expired.length, suspended });
+});
+
 // GET /api/accounts/:id
 router.get('/:id', (req: AuthRequest, res: Response) => {
   const row = db.prepare(`
@@ -177,7 +205,11 @@ router.get('/:id/usage', heavyLimit, async (req: AuthRequest, res: Response) => 
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;
   if (!account) return res.status(404).json({ error: 'Account not found' });
 
-  const accountDir = path.join(WEBROOT, account.username || account.domain);
+  // Account web roots are keyed on domain (see the POST /accounts handler:
+  // docRoot = path.join(WEBROOT, domain, 'public_html')). The previous fallback
+  // tried username first, which produced /var/www/<username> and reported zero
+  // disk usage for every existing account.
+  const accountDir = path.join(WEBROOT, account.domain || account.username);
   try {
     // Disk usage
     let diskBytes = 0;
@@ -228,11 +260,13 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
     const tmpDir = await fs.mkdtemp(path.join('/tmp', `hp_export_${account.username}_`));
 
     // Collect files
-    const webDir = path.join(WEBROOT, account.username);
+    // Same fix as /:id/usage: web roots live at /var/www/<domain>, not
+    // /var/www/<username>, so the tarball used to be empty for every export.
+    const webDir = path.join(WEBROOT, account.domain);
     await fs.mkdir(path.join(tmpDir, 'files'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, 'databases'), { recursive: true });
     if (exists(webDir)) {
-      await execAsync(`tar -czf "${tmpDir}/files/files.tar.gz" -C "${path.dirname(webDir)}" "${account.username}" 2>/dev/null || true`, { timeout: 300000 });
+      await execAsync(`tar -czf "${tmpDir}/files/files.tar.gz" -C "${path.dirname(webDir)}" "${account.domain}" 2>/dev/null || true`, { timeout: 300000 });
     }
 
     // Dump all databases owned by this account user. Pull the list via
@@ -267,31 +301,7 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-/* ── Account expiry / auto-suspension ───────────────────── */
-
-router.get('/check-expiry', async (_req: AuthRequest, res: Response) => {
-  const now = new Date().toISOString().split('T')[0];
-  const expired = db.prepare(`
-    SELECT id, username, domain, expires_at, status
-    FROM accounts
-    WHERE expires_at IS NOT NULL AND expires_at <= ? AND status != 'suspended'
-  `).all(now) as any[];
-
-  const suspended: string[] = [];
-  for (const acc of expired) {
-    db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(acc.id);
-    try {
-      await execAsync(`mv "${path.join(VHOST_DIR, `${acc.domain}.conf`)}" "${path.join(VHOST_DIR, `${acc.domain}.conf.disabled`)}" 2>/dev/null || true`);
-    } catch {}
-    suspended.push(acc.username);
-  }
-
-  if (suspended.length > 0) {
-    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
-  }
-
-  res.json({ checked: expired.length, suspended });
-});
+/* ── Account expiry / auto-suspension (moved above /:id) ─ */
 
 router.post('/:id/suspend', async (req: AuthRequest, res: Response) => {
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.params.id) as any;

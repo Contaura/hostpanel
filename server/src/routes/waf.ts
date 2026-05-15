@@ -73,11 +73,26 @@ router.get('/fail2ban', async (_req: Request, res: Response) => {
 
 const JAIL_RE = /^[a-zA-Z0-9_-]+$/;
 
+// fail2ban-client returns 127 (not found) when fail2ban isn't installed,
+// which used to surface as a bare 500 with "command not found" in the
+// error message. Detect the missing binary and return a clear 503 so the
+// UI can render "fail2ban isn't installed on this server" instead of a
+// scary internal error.
+const FAIL2BAN_BIN = '/usr/bin/fail2ban-client';
+function fail2banNotInstalled(res: Response): boolean {
+  if (!existsSync(FAIL2BAN_BIN) && !existsSync('/usr/sbin/fail2ban-client')) {
+    res.status(503).json({ error: 'fail2ban is not installed on this server. Install fail2ban to use this feature.' });
+    return true;
+  }
+  return false;
+}
+
 router.post('/fail2ban/unban', async (req: Request, res: Response) => {
   const { jail, ip } = req.body;
   if (!jail || !ip) return res.status(400).json({ error: 'jail and ip required' });
   if (!JAIL_RE.test(jail)) return res.status(400).json({ error: 'Invalid jail name' });
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
+  if (fail2banNotInstalled(res)) return;
   try {
     await execAsync(`fail2ban-client set ${jail} unbanip ${ip}`);
     res.json({ success: true });
@@ -89,6 +104,7 @@ router.post('/fail2ban/ban', async (req: Request, res: Response) => {
   if (!jail || !ip) return res.status(400).json({ error: 'jail and ip required' });
   if (!JAIL_RE.test(jail)) return res.status(400).json({ error: 'Invalid jail name' });
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
+  if (fail2banNotInstalled(res)) return;
   try {
     await execAsync(`fail2ban-client set ${jail} banip ${ip}`);
     res.json({ success: true });
@@ -97,6 +113,7 @@ router.post('/fail2ban/ban', async (req: Request, res: Response) => {
 
 router.post('/fail2ban/:jail/toggle', async (req: Request, res: Response) => {
   if (!JAIL_RE.test(req.params.jail)) return res.status(400).json({ error: 'Invalid jail name' });
+  if (fail2banNotInstalled(res)) return;
   const { action } = req.body; // 'start' | 'stop'
   try {
     await execAsync(`fail2ban-client ${action === 'stop' ? 'stop' : 'start'} ${req.params.jail}`);

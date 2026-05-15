@@ -82,12 +82,26 @@ router.post('/autoresponders', (req: Request, res: Response) => {
 });
 
 router.put('/autoresponders/:id', (req: Request, res: Response) => {
-  const { email, subject, body, start_date, end_date, enabled } = req.body;
+  // Partial update — fall back to the existing row's values for any field
+  // the caller doesn't supply. The previous form bound undefined into the
+  // bind list and 500'd with "NOT NULL constraint failed: autoresponders.email"
+  // when the UI updated only subject/body/enabled.
+  const current: any = db.prepare('SELECT * FROM autoresponders WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Autoresponder not found' });
+  const pick = <T,>(k: string, fb: T) => (req.body[k] !== undefined ? req.body[k] : fb);
   try {
     db.prepare(`
       UPDATE autoresponders SET email=?, subject=?, body=?, start_date=?, end_date=?, enabled=?
       WHERE id=?
-    `).run(email, subject, body, start_date || null, end_date || null, enabled ? 1 : 0, req.params.id);
+    `).run(
+      pick('email',      current.email),
+      pick('subject',    current.subject),
+      pick('body',       current.body),
+      pick('start_date', current.start_date),
+      pick('end_date',   current.end_date),
+      pick('enabled',    current.enabled) ? 1 : 0,
+      req.params.id,
+    );
     res.json(db.prepare('SELECT * FROM autoresponders WHERE id = ?').get(req.params.id));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

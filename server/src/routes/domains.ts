@@ -143,6 +143,20 @@ router.post('/dns/:domain', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: `Record type must be one of: ${allowedTypes.join(', ')}` });
     return;
   }
+  // Reject missing/blank name + value up front. The previous form happily
+  // wrote "undefined" into the zone file when the caller omitted a field,
+  // which then came back through GET /dns/:domain as a record with
+  // name="undefined". Whitespace is also disallowed since it would break
+  // the tab-separated zone line we emit below.
+  if (typeof name !== 'string' || !name || /\s/.test(name)) {
+    return res.status(400).json({ error: 'name is required and must not contain whitespace' });
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return res.status(400).json({ error: 'value is required' });
+  }
+  if (!/^\d+$/.test(String(ttl))) {
+    return res.status(400).json({ error: 'ttl must be a positive integer' });
+  }
 
   try {
     const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
