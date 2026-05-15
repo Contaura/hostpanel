@@ -166,7 +166,7 @@ const CRON_RE = /^(@(reboot|hourly|daily|weekly|monthly)|(\*|[0-9,\-\/\*]+)\s+(\
 
 async function getUserCrontab(user: string): Promise<string[]> {
   try {
-    const { stdout } = await execAsync(`crontab -u ${user} -l 2>/dev/null`);
+    const { stdout } = await execAsync(`crontab -u "${user}" -l 2>/dev/null`);
     return stdout.split('\n').filter(l => l.trim() && !l.startsWith('#'));
   } catch { return []; }
 }
@@ -197,7 +197,7 @@ router.post('/account/:user', async (req: AuthRequest, res: Response) => {
     lines.push(newLine);
     const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
     writeFileSync(tmp, lines.join('\n') + '\n');
-    await execAsync(`crontab -u ${user} ${tmp}`);
+    await execAsync(`crontab -u "${user}" ${tmp}`);
     unlinkSync(tmp);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -213,7 +213,7 @@ router.delete('/account/:user/:index', async (req: AuthRequest, res: Response) =
     lines.splice(idx, 1);
     const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
     writeFileSync(tmp, lines.join('\n') + '\n');
-    await execAsync(`crontab -u ${user} ${tmp}`);
+    await execAsync(`crontab -u "${user}" ${tmp}`);
     unlinkSync(tmp);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

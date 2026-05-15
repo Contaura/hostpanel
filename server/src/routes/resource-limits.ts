@@ -63,7 +63,7 @@ router.get('/:username/usage', async (req: Request, res: Response) => {
     const memCurr = read('memory.current');
 
     // Disk usage via du
-    const { stdout: du } = await execAsync(`du -sb /var/www/${username} 2>/dev/null || echo "0"`).catch(() => ({ stdout: '0' }));
+    const { stdout: du } = await execAsync(`du -sb "/var/www/${username}" 2>/dev/null || echo "0"`).catch(() => ({ stdout: '0' }));
     const diskBytes = parseInt(du.trim().split(/\s+/)[0]) || 0;
 
     res.json({
@@ -100,6 +100,9 @@ router.get('/nginx/vhosts', async (_req: Request, res: Response) => {
 router.post('/nginx/vhosts', async (req: Request, res: Response) => {
   const { domain, root, php_fpm_socket } = req.body;
   if (!domain || !root) return res.status(400).json({ error: 'domain and root required' });
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]{1,253}$/.test(domain)) return res.status(400).json({ error: 'Invalid domain name' });
+  if (!/^\/[a-zA-Z0-9_./ -]+$/.test(root)) return res.status(400).json({ error: 'Invalid root path' });
+  const socket = php_fpm_socket || '/var/run/php-fpm/php8.1-fpm.sock';
   const conf = `server {
   listen 80;
   server_name ${domain} www.${domain};
@@ -109,7 +112,7 @@ router.post('/nginx/vhosts', async (req: Request, res: Response) => {
   location / { try_files $uri $uri/ /index.php?$query_string; }
 
   location ~ \\.php$ {
-    fastcgi_pass unix:${php_fpm_socket || '/var/run/php-fpm/php8.1-fpm.sock'};
+    fastcgi_pass unix:${socket};
     fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
     include fastcgi_params;
   }
@@ -119,7 +122,7 @@ router.post('/nginx/vhosts', async (req: Request, res: Response) => {
 `;
   try {
     writeFileSync(path.join(NGINX_DIR, `${domain}.conf`), conf);
-    await execAsync(`ln -sf ${NGINX_DIR}/${domain}.conf ${NGINX_EN}/${domain}.conf`).catch(() => {});
+    await execAsync(`ln -sf "${NGINX_DIR}/${domain}.conf" "${NGINX_EN}/${domain}.conf"`).catch(() => {});
     await execAsync('nginx -t && systemctl reload nginx').catch(() => {});
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -129,7 +132,7 @@ router.delete('/nginx/vhosts/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!/^[a-z0-9.-]+$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    await execAsync(`rm -f ${NGINX_DIR}/${domain}.conf ${NGINX_EN}/${domain}.conf`);
+    await execAsync(`rm -f "${NGINX_DIR}/${domain}.conf" "${NGINX_EN}/${domain}.conf"`);
     await execAsync('systemctl reload nginx').catch(() => {});
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -158,7 +161,7 @@ router.get('/:username/io-stats', async (req: Request, res: Response) => {
     }
 
     // Also get real-time disk usage via du
-    const { stdout: du } = await execAsync(`du -sb /var/www/${username} 2>/dev/null || echo 0`).catch(() => ({ stdout: '0' }));
+    const { stdout: du } = await execAsync(`du -sb "/var/www/${username}" 2>/dev/null || echo 0`).catch(() => ({ stdout: '0' }));
     const diskBytes = parseInt(du.trim().split(/\s+/)[0]) || 0;
 
     res.json({ username, io_stat: parsed, disk_used_bytes: diskBytes, cgroup_path: cgroupPath });
@@ -200,7 +203,7 @@ router.post('/disk-quotas/:username', async (req: Request, res: Response) => {
   const hard = Math.round((parseInt(block_hard_mb) || soft * 1.1) * 1024);
 
   try {
-    await execAsync(`setquota -u ${username} ${soft} ${hard} 0 0 / 2>&1`);
+    await execAsync(`setquota -u "${username}" ${soft} ${hard} 0 0 / 2>&1`);
     res.json({ success: true, username, block_soft_kb: soft, block_hard_kb: hard });
   } catch (err: any) {
     res.status(500).json({ error: err.stderr || err.message });
