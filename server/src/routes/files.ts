@@ -9,6 +9,12 @@ const router = Router();
 const BASE_DIR = process.env.FILES_BASE_DIR || '/var/www';
 
 function safePath(userPath: string): string {
+  // Reject undefined / empty up front so the caller gets a clear 400 instead
+  // of "Cannot read properties of undefined" (which is what happened when
+  // DELETE /api/files/delete was hit without a JSON body).
+  if (typeof userPath !== 'string' || userPath.length === 0) {
+    throw new Error('Path is required');
+  }
   const base = path.resolve(BASE_DIR);
   const resolved = path.resolve(base, userPath.replace(/^\/+/, ''));
   // Anchor the prefix check on a path separator so /var/wwwx doesn't pass /var/www.

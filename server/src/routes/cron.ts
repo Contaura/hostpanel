@@ -81,7 +81,11 @@ function parseCrontab(raw: string): CronJob[] {
   });
 }
 
-const FIELD_RE = /^(\*|\d+(-\d+)?(\/\d+)?(,\d+(-\d+)?(\/\d+)?)*)$/;
+// Accept * / N (step value of wildcard, e.g. */30), single number, range
+// N-M, range with step N-M/S, comma-separated lists of any of the above.
+// The previous regex didn't allow `*/N`, so the panel rejected `*/30` for
+// "every 30 minutes" — a perfectly valid cron expression.
+const FIELD_RE = /^(\*(\/\d+)?|\d+(-\d+)?(\/\d+)?(,\d+(-\d+)?(\/\d+)?)*)$/;
 
 router.get('/list', async (_req: AuthRequest, res: Response) => {
   try {

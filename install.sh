@@ -89,10 +89,26 @@ SQL
 # ── 4/9  Mail directories ────────────────────────────────────────────────────
 echo "[4/9] Configuring mail directories..."
 mkdir -p /etc/dovecot /var/mail/vhosts
-# /etc/postfix/virtual and /etc/postfix/vmailbox are flat files (Postfix maps),
-# not directories — touch them if they don't already exist.
+
+# Two separate concerns here:
+#   - The base postfix map files /etc/postfix/{virtual,vmailbox,transport}
+#     are flat-file maps. Postfix itself reads these. Touch them so initial
+#     `postmap` succeeds.
+#   - The panel writes its own per-account mailbox/alias entries under a
+#     dedicated *directory* set as VMAIL_DIR — server/src/routes/email.ts
+#     opens `${VMAIL_DIR}/mailbox` and `${VMAIL_DIR}/aliases` as flat-file
+#     maps. Using /etc/postfix/virtual directly would collide with the
+#     base map file above (and previously failed with ENOTDIR because the
+#     code tried to open a file-inside-a-file).
 touch /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport
 postmap /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport 2>/dev/null || true
+
+mkdir -p /etc/postfix/vmail
+touch /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases
+postmap /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
+chmod 640 /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases
+chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
+
 touch /etc/dovecot/users
 chmod 640 /etc/dovecot/users
 
