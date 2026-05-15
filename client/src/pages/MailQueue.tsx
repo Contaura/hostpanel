@@ -1,35 +1,39 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Trash2, Send, FileSearch, RotateCcw, PauseCircle, PlayCircle, AlertOctagon } from 'lucide-react';
+import { RefreshCw, Trash2, Send, FileSearch, RotateCcw, PauseCircle, PlayCircle, AlertOctagon, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/mail-queue${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 type Tab = 'queue' | 'delivery-log' | 'bounce-log';
 
 export default function MailQueue() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('queue');
   const [messages, setMessages] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
   const [loading, setLoading] = useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
   const [deliveryLog, setDeliveryLog] = useState<any[]>([]);
   const [logSearch, setLogSearch] = useState('');
   const [logLoading, setLogLoading] = useState(false);
   const [bounceLog, setBounceLog] = useState<string[]>([]);
   const [bounceLoading, setBounceLoading] = useState(false);
+  const [queueSearch, setQueueSearch] = useState('');
+  const [actioning, setActioning] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     try {
-      const [q, s] = await Promise.all([api('/').then(r => r.json()), api('/stats').then(r => r.json())]);
+      const [q, s] = await Promise.all([fetchApi('/api/mail-queue/').then(r => r.json()), fetchApi('/api/mail-queue/stats').then(r => r.json())]);
       setMessages(Array.isArray(q) ? q : []);
       setStats(s);
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setPageLoading(false); }
   }
 
   async function loadDeliveryLog() {
     setLogLoading(true);
-    const r = await api(`/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
+    const r = await fetchApi(`/api/mail-queue/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
     const d = await r.json();
     setDeliveryLog(d.lines || []);
     setLogLoading(false);
@@ -37,49 +41,66 @@ export default function MailQueue() {
 
   async function loadBounceLog() {
     setBounceLoading(true);
-    const r = await api('/bounce-log');
+    const r = await fetchApi('/api/mail-queue/bounce-log');
     const d = await r.json();
     setBounceLog(d.lines || []);
     setBounceLoading(false);
   }
 
+  useEffect(() => {
+    document.title = 'Mail Queue — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
   useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); if (tab === 'bounce-log') loadBounceLog(); }, [tab]);
 
   async function flush() {
-    await api('/flush', { method: 'POST' });
+    await fetchApi('/api/mail-queue/flush', { method: 'POST' });
     toast.success('Queue flushed');
     load();
   }
 
   async function deleteMsg(id: string) {
-    await api(`/${id}`, { method: 'DELETE' });
-    setMessages(m => m.filter(x => x.id !== id));
+    setActioning(id);
+    try {
+      await fetchApi(`/api/mail-queue/${id}`, { method: 'DELETE' });
+      setMessages(m => m.filter(x => x.id !== id));
+    } finally { setActioning(null); }
   }
 
   async function deleteAll() {
-    if (!confirm('Delete all deferred messages?')) return;
-    await api('/', { method: 'DELETE' });
+    if (!await confirm('Delete all deferred messages?')) return;
+    await fetchApi('/api/mail-queue/', { method: 'DELETE' });
     toast.success('Deferred queue cleared');
     load();
   }
 
   async function retryMsg(id: string) {
-    await api(`/retry/${id}`, { method: 'POST' });
-    toast.success('Retry queued');
-    load();
+    setActioning(id);
+    try {
+      await fetchApi(`/api/mail-queue/retry/${id}`, { method: 'POST' });
+      toast.success('Retry queued');
+      load();
+    } finally { setActioning(null); }
   }
 
   async function holdMsg(id: string) {
-    await api(`/hold/${id}`, { method: 'POST' });
-    toast.success('Message held');
-    load();
+    setActioning(id);
+    try {
+      await fetchApi(`/api/mail-queue/hold/${id}`, { method: 'POST' });
+      toast.success('Message held');
+      load();
+    } finally { setActioning(null); }
   }
 
   async function unholdMsg(id: string) {
-    await api(`/unhold/${id}`, { method: 'POST' });
-    toast.success('Message released');
-    load();
+    setActioning(id);
+    try {
+      await fetchApi(`/api/mail-queue/unhold/${id}`, { method: 'POST' });
+      toast.success('Message released');
+      load();
+    } finally { setActioning(null); }
   }
 
   return (
@@ -97,6 +118,12 @@ export default function MailQueue() {
         </div>
       </div>
 
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
       <div className="tab-bar">
         <button className={tab === 'queue' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('queue')}><Send size={14} /> Mail Queue</button>
         <button className={tab === 'delivery-log' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('delivery-log')}><FileSearch size={14} /> Delivery Log</button>
@@ -147,43 +174,58 @@ export default function MailQueue() {
         ))}
       </div>
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr>
-              {['ID', 'From', 'Recipients', 'Size', 'Date', 'Status', ''].map(h => (
-                <th key={h} className="table-header-cell">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={7} className="table-cell text-center text-slate-500">Loading…</td></tr>}
-            {!loading && messages.length === 0 && <tr><td colSpan={7} className="table-cell text-center text-slate-500">Queue is empty</td></tr>}
-            {messages.map((m: any) => (
-              <tr key={m.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                <td className="table-cell font-mono text-xs">{m.id}</td>
-                <td className="table-cell text-xs">{m.sender}</td>
-                <td className="table-cell text-xs">{(m.recipients || []).join(', ')}</td>
-                <td className="table-cell text-xs">{m.size}</td>
-                <td className="table-cell text-xs">{m.date}</td>
-                <td className="table-cell">
-                  <span className={`badge-${m.status === 'active' ? 'success' : m.status === 'deferred' ? 'warning' : 'danger'}`}>{m.status}</span>
-                </td>
-                <td className="table-cell">
-                  <div className="flex gap-1">
-                    <button className="btn-icon text-blue-500" title="Retry" onClick={() => retryMsg(m.id)}><RotateCcw size={13} /></button>
-                    {m.status === 'held'
-                      ? <button className="btn-icon text-emerald-500" title="Unhold" onClick={() => unholdMsg(m.id)}><PlayCircle size={13} /></button>
-                      : <button className="btn-icon text-amber-500" title="Hold" onClick={() => holdMsg(m.id)}><PauseCircle size={13} /></button>
-                    }
-                    <button className="btn-icon text-red-500" title="Delete" onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
-                  </div>
-                </td>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-56 text-sm" placeholder="Search queue…" value={queueSearch} onChange={e => setQueueSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                {['ID', 'From', 'Recipients', 'Size', 'Date', 'Status', ''].map(h => (
+                  <th key={h} className="table-header-cell">{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={7} className="table-cell text-center text-slate-500">Loading…</td></tr>}
+              {!loading && (() => {
+                const q = queueSearch.trim().toLowerCase();
+                const visible = q ? messages.filter((m: any) => [m.id, m.sender, m.status, ...(m.recipients || [])].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : messages;
+                if (messages.length === 0) return <tr><td colSpan={7} className="table-cell text-center text-slate-500">Queue is empty</td></tr>;
+                if (visible.length === 0) return <tr><td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">No messages match "{queueSearch}"</td></tr>;
+                return visible.map((m: any) => (
+                  <tr key={m.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <td className="table-cell font-mono text-xs">{m.id}</td>
+                    <td className="table-cell text-xs">{m.sender}</td>
+                    <td className="table-cell text-xs">{(m.recipients || []).join(', ')}</td>
+                    <td className="table-cell text-xs">{m.size}</td>
+                    <td className="table-cell text-xs">{m.date}</td>
+                    <td className="table-cell">
+                      <span className={`badge-${m.status === 'active' ? 'success' : m.status === 'deferred' ? 'warning' : 'danger'}`}>{m.status}</span>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex gap-1">
+                        <button className="btn-icon text-blue-500" title="Retry" disabled={actioning === m.id} onClick={() => retryMsg(m.id)}><RotateCcw size={13} /></button>
+                        {m.status === 'held'
+                          ? <button className="btn-icon text-emerald-500" title="Unhold" disabled={actioning === m.id} onClick={() => unholdMsg(m.id)}><PlayCircle size={13} /></button>
+                          : <button className="btn-icon text-amber-500" title="Hold" disabled={actioning === m.id} onClick={() => holdMsg(m.id)}><PauseCircle size={13} /></button>
+                        }
+                        <button className="btn-icon text-red-500" title="Delete" disabled={actioning === m.id} onClick={() => deleteMsg(m.id)}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div></>}
+      </>
+      )}
     </div>
   );
 }

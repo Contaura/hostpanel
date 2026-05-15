@@ -1,7 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell } from 'lucide-react';
+import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell, User, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface CronJob {
   id: number;
@@ -25,26 +26,39 @@ const PRESETS = [
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
-type Tab = 'jobs' | 'logs' | 'alerts';
+type Tab = 'jobs' | 'logs' | 'alerts' | 'account';
 
 export default function CronJobs() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('jobs');
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [form, setForm] = useState({ minute: '*', hour: '*', day: '*', month: '*', weekday: '*', command: '' });
   const [logs, setLogs] = useState<any[]>([]);
   const [running, setRunning] = useState<number | null>(null);
   const [runOutput, setRunOutput] = useState<{ id: number; output: string; exit_code: number } | null>(null);
   const [failureEmail, setFailureEmail] = useState('');
   const [failureEmailSaved, setFailureEmailSaved] = useState(false);
+  const [acctUser, setAcctUser] = useState('');
+  const [acctJobs, setAcctJobs] = useState<any[]>([]);
+  const [acctLoaded, setAcctLoaded] = useState(false);
+  const [acctLoading, setAcctLoading] = useState(false);
+  const [acctAdding, setAcctAdding] = useState(false);
+  const [acctForm, setAcctForm] = useState({ schedule: '0 * * * *', command: '' });
+  const [jobSearch, setJobSearch] = useState('');
+  const [acctJobSearch, setAcctJobSearch] = useState('');
+  const [logSearch, setLogSearch] = useState('');
+  const [deletingJob, setDeletingJob] = useState<number | null>(null);
+  const [deletingAcctJob, setDeletingAcctJob] = useState<number | null>(null);
 
   async function load() {
     try {
       const { data } = await axios.get<CronJob[]>('/api/cron/list');
       setJobs(data);
-    } catch { setJobs([]); }
+    } catch { setJobs([]); } finally { setPageLoading(false); }
   }
 
   async function loadLogs() {
@@ -68,12 +82,50 @@ export default function CronJobs() {
     catch {}
   }
 
+  async function loadAcctJobs() {
+    if (!acctUser.trim()) return;
+    setAcctLoading(true);
+    try {
+      const { data } = await axios.get(`/api/cron/account/${encodeURIComponent(acctUser.trim())}`);
+      setAcctJobs(Array.isArray(data) ? data : []);
+      setAcctLoaded(true);
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed to load crontab'); setAcctJobs([]); }
+    setAcctLoading(false);
+  }
+
+  async function addAcctJob() {
+    if (!acctUser.trim() || !acctForm.command.trim()) return;
+    try {
+      await axios.post(`/api/cron/account/${encodeURIComponent(acctUser.trim())}`, acctForm);
+      toast.success('Job added');
+      setAcctForm({ schedule: '0 * * * *', command: '' });
+      setAcctAdding(false);
+      loadAcctJobs();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+  }
+
+  async function deleteAcctJob(index: number) {
+    if (!await confirm('Remove this cron job?')) return;
+    setDeletingAcctJob(index);
+    try {
+      await axios.delete(`/api/cron/account/${encodeURIComponent(acctUser.trim())}/${index}`);
+      toast.success('Job removed');
+      loadAcctJobs();
+    } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingAcctJob(null); }
+  }
+
   async function saveFailureEmail() {
     try {
       await axios.post('/api/cron/failure-email', { email: failureEmail });
       toast.success('Alert email saved'); setFailureEmailSaved(true); setTimeout(() => setFailureEmailSaved(false), 2000);
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
+
+  useEffect(() => {
+    document.title = 'Cron Jobs — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); loadFailureEmail(); }, []);
   useEffect(() => { if (tab === 'logs') loadLogs(); }, [tab]);
@@ -94,12 +146,14 @@ export default function CronJobs() {
   }
 
   async function deleteJob(id: number) {
-    if (!confirm('Remove this cron job?')) return;
+    if (!await confirm('Remove this cron job?')) return;
+    setDeletingJob(id);
     try {
       await axios.delete(`/api/cron/${id}`);
       toast.success('Cron job removed');
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingJob(null); }
   }
 
   const field = (name: keyof typeof form, label: string, placeholder: string) => (
@@ -110,6 +164,7 @@ export default function CronJobs() {
     </div>
   );
 
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -123,6 +178,7 @@ export default function CronJobs() {
 
       <div className="tab-bar">
         <button className={tab === 'jobs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('jobs')}><Clock size={14} /> Scheduled Jobs</button>
+        <button className={tab === 'account' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('account')}><User size={14} /> Account Crontabs</button>
         <button className={tab === 'logs' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('logs')}><FileText size={14} /> Run Log</button>
         <button className={tab === 'alerts' ? 'tab-item-active' : 'tab-item'} onClick={() => setTab('alerts')}><Bell size={14} /> Failure Alerts</button>
       </div>
@@ -172,47 +228,63 @@ export default function CronJobs() {
 
       {tab === 'jobs' && (
         <>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className={theadCls}>
-                <tr>
-                  <th className="table-header-cell w-48">Schedule</th>
-                  <th className="table-header-cell">Command</th>
-                  <th className="px-4 py-3 w-20" />
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center">
-                    <Clock className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                    <p className="text-slate-400 text-sm">No cron jobs scheduled</p>
-                  </td></tr>
-                ) : jobs.map(job => (
-                  <tr key={job.id} className={rowCls}>
-                    <td className="table-cell">
-                      <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 rounded px-2 py-1 text-slate-700 dark:text-slate-300">
-                        {job.minute} {job.hour} {job.day} {job.month} {job.weekday}
-                      </span>
-                    </td>
-                    <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">
-                      {job.command}
-                    </td>
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
-                        <button onClick={() => runJob(job)} disabled={running === job.id}
-                          className="btn-icon text-emerald-500" title="Run now">
-                          {running === job.id ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg> : <Play size={13} />}
-                        </button>
-                        <button onClick={() => deleteJob(job.id)}
-                          className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-56 text-sm" placeholder="Search commands…" value={jobSearch} onChange={e => setJobSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className={theadCls}>
+                  <tr>
+                    <th className="table-header-cell w-48">Schedule</th>
+                    <th className="table-header-cell">Command</th>
+                    <th className="px-4 py-3 w-20" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const q = jobSearch.trim().toLowerCase();
+                    const visible = q ? jobs.filter(j => j.command.toLowerCase().includes(q) || `${j.minute} ${j.hour} ${j.day} ${j.month} ${j.weekday}`.includes(q)) : jobs;
+                    if (jobs.length === 0) return (
+                      <tr><td colSpan={3} className="px-4 py-16 text-center">
+                        <Clock className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                        <p className="text-slate-400 text-sm">No cron jobs scheduled</p>
+                      </td></tr>
+                    );
+                    if (visible.length === 0) return (
+                      <tr><td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-400">No jobs match "{jobSearch}"</td></tr>
+                    );
+                    return visible.map(job => (
+                      <tr key={job.id} className={rowCls}>
+                        <td className="table-cell">
+                          <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 rounded px-2 py-1 text-slate-700 dark:text-slate-300">
+                            {job.minute} {job.hour} {job.day} {job.month} {job.weekday}
+                          </span>
+                        </td>
+                        <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">
+                          {job.command}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                            <button onClick={() => runJob(job)} disabled={running === job.id}
+                              className="btn-icon text-emerald-500" title="Run now">
+                              {running === job.id ? <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" className="opacity-75"/></svg> : <Play size={13} />}
+                            </button>
+                            <button onClick={() => deleteJob(job.id)} disabled={deletingJob === job.id}
+                              className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {runOutput && (
@@ -225,6 +297,99 @@ export default function CronJobs() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'account' && (
+        <div className="space-y-4">
+          <div className="card p-5 space-y-3 max-w-sm">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Account User Crontab</h2>
+            <p className="text-xs text-slate-500">View and manage the system crontab of an individual hosting account user.</p>
+            <div className="flex gap-2">
+              <input className="input flex-1 font-mono" placeholder="username"
+                value={acctUser}
+                onChange={e => { setAcctUser(e.target.value); setAcctLoaded(false); setAcctJobs([]); }}
+                onKeyDown={e => e.key === 'Enter' && loadAcctJobs()} />
+              <button className="btn-primary text-sm" onClick={loadAcctJobs} disabled={!acctUser.trim() || acctLoading}>
+                {acctLoading ? '…' : 'Load'}
+              </button>
+            </div>
+          </div>
+
+          {acctLoaded && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-slate-600 dark:text-slate-400 font-mono">{acctUser}</p>
+                <button className="btn-primary text-sm" onClick={() => setAcctAdding(v => !v)}><Plus size={13} /> Add Job</button>
+              </div>
+
+              {acctAdding && (
+                <div className="card p-4 space-y-3 max-w-lg">
+                  <div>
+                    <label className="label">Schedule (cron expression or @hourly, @daily…)</label>
+                    <input className="input font-mono" value={acctForm.schedule} onChange={e => setAcctForm(f => ({ ...f, schedule: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="label">Command</label>
+                    <input className="input font-mono" placeholder="/usr/bin/php /home/user/cron.php"
+                      value={acctForm.command} onChange={e => setAcctForm(f => ({ ...f, command: e.target.value }))} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="btn-primary text-sm" onClick={addAcctJob} disabled={!acctForm.command.trim()}>Add</button>
+                    <button className="btn-ghost text-sm" onClick={() => setAcctAdding(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input className="input pl-8 w-56 text-sm" placeholder="Search commands…" value={acctJobSearch} onChange={e => setAcctJobSearch(e.target.value)} />
+                  </div>
+                </div>
+                <div className="card overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className={theadCls}><tr>
+                      <th className="table-header-cell w-48">Schedule</th>
+                      <th className="table-header-cell">Command</th>
+                      <th className="px-4 py-3 w-12" />
+                    </tr></thead>
+                    <tbody>
+                      {(() => {
+                        const q = acctJobSearch.trim().toLowerCase();
+                        const visible = q ? acctJobs.filter((j: any) => [j.command, j.schedule].some((v: string) => v?.toLowerCase().includes(q))) : acctJobs;
+                        if (acctJobs.length === 0) return (
+                          <tr><td colSpan={3} className="px-4 py-12 text-center text-slate-400 text-sm">
+                            No cron jobs for <code className="font-mono">{acctUser}</code>
+                          </td></tr>
+                        );
+                        if (visible.length === 0) return (
+                          <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No jobs match "{acctJobSearch}"</td></tr>
+                        );
+                        return visible.map((j: any) => (
+                          <tr key={j.id} className={rowCls}>
+                            <td className="table-cell">
+                              <span className="font-mono text-xs bg-slate-100 dark:bg-slate-700 rounded px-2 py-1 text-slate-700 dark:text-slate-300">
+                                {j.schedule}
+                              </span>
+                            </td>
+                            <td className="table-cell font-mono text-xs text-slate-600 dark:text-slate-400 max-w-xs truncate">{j.command}</td>
+                            <td className="px-3 py-3">
+                              <button onClick={() => deleteAcctJob(j.id)} disabled={deletingAcctJob === j.id}
+                                className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {tab === 'alerts' && (
@@ -244,28 +409,45 @@ export default function CronJobs() {
       )}
 
       {tab === 'logs' && (
-        <div className="card overflow-hidden p-0">
-          <table className="w-full text-sm">
-            <thead className={theadCls}>
-              <tr>
-                <th className="table-header-cell w-36">Ran At</th>
-                <th className="table-header-cell">Command</th>
-                <th className="table-header-cell w-20">Exit</th>
-                <th className="table-header-cell">Output</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.length === 0 && <tr><td colSpan={4} className="table-cell text-center py-8 text-slate-400">No logs yet — run a job manually or wait for scheduled runs.</td></tr>}
-              {logs.map((l: any) => (
-                <tr key={l.id} className={rowCls}>
-                  <td className="table-cell text-xs text-slate-500">{new Date(l.ran_at).toLocaleString()}</td>
-                  <td className="table-cell font-mono text-xs truncate max-w-[200px]">{l.command}</td>
-                  <td className="table-cell"><span className={`badge text-xs ${l.exit_code === 0 ? 'badge-success' : 'badge-error'}`}>{l.exit_code}</span></td>
-                  <td className="table-cell text-xs text-slate-500 truncate max-w-[240px] font-mono">{l.output || '—'}</td>
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-56 text-sm" placeholder="Search logs…" value={logSearch} onChange={e => setLogSearch(e.target.value)} />
+            </div>
+          </div>
+          <div className="card overflow-hidden p-0">
+            <table className="w-full text-sm">
+              <thead className={theadCls}>
+                <tr>
+                  <th className="table-header-cell w-36">Ran At</th>
+                  <th className="table-header-cell">Command</th>
+                  <th className="table-header-cell w-20">Exit</th>
+                  <th className="table-header-cell">Output</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {(() => {
+                  const q = logSearch.trim().toLowerCase();
+                  const visible = q ? logs.filter((l: any) => [l.command, l.output].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : logs;
+                  if (logs.length === 0) return (
+                    <tr><td colSpan={4} className="table-cell text-center py-8 text-slate-400">No logs yet — run a job manually or wait for scheduled runs.</td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No logs match "{logSearch}"</td></tr>
+                  );
+                  return visible.map((l: any) => (
+                    <tr key={l.id} className={rowCls}>
+                      <td className="table-cell text-xs text-slate-500">{new Date(l.ran_at).toLocaleString()}</td>
+                      <td className="table-cell font-mono text-xs truncate max-w-[200px]">{l.command}</td>
+                      <td className="table-cell"><span className={`badge text-xs ${l.exit_code === 0 ? 'badge-success' : 'badge-error'}`}>{l.exit_code}</span></td>
+                      <td className="table-cell text-xs text-slate-500 truncate max-w-[240px] font-mono">{l.output || '—'}</td>
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Code2, Settings, Package, Save, Sliders, Trash2 } from 'lucide-react';
+import { Code2, Settings, Package, Save, Sliders, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface PHPInfo {
   version: string;
@@ -25,12 +26,14 @@ const SETTING_LABELS: Record<string, { label: string; hint: string; type: 'text'
 
 export default function PHPManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'info' | 'settings' | 'extensions' | 'domain-ini' | 'fpm-pool'>('info');
   const [info, setInfo] = useState<PHPInfo | null>(null);
   const [settings, setSettings] = useState<Settings>({});
   const [editSettings, setEditSettings] = useState<Settings>({});
   const [saving, setSaving] = useState(false);
   const [extSearch, setExtSearch] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
 
   async function load() {
     try {
@@ -42,7 +45,13 @@ export default function PHPManager() {
       setSettings(settingsRes.data);
       setEditSettings({ ...settingsRes.data });
     } catch (err: any) { toast.error('Failed to load PHP info'); }
+    finally { setPageLoading(false); }
   }
+  useEffect(() => {
+    document.title = 'PHP Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function saveSettings() {
@@ -62,6 +71,7 @@ export default function PHPManager() {
   const [fpmPool, setFpmPool] = useState<Record<string, string>>({});
   const [fpmLoaded, setFpmLoaded] = useState(false);
   const [fpmSaving, setFpmSaving] = useState(false);
+  const [deletingPool, setDeletingPool] = useState(false);
 
   async function loadFpmPool() {
     if (!fpmDomain.trim()) return toast.error('Enter a domain');
@@ -82,12 +92,14 @@ export default function PHPManager() {
   }
 
   async function deleteFpmPool() {
-    if (!confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
+    if (!await confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
+    setDeletingPool(true);
     try {
       await axios.delete(`/api/php/fpm-pool/${fpmDomain.trim()}`);
       toast.success('FPM pool deleted');
       setFpmLoaded(false); setFpmPool({});
     } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingPool(false); }
   }
 
   const [domainIniDomain, setDomainIniDomain] = useState('');
@@ -119,6 +131,13 @@ export default function PHPManager() {
         <h1 className="page-title">PHP Manager</h1>
         <p className="page-subtitle">View PHP configuration and manage settings</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {info && (
         <div className="flex items-center gap-3 p-4 card">
@@ -194,8 +213,11 @@ export default function PHPManager() {
 
       {tab === 'extensions' && (
         <div className="card p-5 space-y-4 max-w-2xl">
-          <input className="input" placeholder="Search extensions…"
-            value={extSearch} onChange={e => setExtSearch(e.target.value)} />
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8" placeholder="Search extensions…"
+              value={extSearch} onChange={e => setExtSearch(e.target.value)} />
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {filteredExts.map(ext => (
               <div key={ext} className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-700/50 text-sm">
@@ -242,7 +264,7 @@ export default function PHPManager() {
                 <button onClick={saveFpmPool} disabled={fpmSaving} className="btn-primary">
                   <Save size={14} /> {fpmSaving ? 'Saving…' : 'Save FPM Pool'}
                 </button>
-                <button onClick={deleteFpmPool} className="btn-secondary text-rose-600 dark:text-rose-400">
+                <button onClick={deleteFpmPool} disabled={deletingPool} className="btn-secondary text-rose-600 dark:text-rose-400">
                   <Trash2 size={14} /> Delete Pool
                 </button>
               </div>
@@ -285,6 +307,8 @@ export default function PHPManager() {
             </>
           )}
         </div>
+      )}
+      </>
       )}
     </div>
   );

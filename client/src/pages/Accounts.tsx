@@ -1,7 +1,8 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, Fragment } from 'react';
 import axios from 'axios';
-import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen } from 'lucide-react';
+import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Account {
   id: number;
@@ -32,6 +33,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function Accounts() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [plans, setPlans]       = useState<Plan[]>([]);
   const [clients, setClients]   = useState<Client[]>([]);
@@ -39,6 +41,12 @@ export default function Accounts() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [usageData, setUsageData] = useState<Record<number, any>>({});
   const [loading, setLoading]   = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+  const [editAccountForm, setEditAccountForm] = useState({ plan_id: '', client_id: '', notes: '', expires_at: '' });
+  const [expiryChecking, setExpiryChecking] = useState(false);
+  const [actioning, setActioning] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
     plan_id: '', client_id: '', notes: '', expires_at: '',
@@ -54,8 +62,13 @@ export default function Accounts() {
       setAccounts(aRes.data);
       setPlans(pRes.data);
       setClients(cRes.data);
-    } catch { toast.error('Failed to load accounts'); }
+    } catch { toast.error('Failed to load accounts'); } finally { setPageLoading(false); }
   }
+  useEffect(() => {
+    document.title = 'Hosting Accounts — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function create(e: FormEvent) {
@@ -70,20 +83,26 @@ export default function Accounts() {
   }
 
   async function setStatus(id: number, status: string) {
+    setActioning(id);
     try {
       await axios.patch(`/api/accounts/${id}/status`, { status });
       toast.success(`Account ${status}`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   async function suspendAccount(id: number) {
+    setActioning(id);
     try { await axios.post(`/api/accounts/${id}/suspend`); toast.success('Account suspended'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   async function unsuspendAccount(id: number) {
+    setActioning(id);
     try { await axios.post(`/api/accounts/${id}/unsuspend`); toast.success('Account unsuspended'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
   }
 
   function expiryBadge(expires_at: string | null) {
@@ -102,9 +121,30 @@ export default function Accounts() {
   }
 
   async function deleteAccount(id: number, username: string) {
-    if (!confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
+    if (!await confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
+    setActioning(id);
     try { await axios.delete(`/api/accounts/${id}`); toast.success('Account deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setActioning(null); }
+  }
+
+  async function updateAccount(id: number) {
+    try {
+      await axios.patch(`/api/accounts/${id}`, editAccountForm);
+      toast.success('Account updated');
+      setEditingAccountId(null);
+      load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function runExpiryCheck() {
+    setExpiryChecking(true);
+    try {
+      const { data } = await axios.get('/api/accounts/check-expiry');
+      toast.success(`Expiry check complete — ${data.suspended ?? 0} account(s) suspended`);
+      load();
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Expiry check failed'); }
+    setExpiryChecking(false);
   }
 
   const statusActions: Record<string, { label: string; target: string; icon: any; cls: string }[]> = {
@@ -120,6 +160,7 @@ export default function Accounts() {
     terminated: accounts.filter(a => a.status === 'terminated').length,
   };
 
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -129,14 +170,20 @@ export default function Accounts() {
         </div>
         <div className="flex gap-2">
           <button onClick={load} className="btn-secondary"><RefreshCw size={14} /></button>
+          <button onClick={runExpiryCheck} disabled={expiryChecking} className="btn-secondary" title="Suspend all accounts past their expiry date">
+            {expiryChecking
+              ? <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              : <CalendarClock size={14} />}
+            Expiry Check
+          </button>
           <button onClick={() => setShowForm(v => !v)} className="btn-primary">
             <Plus size={14} /> New Account
           </button>
         </div>
       </div>
 
-      {/* Status summary */}
-      <div className="flex gap-3 flex-wrap">
+      {/* Status summary + search */}
+      <div className="flex flex-wrap items-center gap-3">
         {[
           { label: 'Active',     n: counts.active,     cls: 'badge-green' },
           { label: 'Suspended',  n: counts.suspended,  cls: 'badge-yellow' },
@@ -144,6 +191,15 @@ export default function Accounts() {
         ].map(({ label, n, cls }) => (
           <div key={label} className={`${cls} text-sm font-semibold px-3 py-1`}>{n} {label}</div>
         ))}
+        <div className="relative ml-auto">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            className="input pl-8 w-56 text-sm"
+            placeholder="Search accounts…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       {showForm && (
@@ -228,14 +284,24 @@ export default function Accounts() {
             <th className="px-4 py-3 w-32" />
           </tr></thead>
           <tbody>
-            {accounts.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-16 text-center">
-                <Server className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No hosting accounts yet</p>
-              </td></tr>
-            ) : accounts.map(acc => (
-              <>
-                <tr key={acc.id} className={rowCls}>
+            {(() => {
+              const q = search.trim().toLowerCase();
+              const visible = q ? accounts.filter(a =>
+                [a.username, a.domain, a.status, a.plan_name, a.client_name, a.client_email]
+                  .some(v => v?.toLowerCase().includes(q))
+              ) : accounts;
+              if (accounts.length === 0) return (
+                <tr><td colSpan={6} className="px-4 py-16 text-center">
+                  <Server className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                  <p className="text-slate-400 text-sm">No hosting accounts yet</p>
+                </td></tr>
+              );
+              if (visible.length === 0) return (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400 text-sm">No accounts match "{search}"</td></tr>
+              );
+              return visible.map(acc => (
+              <Fragment key={acc.id}>
+                <tr className={rowCls}>
                   <td className="table-cell">
                     <div className="flex items-center gap-2.5">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${acc.status === 'active' ? 'bg-emerald-400 animate-pulse' : acc.status === 'suspended' ? 'bg-amber-400' : 'bg-slate-400'}`} />
@@ -265,21 +331,27 @@ export default function Accounts() {
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                       {acc.status === 'active' && (
-                        <button onClick={() => suspendAccount(acc.id)} className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30" title="Suspend (disables vhost)">
+                        <button onClick={() => suspendAccount(acc.id)} disabled={actioning === acc.id} className="btn-icon hover:!text-amber-600 hover:!bg-amber-50 dark:hover:!bg-amber-900/30" title="Suspend (disables vhost)">
                           <Ban size={13} />
                         </button>
                       )}
                       {acc.status === 'suspended' && (
-                        <button onClick={() => unsuspendAccount(acc.id)} className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30" title="Unsuspend (re-enables vhost)">
+                        <button onClick={() => unsuspendAccount(acc.id)} disabled={actioning === acc.id} className="btn-icon hover:!text-emerald-600 hover:!bg-emerald-50 dark:hover:!bg-emerald-900/30" title="Unsuspend (re-enables vhost)">
                           <Power size={13} />
                         </button>
                       )}
                       {(statusActions[acc.status] ?? []).filter(a => a.target === 'terminated').map(a => (
-                        <button key={a.target} onClick={() => setStatus(acc.id, a.target)}
+                        <button key={a.target} onClick={() => setStatus(acc.id, a.target)} disabled={actioning === acc.id}
                           className={`btn-icon ${a.cls}`} title={a.label}>
                           <a.icon size={13} />
                         </button>
                       ))}
+                      <button onClick={() => {
+                        setEditingAccountId(editingAccountId === acc.id ? null : acc.id);
+                        setEditAccountForm({ plan_id: String(acc.plan_name ? (plans.find(p => p.name === acc.plan_name)?.id ?? '') : ''), client_id: String(acc.client_name ? (clients.find(c => c.name === acc.client_name)?.id ?? '') : ''), notes: acc.notes || '', expires_at: acc.expires_at || '' });
+                      }} className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit metadata">
+                        <Pencil size={13} />
+                      </button>
                       <button onClick={() => {
                         const next = expanded === acc.id ? null : acc.id;
                         setExpanded(next);
@@ -295,11 +367,11 @@ export default function Accounts() {
                           fetch(`/api/accounts/${acc.id}/export`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
                             .then(r => r.blob())
                             .then(blob => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `account_${acc.username}.tar.gz`; a.click(); })
-                            .catch(() => alert('Export failed'));
+                            .catch(() => toast.error('Export failed'));
                         }}>
                         <PackageOpen size={13} />
                       </button>
-                      <button onClick={() => deleteAccount(acc.id, acc.username)}
+                      <button onClick={() => deleteAccount(acc.id, acc.username)} disabled={actioning === acc.id}
                         className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                         title="Delete">
                         <Trash2 size={13} />
@@ -307,8 +379,42 @@ export default function Accounts() {
                     </div>
                   </td>
                 </tr>
+                {editingAccountId === acc.id && (
+                  <tr className="bg-slate-50/80 dark:bg-slate-700/30 border-b border-slate-100 dark:border-slate-700/40">
+                    <td colSpan={6} className="px-5 py-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl">
+                        <div>
+                          <label className="label">Plan</label>
+                          <select className="input text-sm" value={editAccountForm.plan_id} onChange={e => setEditAccountForm(f => ({ ...f, plan_id: e.target.value }))}>
+                            <option value="">No plan</option>
+                            {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Client</label>
+                          <select className="input text-sm" value={editAccountForm.client_id} onChange={e => setEditAccountForm(f => ({ ...f, client_id: e.target.value }))}>
+                            <option value="">No client</option>
+                            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label">Expiry Date</label>
+                          <input type="date" className="input text-sm" value={editAccountForm.expires_at} onChange={e => setEditAccountForm(f => ({ ...f, expires_at: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="label">Notes</label>
+                          <input className="input text-sm" value={editAccountForm.notes} onChange={e => setEditAccountForm(f => ({ ...f, notes: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button className="btn-primary text-sm" onClick={() => updateAccount(acc.id)}>Save</button>
+                        <button className="btn-secondary text-sm" onClick={() => setEditingAccountId(null)}>Cancel</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {expanded === acc.id && (
-                  <tr key={`${acc.id}-detail`} className="bg-slate-50/60 dark:bg-slate-700/20 border-b border-slate-100 dark:border-slate-700/40">
+                  <tr className="bg-slate-50/60 dark:bg-slate-700/20 border-b border-slate-100 dark:border-slate-700/40">
                     <td colSpan={6} className="px-6 py-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div>
@@ -341,8 +447,9 @@ export default function Accounts() {
                     </td>
                   </tr>
                 )}
-              </>
-            ))}
+              </Fragment>
+            ));
+            })()}
           </tbody>
         </table>
       </div>

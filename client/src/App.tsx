@@ -2,7 +2,10 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './context/ConfirmContext';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
+import NotFound from './pages/NotFound';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import FileManager from './pages/FileManager';
@@ -73,7 +76,7 @@ function AppRoutes() {
       <Route path="/portal/login" element={<ClientPortalLogin />} />
       <Route path="/portal" element={<ClientPortal />} />
 
-      <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+      <Route path="/" element={<PrivateRoute><ErrorBoundary><Layout /></ErrorBoundary></PrivateRoute>}>
         <Route index element={<Dashboard />} />
 
         {/* Files & Storage */}
@@ -157,6 +160,8 @@ function AppRoutes() {
         <Route path="settings"    element={<Settings />} />
         <Route path="admin-users" element={<AdminUsers />} />
         <Route path="api-tokens"  element={<ApiTokens />} />
+
+        <Route path="*" element={<NotFound />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -170,7 +175,9 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <AppRoutes />
+            <ConfirmProvider>
+              <AppRoutes />
+            </ConfirmProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>

@@ -1,34 +1,43 @@
 import { useEffect, useState } from 'react';
 import { Search, Trash2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/audit-log${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function AuditLog() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [user, setUser] = useState('');
+  const [pageLoading, setPageLoading] = useState(true);
   const perPage = 50;
 
   async function load(p = 1) {
-    const params = new URLSearchParams({ page: String(p), per_page: String(perPage) });
-    if (search) params.set('search', search);
-    if (user) params.set('user', user);
-    const r = await api(`/?${params}`);
-    const d = await r.json();
-    setLogs(Array.isArray(d.logs) ? d.logs : []);
-    setTotal(d.total || 0);
-    setPage(p);
+    try {
+      const params = new URLSearchParams({ page: String(p), per_page: String(perPage) });
+      if (search) params.set('search', search);
+      if (user) params.set('user', user);
+      const r = await fetchApi(`/api/audit-log/?${params}`);
+      const d = await r.json();
+      setLogs(Array.isArray(d.logs) ? d.logs : []);
+      setTotal(d.total || 0);
+      setPage(p);
+    } finally { setPageLoading(false); }
   }
+
+  useEffect(() => {
+    document.title = 'Audit Log — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); }, []);
 
   async function clearOld() {
-    if (!confirm('Delete all audit log entries older than 90 days?')) return;
-    await api('/clear', { method: 'DELETE' });
+    if (!await confirm('Delete all audit log entries older than 90 days?')) return;
+    await fetchApi('/api/audit-log/clear', { method: 'DELETE' });
     toast.success('Old logs cleared');
     load();
   }
@@ -46,6 +55,13 @@ export default function AuditLog() {
         <h1 className="page-title">Audit Log</h1>
         <button className="btn-danger text-xs" onClick={clearOld}><Trash2 size={12} className="mr-1" />Clear Old (&gt;90d)</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="card flex gap-3">
         <div className="relative flex-1">
@@ -90,6 +106,8 @@ export default function AuditLog() {
             <button className="btn-ghost text-xs" disabled={page >= Math.ceil(total / perPage)} onClick={() => load(page + 1)}>Next</button>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

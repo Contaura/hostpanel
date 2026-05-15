@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, RefreshCw, Cloud, CloudOff, Zap } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Cloud, CloudOff, Zap, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/cloudflare${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function CloudflareManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [zones, setZones] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [dns, setDns] = useState<any[]>([]);
@@ -13,17 +14,27 @@ export default function CloudflareManager() {
   const [analytics, setAnalytics] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [token, setToken] = useState('');
+  const [dnsSearch, setDnsSearch] = useState('');
+  const [deletingZone, setDeletingZone] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Cloudflare — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { loadZones(); }, []);
 
   async function loadZones() {
-    const r = await api('/');
-    setZones(await r.json());
+    try {
+      const r = await fetchApi('/api/cloudflare/');
+      setZones(await r.json());
+    } finally { setPageLoading(false); }
   }
 
   async function addZone() {
     if (!token.trim()) return;
-    const r = await api('/', { method: 'POST', body: JSON.stringify({ api_token: token }) });
+    const r = await fetchApi('/api/cloudflare/', { method: 'POST', body: JSON.stringify({ api_token: token }) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Cloudflare zones imported');
@@ -33,39 +44,42 @@ export default function CloudflareManager() {
 
   async function selectZone(zone: any) {
     setSelected(zone);
-    const r = await api(`/${zone.cf_zone_id}/dns`);
+    const r = await fetchApi(`/api/cloudflare/${zone.cf_zone_id}/dns`);
     setDns(await r.json());
     if (tab === 'analytics') loadAnalytics(zone.cf_zone_id);
   }
 
   async function loadAnalytics(id: string) {
-    const r = await api(`/${id}/analytics`);
+    const r = await fetchApi(`/api/cloudflare/${id}/analytics`);
     setAnalytics(await r.json());
   }
 
   async function toggleProxy(zoneId: string, recordId: string, current: boolean) {
-    await api(`/${zoneId}/dns/${recordId}/proxy`, { method: 'PATCH', body: JSON.stringify({ proxied: !current }) });
+    await fetchApi(`/api/cloudflare/${zoneId}/dns/${recordId}/proxy`, { method: 'PATCH', body: JSON.stringify({ proxied: !current }) });
     toast.success(`Proxy ${!current ? 'enabled' : 'disabled'}`);
-    const r = await api(`/${zoneId}/dns`);
+    const r = await fetchApi(`/api/cloudflare/${zoneId}/dns`);
     setDns(await r.json());
   }
 
   async function purge(zoneId: string) {
-    await api(`/${zoneId}/purge`, { method: 'POST' });
+    await fetchApi(`/api/cloudflare/${zoneId}/purge`, { method: 'POST' });
     toast.success('Cache purged');
   }
 
   async function togglePause(zone: any) {
-    await api(`/${zone.cf_zone_id}/pause`, { method: 'PATCH', body: JSON.stringify({ paused: !zone.paused }) });
+    await fetchApi(`/api/cloudflare/${zone.cf_zone_id}/pause`, { method: 'PATCH', body: JSON.stringify({ paused: !zone.paused }) });
     toast.success(zone.paused ? 'Zone unpaused' : 'Zone paused');
     loadZones();
   }
 
   async function deleteZone(id: number) {
-    if (!confirm('Remove this zone from HostPanel?')) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    setSelected(null);
-    loadZones();
+    if (!await confirm('Remove this zone from HostPanel?')) return;
+    setDeletingZone(id);
+    try {
+      await fetchApi(`/api/cloudflare/${id}`, { method: 'DELETE' });
+      setSelected(null);
+      loadZones();
+    } finally { setDeletingZone(null); }
   }
 
   return (
@@ -74,6 +88,13 @@ export default function CloudflareManager() {
         <h1 className="page-title">Cloudflare CDN</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Add API Token</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-3">
@@ -108,7 +129,7 @@ export default function CloudflareManager() {
                   <button className="btn-icon" title="Purge cache" onClick={e => { e.stopPropagation(); purge(z.cf_zone_id); }}>
                     <Zap size={13} />
                   </button>
-                  <button className="btn-icon text-red-500" onClick={e => { e.stopPropagation(); deleteZone(z.id); }}>
+                  <button className="btn-icon text-red-500" disabled={deletingZone === z.id} onClick={e => { e.stopPropagation(); deleteZone(z.id); }}>
                     <Trash2 size={13} />
                   </button>
                 </div>
@@ -126,29 +147,42 @@ export default function CloudflareManager() {
             </div>
 
             {tab === 'dns' && (
-              <div className="card overflow-hidden p-0">
-                <table className="w-full text-sm">
-                  <thead><tr>{['Type', 'Name', 'Content', 'Proxy', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                  <tbody>
-                    {dns.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No records</td></tr>}
-                    {dns.map((r: any) => (
-                      <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                        <td className="table-cell"><span className="badge-info text-xs">{r.type}</span></td>
-                        <td className="table-cell text-xs font-mono">{r.name}</td>
-                        <td className="table-cell text-xs text-slate-500 max-w-[200px] truncate">{r.content}</td>
-                        <td className="table-cell">
-                          <button
-                            className={`text-xs px-2 py-0.5 rounded-full ${r.proxied ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}
-                            onClick={() => toggleProxy(selected.cf_zone_id, r.id, r.proxied)}
-                          >
-                            {r.proxied ? '☁ Proxied' : '⬜ DNS only'}
-                          </button>
-                        </td>
-                        <td className="table-cell text-xs text-slate-400">{r.ttl === 1 ? 'Auto' : `${r.ttl}s`}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                <div className="flex justify-end">
+                  <div className="relative">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <input className="input pl-8 w-48 text-sm" placeholder="Search DNS records…" value={dnsSearch} onChange={e => setDnsSearch(e.target.value)} />
+                  </div>
+                </div>
+                <div className="card overflow-hidden p-0">
+                  <table className="w-full text-sm">
+                    <thead><tr>{['Type', 'Name', 'Content', 'Proxy', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                    <tbody>
+                      {(() => {
+                        const q = dnsSearch.trim().toLowerCase();
+                        const visible = q ? dns.filter((r: any) => [r.type, r.name, r.content].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : dns;
+                        if (dns.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No records</td></tr>;
+                        if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No records match "{dnsSearch}"</td></tr>;
+                        return visible.map((r: any) => (
+                          <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                            <td className="table-cell"><span className="badge-info text-xs">{r.type}</span></td>
+                            <td className="table-cell text-xs font-mono">{r.name}</td>
+                            <td className="table-cell text-xs text-slate-500 max-w-[200px] truncate">{r.content}</td>
+                            <td className="table-cell">
+                              <button
+                                className={`text-xs px-2 py-0.5 rounded-full ${r.proxied ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}
+                                onClick={() => toggleProxy(selected.cf_zone_id, r.id, r.proxied)}
+                              >
+                                {r.proxied ? '☁ Proxied' : '⬜ DNS only'}
+                              </button>
+                            </td>
+                            <td className="table-cell text-xs text-slate-400">{r.ttl === 1 ? 'Auto' : `${r.ttl}s`}</td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -172,6 +206,8 @@ export default function CloudflareManager() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }

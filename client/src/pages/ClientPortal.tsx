@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, QrCode, Lock } from 'lucide-react';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Invoice { id: number; invoice_number: string; amount: number; currency: string; status: string; due_date: string; paid_date: string; created_at: string; account_domain: string; notes: string }
 
@@ -19,6 +20,7 @@ const STATUS_CONFIG: Record<string, { icon: any; color: string; label: string }>
 
 export default function ClientPortal() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [params] = useSearchParams();
   const [tab, setTab] = useState<'invoices' | 'security'>('invoices');
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -80,7 +82,7 @@ export default function ClientPortal() {
   }
 
   async function disableTotp() {
-    if (!confirm('Disable two-factor authentication? This will reduce your account security.')) return;
+    if (!await confirm('Disable two-factor authentication? This will reduce your account security.')) return;
     setTotpLoading(true);
     try {
       await adel('/api/portal/totp');

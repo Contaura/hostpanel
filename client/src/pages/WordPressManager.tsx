@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, Power, Trash2, Download, Zap, Upload } from 'lucide-react';
+import { RefreshCw, Power, Trash2, Download, Zap, Upload, Search } from 'lucide-react';
 import { useRef } from 'react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/wordpress${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { fetchApi } from '../lib/api';
 
 export default function WordPressManager() {
   const toast = useToast();
@@ -22,27 +19,42 @@ export default function WordPressManager() {
   const [srForm, setSrForm] = useState({ search: '', replace: '' });
   const [uploading, setUploading] = useState(false);
   const [uploadOutput, setUploadOutput] = useState('');
+  const [pluginSearch, setPluginSearch] = useState('');
+  const [themeSearch, setThemeSearch] = useState('');
+  const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const pluginZipRef = useRef<HTMLInputElement>(null);
   const themeZipRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []));
-    api('/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : []));
+    document.title = 'WordPress — HostPanel';
+    return () => { document.title = 'HostPanel'; };
   }, []);
+
+  useEffect(() => { loadInitial(); }, []);
+
+  async function loadInitial() {
+    try {
+      await Promise.all([
+        fetchApi('/api/wordpress/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : [])),
+        fetchApi('/api/wordpress/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : [])),
+      ]);
+    } finally { setPageLoading(false); }
+  }
 
   async function selectSite(domain: string) {
     setSelected(domain); setOutput(''); setInfo(null); setPlugins([]); setThemes([]);
     const [i, pl, th] = await Promise.all([
-      api(`/${domain}/info`).then(r => r.json()),
-      api(`/${domain}/plugins`).then(r => r.json()),
-      api(`/${domain}/themes`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/info`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/plugins`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/themes`).then(r => r.json()),
     ]);
     setInfo(i); setPlugins(Array.isArray(pl) ? pl : []); setThemes(Array.isArray(th) ? th : []);
   }
 
   async function run(path: string, msg: string) {
     setLoading(true); setOutput('Running…');
-    const r = await api(path, { method: 'POST' });
+    const r = await fetchApi(`/api/wordpress${path}`, { method: 'POST' });
     const d = await r.json();
     setOutput(d.output || d.core || d.error || 'Done');
     if (d.error) toast.error(d.error); else toast.success(msg);
@@ -51,25 +63,30 @@ export default function WordPressManager() {
   }
 
   async function togglePlugin(slug: string, active: string) {
-    await api(`/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
-    const r = await api(`/${selected}/plugins`).then(r => r.json());
-    setPlugins(Array.isArray(r) ? r : []);
+    setLoading(true);
+    try {
+      await fetchApi(`/api/wordpress/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
+      const r = await fetchApi(`/api/wordpress/${selected}/plugins`).then(r => r.json());
+      setPlugins(Array.isArray(r) ? r : []);
+    } finally { setLoading(false); }
   }
 
   async function activateTheme(slug: string) {
-    await api(`/${selected}/themes/${slug}/activate`, { method: 'POST' });
-    const r = await api(`/${selected}/themes`).then(r => r.json());
-    setThemes(Array.isArray(r) ? r : []);
-    toast.success(`Theme ${slug} activated`);
+    setLoading(true);
+    try {
+      await fetchApi(`/api/wordpress/${selected}/themes/${slug}/activate`, { method: 'POST' });
+      const r = await fetchApi(`/api/wordpress/${selected}/themes`).then(r => r.json());
+      setThemes(Array.isArray(r) ? r : []);
+      toast.success(`Theme ${slug} activated`);
+    } finally { setLoading(false); }
   }
 
   async function uploadZip(type: 'plugins' | 'themes', file: File) {
     setUploading(true); setUploadOutput('Uploading…');
     const fd = new FormData();
     fd.append('zip', file);
-    const r = await fetch(`/api/wordpress/${selected}/${type}/upload`, {
+    const r = await fetchApi(`/api/wordpress/${selected}/${type}/upload`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` },
       body: fd,
     });
     const d = await r.json();
@@ -82,7 +99,7 @@ export default function WordPressManager() {
   async function searchReplace() {
     if (!srForm.search || !srForm.replace) return;
     setLoading(true); setOutput('Running search-replace…');
-    const r = await api(`/${selected}/search-replace`, { method: 'POST', body: JSON.stringify(srForm) });
+    const r = await fetchApi(`/api/wordpress/${selected}/search-replace`, { method: 'POST', body: JSON.stringify(srForm) });
     const d = await r.json();
     setOutput(d.output || d.error || 'Done');
     setLoading(false);
@@ -92,12 +109,19 @@ export default function WordPressManager() {
     <div className="space-y-6">
       <h1 className="page-title">WordPress Manager</h1>
 
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
+
       <div className="card flex gap-3 items-center">
         <select className="input flex-1" value={selected} onChange={e => selectSite(e.target.value)}>
           <option value="">Select a WordPress site…</option>
           {sites.map(s => <option key={s.domain} value={s.domain}>{s.domain}</option>)}
         </select>
-        <button className="btn-ghost" onClick={() => api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []))}><RefreshCw size={14} /></button>
+        <button className="btn-ghost" onClick={() => fetchApi('/api/wordpress/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []))}><RefreshCw size={14} /></button>
       </div>
 
       {sites.length === 0 && <p className="text-sm text-slate-500">No WordPress installations found. Install one via Script Installer.</p>}
@@ -142,64 +166,90 @@ export default function WordPressManager() {
           )}
 
           {tab === 'plugins' && (
-            <div className="card overflow-hidden p-0">
-              <table className="w-full text-sm">
-                <thead><tr>{['Plugin', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                <tbody>
-                  {plugins.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No plugins found</td></tr>}
-                  {plugins.map((p: any) => (
-                    <tr key={p.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="table-cell font-medium">{p.title || p.name}</td>
-                      <td className="table-cell text-xs text-slate-500">{p.version}</td>
-                      <td className="table-cell">
-                        <button onClick={() => togglePlugin(p.name, p.status)} className={`text-xs px-2 py-0.5 rounded-full font-medium ${p.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
-                          {p.status}
-                        </button>
-                      </td>
-                      <td className="table-cell">
-                        {p.update === 'available' && (
-                          <button className="btn-ghost text-xs text-amber-600" onClick={() => run(`/${selected}/plugins/${p.name}/update`, `${p.name} updated`)}>
-                            <Download size={11} className="mr-1" />Update
-                          </button>
-                        )}
-                      </td>
-                      <td className="table-cell">
-                        <button className="btn-icon text-red-500" onClick={() => run(`/${selected}/plugins/${p.name}/delete`, `${p.name} deleted`)}><Trash2 size={13} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search plugins…" value={pluginSearch} onChange={e => setPluginSearch(e.target.value)} />
+                </div>
+              </div>
+              <div className="card overflow-hidden p-0">
+                <table className="w-full text-sm">
+                  <thead><tr>{['Plugin', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(() => {
+                      const q = pluginSearch.trim().toLowerCase();
+                      const visible = q ? plugins.filter((p: any) => [p.title, p.name, p.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : plugins;
+                      if (plugins.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No plugins found</td></tr>;
+                      if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No plugins match "{pluginSearch}"</td></tr>;
+                      return visible.map((p: any) => (
+                        <tr key={p.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="table-cell font-medium">{p.title || p.name}</td>
+                          <td className="table-cell text-xs text-slate-500">{p.version}</td>
+                          <td className="table-cell">
+                            <button onClick={() => togglePlugin(p.name, p.status)} disabled={loading} className={`text-xs px-2 py-0.5 rounded-full font-medium disabled:opacity-50 ${p.status === 'active' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-slate-100 text-slate-500 dark:bg-slate-700'}`}>
+                              {p.status}
+                            </button>
+                          </td>
+                          <td className="table-cell">
+                            {p.update === 'available' && (
+                              <button className="btn-ghost text-xs text-amber-600" disabled={loading} onClick={() => run(`/${selected}/plugins/${p.name}/update`, `${p.name} updated`)}>
+                                <Download size={11} className="mr-1" />Update
+                              </button>
+                            )}
+                          </td>
+                          <td className="table-cell">
+                            <button className="btn-icon text-red-500" disabled={loading} onClick={() => run(`/${selected}/plugins/${p.name}/delete`, `${p.name} deleted`)}><Trash2 size={13} /></button>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
           {tab === 'themes' && (
-            <div className="card overflow-hidden p-0">
-              <table className="w-full text-sm">
-                <thead><tr>{['Theme', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
-                <tbody>
-                  {themes.length === 0 && <tr><td colSpan={5} className="table-cell text-center text-slate-500">No themes found</td></tr>}
-                  {themes.map((t: any) => (
-                    <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="table-cell font-medium">{t.title || t.name}</td>
-                      <td className="table-cell text-xs text-slate-500">{t.version}</td>
-                      <td className="table-cell">
-                        {t.status === 'active'
-                          ? <span className="badge-success text-xs">Active</span>
-                          : <button className="btn-ghost text-xs" onClick={() => activateTheme(t.name)}><Power size={11} className="mr-1" />Activate</button>}
-                      </td>
-                      <td className="table-cell">
-                        {t.update === 'available' && (
-                          <button className="btn-ghost text-xs text-amber-600" onClick={() => run(`/${selected}/themes/${t.name}/update`, `${t.name} updated`)}>
-                            <Download size={11} className="mr-1" />Update
-                          </button>
-                        )}
-                      </td>
-                      <td className="table-cell text-slate-400 text-xs">{t.status !== 'active' ? '—' : ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search themes…" value={themeSearch} onChange={e => setThemeSearch(e.target.value)} />
+                </div>
+              </div>
+              <div className="card overflow-hidden p-0">
+                <table className="w-full text-sm">
+                  <thead><tr>{['Theme', 'Version', 'Status', 'Update', ''].map(h => <th key={h} className="table-header-cell">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {(() => {
+                      const q = themeSearch.trim().toLowerCase();
+                      const visible = q ? themes.filter((t: any) => [t.title, t.name, t.status].some((v: any) => String(v ?? '').toLowerCase().includes(q))) : themes;
+                      if (themes.length === 0) return <tr><td colSpan={5} className="table-cell text-center text-slate-500">No themes found</td></tr>;
+                      if (visible.length === 0) return <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No themes match "{themeSearch}"</td></tr>;
+                      return visible.map((t: any) => (
+                        <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                          <td className="table-cell font-medium">{t.title || t.name}</td>
+                          <td className="table-cell text-xs text-slate-500">{t.version}</td>
+                          <td className="table-cell">
+                            {t.status === 'active'
+                              ? <span className="badge-success text-xs">Active</span>
+                              : <button className="btn-ghost text-xs" disabled={loading} onClick={() => activateTheme(t.name)}><Power size={11} className="mr-1" />Activate</button>}
+                          </td>
+                          <td className="table-cell">
+                            {t.update === 'available' && (
+                              <button className="btn-ghost text-xs text-amber-600" disabled={loading} onClick={() => run(`/${selected}/themes/${t.name}/update`, `${t.name} updated`)}>
+                                <Download size={11} className="mr-1" />Update
+                              </button>
+                            )}
+                          </td>
+                          <td className="table-cell text-slate-400 text-xs">{t.status !== 'active' ? '—' : ''}</td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -267,17 +317,23 @@ export default function WordPressManager() {
                   </select>
                 </div>
                 <div className="flex gap-2">
-                  <button className="btn-primary" onClick={async () => {
-                    await api(`/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
-                    const d = await api('/auto-updates').then(r => r.json());
-                    setAutoUpdates(Array.isArray(d) ? d : []);
-                    toast.success('Auto-update schedule saved');
+                  <button className="btn-primary" disabled={autoUpdateSaving} onClick={async () => {
+                    setAutoUpdateSaving(true);
+                    try {
+                      await fetchApi(`/api/wordpress/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
+                      const d = await fetchApi('/api/wordpress/auto-updates').then(r => r.json());
+                      setAutoUpdates(Array.isArray(d) ? d : []);
+                      toast.success('Auto-update schedule saved');
+                    } finally { setAutoUpdateSaving(false); }
                   }}>Save Schedule</button>
-                  <button className="btn-secondary text-red-500" onClick={async () => {
-                    await api(`/auto-updates/${selected}`, { method: 'DELETE' });
-                    const d = await api('/auto-updates').then(r => r.json());
-                    setAutoUpdates(Array.isArray(d) ? d : []);
-                    toast.success('Auto-update removed');
+                  <button className="btn-secondary text-red-500" disabled={autoUpdateSaving} onClick={async () => {
+                    setAutoUpdateSaving(true);
+                    try {
+                      await fetchApi(`/api/wordpress/auto-updates/${selected}`, { method: 'DELETE' });
+                      const d = await fetchApi('/api/wordpress/auto-updates').then(r => r.json());
+                      setAutoUpdates(Array.isArray(d) ? d : []);
+                      toast.success('Auto-update removed');
+                    } finally { setAutoUpdateSaving(false); }
                   }}>Remove</button>
                 </div>
               </div>
@@ -306,6 +362,8 @@ export default function WordPressManager() {
             </div>
           )}
         </>
+      )}
+      </>
       )}
     </div>
   );

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Bell, Send } from 'lucide-react';
+import { Plus, Trash2, Bell, Send, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/notifications${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 const blank = { name: '', url: '', type: 'webhook', events: [] as string[], secret: '' };
 
@@ -12,16 +11,29 @@ export default function Notifications() {
   const [allEvents, setAllEvents] = useState<string[]>([]);
   const [form, setForm] = useState<any>(blank);
   const [adding, setAdding] = useState(false);
+  const [editingHookId, setEditingHookId] = useState<number | null>(null);
+  const [editHookForm, setEditHookForm] = useState({ name: '', url: '', type: 'webhook', events: [] as string[], secret: '' });
+  const [hookSearch, setHookSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [testing, setTesting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => { load(); api('/events').then(r => r.json()).then(setAllEvents); }, []);
+  useEffect(() => {
+    document.title = 'Notifications — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => { load(); fetchApi('/api/notifications/events').then(r => r.json()).then(setAllEvents); }, []);
 
   async function load() {
-    const r = await api('/');
-    setHooks(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    try {
+      const r = await fetchApi('/api/notifications/');
+      setHooks(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setPageLoading(false); }
   }
 
   async function save() {
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/notifications/', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Webhook created');
@@ -30,24 +42,47 @@ export default function Notifications() {
   }
 
   async function del(id: number) {
-    await api(`/${id}`, { method: 'DELETE' });
-    setHooks(h => h.filter(x => x.id !== id));
+    setDeleting(id);
+    try {
+      await fetchApi(`/api/notifications/${id}`, { method: 'DELETE' });
+      setHooks(h => h.filter(x => x.id !== id));
+    } finally { setDeleting(null); }
   }
 
   async function test(id: number) {
-    const r = await api(`/${id}/test`, { method: 'POST' });
-    const d = await r.json();
-    if (d.error) toast.error(d.error);
-    else toast.success('Test notification sent');
+    setTesting(id);
+    try {
+      const r = await fetchApi(`/api/notifications/${id}/test`, { method: 'POST' });
+      const d = await r.json();
+      if (d.error) toast.error(d.error);
+      else toast.success('Test notification sent');
+    } finally { setTesting(null); }
   }
 
   async function toggleEnabled(hook: any) {
-    await api(`/${hook.id}`, { method: 'PUT', body: JSON.stringify({ ...hook, enabled: !hook.enabled }) });
+    await fetchApi(`/api/notifications/${hook.id}`, { method: 'PUT', body: JSON.stringify({ ...hook, enabled: !hook.enabled }) });
+    load();
+  }
+
+  async function updateHook(id: number) {
+    const existing = hooks.find(h => h.id === id);
+    const r = await fetchApi(`/api/notifications/${id}`, { method: 'PUT', body: JSON.stringify({ ...editHookForm, enabled: existing?.enabled ?? 1 }) });
+    const d = await r.json();
+    if (d.error) { toast.error(d.error); return; }
+    toast.success('Webhook updated');
+    setEditingHookId(null);
     load();
   }
 
   function toggleEvent(e: string) {
     setForm((f: any) => ({
+      ...f,
+      events: f.events.includes(e) ? f.events.filter((x: string) => x !== e) : [...f.events, e],
+    }));
+  }
+
+  function toggleEditEvent(e: string) {
+    setEditHookForm(f => ({
       ...f,
       events: f.events.includes(e) ? f.events.filter((x: string) => x !== e) : [...f.events, e],
     }));
@@ -61,6 +96,13 @@ export default function Notifications() {
         <h1 className="page-title">Notification Webhooks</h1>
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />Add Webhook</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {adding && (
         <div className="card space-y-4">
@@ -114,9 +156,19 @@ export default function Notifications() {
       )}
 
       <div className="space-y-3">
-        {hooks.length === 0 && <p className="text-sm text-slate-500">No notification channels configured.</p>}
-        {hooks.map((h: any) => (
-          <div key={h.id} className="card">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search webhooks…" value={hookSearch} onChange={e => setHookSearch(e.target.value)} />
+          </div>
+        </div>
+        {(() => {
+          const q = hookSearch.trim().toLowerCase();
+          const visible = q ? hooks.filter((h: any) => h.name.toLowerCase().includes(q) || h.url.toLowerCase().includes(q) || (h.events || []).some((e: string) => e.toLowerCase().includes(q))) : hooks;
+          if (hooks.length === 0) return <p className="text-sm text-slate-500">No notification channels configured.</p>;
+          if (visible.length === 0) return <p className="text-sm text-slate-400">No webhooks match "{hookSearch}".</p>;
+          return <>{visible.map((h: any) => (
+          <div key={h.id} className="card space-y-3">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{typeIcon[h.type] || '🔗'}</span>
@@ -132,19 +184,73 @@ export default function Notifications() {
                 >
                   <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${h.enabled ? 'left-4' : 'left-0.5'}`} />
                 </button>
-                <button className="btn-icon" title="Send test" onClick={() => test(h.id)}><Send size={13} /></button>
-                <button className="btn-icon text-red-500" onClick={() => del(h.id)}><Trash2 size={13} /></button>
+                <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                  if (editingHookId === h.id) { setEditingHookId(null); return; }
+                  setEditingHookId(h.id);
+                  setEditHookForm({ name: h.name, url: h.url, type: h.type, events: Array.isArray(h.events) ? h.events : [], secret: '' });
+                }}><Pencil size={13} /></button>
+                <button className="btn-icon" title="Send test" disabled={testing === h.id} onClick={() => test(h.id)}><Send size={13} /></button>
+                <button className="btn-icon text-red-500" disabled={deleting === h.id} onClick={() => del(h.id)}><Trash2 size={13} /></button>
               </div>
             </div>
-            <div className="mt-2 flex flex-wrap gap-1">
-              {(h.events || []).slice(0, 8).map((e: string) => (
-                <span key={e} className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded">{e}</span>
-              ))}
-              {(h.events || []).length > 8 && <span className="text-xs text-slate-400">+{h.events.length - 8} more</span>}
-            </div>
+
+            {editingHookId === h.id ? (
+              <div className="border-t border-slate-100 dark:border-slate-700 pt-3 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="label">Name</label><input className="input" value={editHookForm.name} onChange={e => setEditHookForm(f => ({ ...f, name: e.target.value }))} /></div>
+                  <div>
+                    <label className="label">Type</label>
+                    <select className="input" value={editHookForm.type} onChange={e => setEditHookForm(f => ({ ...f, type: e.target.value }))}>
+                      <option value="webhook">Generic Webhook</option>
+                      <option value="slack">Slack</option>
+                      <option value="discord">Discord</option>
+                      <option value="email">Email</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="label">{editHookForm.type === 'email' ? 'Recipient Email' : 'Webhook URL'}</label>
+                    <input className="input" type={editHookForm.type === 'email' ? 'email' : 'url'} value={editHookForm.url} onChange={e => setEditHookForm(f => ({ ...f, url: e.target.value }))} />
+                  </div>
+                  {editHookForm.type === 'webhook' && (
+                    <div className="col-span-2"><label className="label">Secret (leave blank to keep existing)</label><input className="input font-mono" placeholder="••••••••" value={editHookForm.secret} onChange={e => setEditHookForm(f => ({ ...f, secret: e.target.value }))} /></div>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="label mb-0">Events</label>
+                    <div className="flex gap-2 text-xs">
+                      <button className="text-indigo-500" onClick={() => setEditHookForm(f => ({ ...f, events: [...allEvents] }))}>All</button>
+                      <button className="text-slate-500" onClick={() => setEditHookForm(f => ({ ...f, events: [] }))}>None</button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allEvents.map(e => (
+                      <button key={e} onClick={() => toggleEditEvent(e)}
+                        className={`text-xs px-2 py-1 rounded-full border transition-colors ${editHookForm.events.includes(e) ? 'bg-indigo-600 text-white border-indigo-600' : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-400'}`}>
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button className="btn-primary text-sm" onClick={() => updateHook(h.id)}>Save</button>
+                  <button className="btn-ghost text-sm" onClick={() => setEditingHookId(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1">
+                {(h.events || []).slice(0, 8).map((e: string) => (
+                  <span key={e} className="text-xs bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-1.5 py-0.5 rounded">{e}</span>
+                ))}
+                {(h.events || []).length > 8 && <span className="text-xs text-slate-400">+{h.events.length - 8} more</span>}
+              </div>
+            )}
           </div>
-        ))}
+        ))}</>;
+        })()}
       </div>
+      </>
+      )}
     </div>
   );
 }

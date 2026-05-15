@@ -35,12 +35,17 @@ export default function WebExtras() {
   const [sslCerts, setSslCerts] = useState<any[]>([]);
   const [sslLoading, setSslLoading] = useState(false);
 
+  useEffect(() => {
+    document.title = 'Web Extras — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
     if (t === 'index') api('/api/web/index-manager').then(r => setIndexDomains(r.data || [])).catch(() => {});
     if (t === 'leech') api('/api/web/leech').then(r => setLeechDomains(r.data || { enabled: false, domains: [] })).catch(() => {});
-    if (t === 'hotlink') api('/api/web/hotlink').then(r => setHotlink(r.data)).catch(() => {});
+    if (t === 'hotlink') api('/api/web/hotlink').then(r => setHotlink(r.data)).catch(() => {}).finally(() => setPageLoading(false));
     if (t === 'mime') api('/api/web/mime').then(r => setMimeTypes(r.data)).catch(() => {});
     if (t === 'diskusage') loadDisk();
     if (t === 'bandwidth') api('/api/web/bandwidth').then(r => setBwData(r.data)).catch(() => {});
@@ -62,13 +67,26 @@ export default function WebExtras() {
   }
 
   async function deleteMime(mime: string) {
+    setDeletingMime(mime);
     try { await adel('/api/web/mime', { mime }); success('Removed'); loadTab('mime'); }
     catch (e: any) { error('Failed'); }
+    finally { setDeletingMime(null); }
+  }
+
+  async function removeLeech(d: string) {
+    setRemovingLeech(d);
+    try { await adel(`/api/web/leech/${d}`); loadTab('leech'); }
+    catch (e: any) { error('Failed'); }
+    finally { setRemovingLeech(null); }
   }
 
   const [indexDomains, setIndexDomains] = useState<{ domain: string; listing: boolean }[]>([]);
   const [leechDomains, setLeechDomains] = useState<{ enabled: boolean; domains: string[] }>({ enabled: false, domains: [] });
   const [newLeechDomain, setNewLeechDomain] = useState('');
+  const [deletingMime, setDeletingMime] = useState<string | null>(null);
+  const [removingLeech, setRemovingLeech] = useState<string | null>(null);
+  const [addingLeech, setAddingLeech] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
 
   const tabs = [
     { id: 'hotlink'   as Tab, label: 'Hotlink Protection', icon: ShieldOff  },
@@ -86,6 +104,13 @@ export default function WebExtras() {
         <h1 className="page-title">Web Extras</h1>
         <p className="page-subtitle">Hotlink protection, MIME types, disk usage, bandwidth stats, and SSL certificates</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -145,7 +170,7 @@ export default function WebExtras() {
                   <tr key={i} className="border-b border-slate-100 dark:border-slate-800">
                     <td className="table-cell font-mono text-xs">{m.mime}</td>
                     <td className="table-cell text-slate-600 dark:text-slate-400">{m.extensions}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteMime(m.mime)}><Trash2 size={14} /></button></td>
+                    <td className="table-cell"><button className="btn-icon text-red-500" disabled={deletingMime === m.mime} onClick={() => deleteMime(m.mime)}><Trash2 size={14} /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -283,13 +308,17 @@ export default function WebExtras() {
             <p className="text-xs text-slate-500">Adds basic HTTP authentication to a domain's directory to limit credential sharing.</p>
             <div className="flex gap-3">
               <input className="input flex-1" placeholder="example.com" value={newLeechDomain} onChange={e => setNewLeechDomain(e.target.value)} />
-              <button className="btn-primary" onClick={async () => {
+              <button className="btn-primary" disabled={addingLeech} onClick={async () => {
                 if (!newLeechDomain) return;
-                await apost('/api/web/leech', { domain: newLeechDomain });
-                success(`Leech protection enabled for ${newLeechDomain}`);
-                setNewLeechDomain('');
-                loadTab('leech');
-              }}><Plus size={14} /> Enable</button>
+                setAddingLeech(true);
+                try {
+                  await apost('/api/web/leech', { domain: newLeechDomain });
+                  success(`Leech protection enabled for ${newLeechDomain}`);
+                  setNewLeechDomain('');
+                  loadTab('leech');
+                } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+                finally { setAddingLeech(false); }
+              }}><Plus size={14} /> {addingLeech ? 'Enabling…' : 'Enable'}</button>
             </div>
           </div>
           <div className="card overflow-hidden p-0">
@@ -301,10 +330,7 @@ export default function WebExtras() {
                   <tr key={d} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                     <td className="table-cell font-mono text-sm">{d}</td>
                     <td className="table-cell">
-                      <button className="btn-icon text-red-500" onClick={async () => {
-                        await adel(`/api/web/leech/${d}`);
-                        loadTab('leech');
-                      }}><Trash2 size={13} /></button>
+                      <button className="btn-icon text-red-500" disabled={removingLeech === d} onClick={() => removeLeech(d)}><Trash2 size={13} /></button>
                     </td>
                   </tr>
                 ))}
@@ -312,6 +338,8 @@ export default function WebExtras() {
             </table>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Package, Plus, Trash2, Edit3, Check, X, HardDrive, Wifi, Mail, Database, Globe, FolderUp, Shield } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Plan {
   id: number;
@@ -36,16 +37,23 @@ const CYCLE_COLORS: Record<string, string> = {
 
 export default function Plans() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
   const [form, setForm] = useState({ ...EMPTY_PLAN });
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   async function load() {
     try { const { data } = await axios.get<Plan[]>('/api/billing/plans'); setPlans(data); }
     catch { toast.error('Failed to load plans'); }
   }
+  useEffect(() => {
+    document.title = 'Hosting Plans — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   function startEdit(plan: Plan) {
@@ -74,9 +82,11 @@ export default function Plans() {
   }
 
   async function deletePlan(id: number) {
-    if (!confirm('Delete this plan? Existing accounts using it will be unaffected.')) return;
+    if (!await confirm('Delete this plan? Existing accounts using it will be unaffected.')) return;
+    setDeleting(id);
     try { await axios.delete(`/api/billing/plans/${id}`); toast.success('Plan deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   const field = (key: keyof typeof form, label: string, type: string = 'text', placeholder = '') => (
@@ -171,7 +181,7 @@ export default function Plans() {
                 className="btn-icon hover:!text-indigo-600 dark:hover:!text-indigo-400 hover:!bg-indigo-50 dark:hover:!bg-indigo-900/30">
                 <Edit3 size={13} />
               </button>
-              <button onClick={() => deletePlan(plan.id)}
+              <button onClick={() => deletePlan(plan.id)} disabled={deleting === plan.id}
                 className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
                 <Trash2 size={13} />
               </button>

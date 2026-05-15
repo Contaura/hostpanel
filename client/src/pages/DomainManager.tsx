@@ -1,7 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X, RefreshCw } from 'lucide-react';
+import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X, RefreshCw, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface DNSRecord { name: string; type: string; value: string; ttl: string }
 
@@ -16,6 +17,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function DomainManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [domains, setDomains] = useState<string[]>([]);
   const [tab, setTab] = useState<'domains' | 'dns' | 'ssl' | 'dnssec'>('domains');
   const [showForm, setShowForm] = useState(false);
@@ -30,11 +32,20 @@ export default function DomainManager() {
   const [dnssecDomain, setDnssecDomain] = useState('');
   const [dnssecStatus, setDnssecStatus] = useState<Record<string, { signed: boolean; has_keys: boolean }>>({});
   const [dnssecLoading, setDnssecLoading] = useState('');
+  const [domainSearch, setDomainSearch] = useState('');
+  const [dnsSearch, setDnsSearch] = useState('');
+  const [deletingDomain, setDeletingDomain] = useState<string | null>(null);
+  const [deletingDns, setDeletingDns] = useState<number | null>(null);
 
   async function loadDomains() {
     const { data } = await axios.get<string[]>('/api/domains/domains');
     setDomains(data);
   }
+  useEffect(() => {
+    document.title = 'Domains — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadDomains(); }, []);
 
   async function loadDNS(domain: string) {
@@ -53,9 +64,11 @@ export default function DomainManager() {
   }
 
   async function deleteDomain(domain: string) {
-    if (!confirm(`Remove domain ${domain}?`)) return;
+    if (!await confirm(`Remove domain ${domain}?`)) return;
+    setDeletingDomain(domain);
     try { await axios.delete(`/api/domains/domains/${domain}`); toast.success(`${domain} removed`); loadDomains(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingDomain(null); }
   }
 
   async function issueSSL(e: FormEvent) {
@@ -80,8 +93,10 @@ export default function DomainManager() {
 
   async function deleteDNSRecord(index: number) {
     if (!dnsForm.domain) return;
+    setDeletingDns(index);
     try { await axios.delete(`/api/domains/dns/${dnsForm.domain}/${index}`); toast.success('Record deleted'); loadDNS(dnsForm.domain); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeletingDns(null); }
   }
 
   async function loadDnssecStatus(domain: string) {
@@ -99,7 +114,7 @@ export default function DomainManager() {
   }
 
   async function unsignZone(domain: string) {
-    if (!confirm(`Remove DNSSEC signing for "${domain}"?`)) return;
+    if (!await confirm(`Remove DNSSEC signing for "${domain}"?`)) return;
     setDnssecLoading(domain);
     try { await axios.post(`/api/domains/dnssec/${domain}/unsign`); toast.success('DNSSEC removed'); loadDnssecStatus(domain); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -150,6 +165,12 @@ export default function DomainManager() {
               </div>
             </form>
           )}
+          <div className="flex justify-end">
+            <div className="relative">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input className="input pl-8 w-48 text-sm" placeholder="Search domains…" value={domainSearch} onChange={e => setDomainSearch(e.target.value)} />
+            </div>
+          </div>
           <div className="card overflow-hidden">
             <table className="w-full text-sm">
               <thead className={theadCls}><tr>
@@ -158,32 +179,40 @@ export default function DomainManager() {
                 <th className="px-4 py-3 w-12" />
               </tr></thead>
               <tbody>
-                {domains.length === 0 ? (
-                  <tr><td colSpan={3} className="px-4 py-16 text-center">
-                    <Globe className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                    <p className="text-slate-400 text-sm">No domains configured</p>
-                  </td></tr>
-                ) : domains.map(d => (
-                  <tr key={d} className={rowCls}>
-                    <td className="table-cell">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-7 w-7 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center flex-shrink-0">
-                          <Globe size={13} className="text-emerald-600 dark:text-emerald-400" />
+                {(() => {
+                  const q = domainSearch.trim().toLowerCase();
+                  const visible = q ? domains.filter(d => d.toLowerCase().includes(q)) : domains;
+                  if (domains.length === 0) return (
+                    <tr><td colSpan={3} className="px-4 py-16 text-center">
+                      <Globe className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                      <p className="text-slate-400 text-sm">No domains configured</p>
+                    </td></tr>
+                  );
+                  if (visible.length === 0) return (
+                    <tr><td colSpan={3} className="px-4 py-8 text-center text-sm text-slate-400">No domains match "{domainSearch}"</td></tr>
+                  );
+                  return visible.map(d => (
+                    <tr key={d} className={rowCls}>
+                      <td className="table-cell">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-7 w-7 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center flex-shrink-0">
+                            <Globe size={13} className="text-emerald-600 dark:text-emerald-400" />
+                          </div>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100">{d}</span>
                         </div>
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">{d}</span>
-                      </div>
-                    </td>
-                    <td className="table-cell font-mono text-slate-400 dark:text-slate-500 text-xs hidden md:table-cell">
-                      /var/www/{d}/public_html
-                    </td>
-                    <td className="px-3 py-3">
-                      <button onClick={() => deleteDomain(d)}
-                        className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="table-cell font-mono text-slate-400 dark:text-slate-500 text-xs hidden md:table-cell">
+                        /var/www/{d}/public_html
+                      </td>
+                      <td className="px-3 py-3">
+                        <button onClick={() => deleteDomain(d)} disabled={deletingDomain === d}
+                          className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
@@ -343,6 +372,13 @@ export default function DomainManager() {
           </div>
 
           {dnsRecords.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input className="input pl-8 w-48 text-sm" placeholder="Search records…" value={dnsSearch} onChange={e => setDnsSearch(e.target.value)} />
+                </div>
+              </div>
             <div className="card overflow-hidden">
               <table className="w-full text-sm">
                 <thead className={theadCls}><tr>
@@ -353,7 +389,15 @@ export default function DomainManager() {
                   <th className="px-4 py-3 w-20" />
                 </tr></thead>
                 <tbody>
-                  {dnsRecords.map((r, i) => editingDns === i ? (
+                  {(() => {
+                    const q = dnsSearch.trim().toLowerCase();
+                    const visibleDns = q ? dnsRecords.map((r, i) => ({ r, i })).filter(({ r }) =>
+                      [r.name, r.type, r.value].some(v => v?.toLowerCase().includes(q))
+                    ) : dnsRecords.map((r, i) => ({ r, i }));
+                    if (visibleDns.length === 0) return (
+                      <tr><td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">No records match "{dnsSearch}"</td></tr>
+                    );
+                    return visibleDns.map(({ r, i }) => editingDns === i ? (
                     <tr key={i} className={rowCls}>
                       <td className="table-cell"><input className="input text-xs py-1" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} /></td>
                       <td className="table-cell"><select className="input text-xs py-1" value={editForm.type} onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}>{DNS_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></td>
@@ -375,13 +419,15 @@ export default function DomainManager() {
                       <td className="px-3 py-3">
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100">
                           <button className="btn-icon text-indigo-500" onClick={() => { setEditingDns(i); setEditForm({ ...r }); }}><Edit2 size={12} /></button>
-                          <button className="btn-icon hover:!text-rose-600" onClick={() => deleteDNSRecord(i)}><Trash2 size={12} /></button>
+                          <button className="btn-icon hover:!text-rose-600" disabled={deletingDns === i} onClick={() => deleteDNSRecord(i)}><Trash2 size={12} /></button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    ));
+                  })()}
                 </tbody>
               </table>
+            </div>
             </div>
           )}
         </div>

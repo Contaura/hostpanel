@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 import { Plus, Play, Square, RotateCcw, Trash2, ChevronDown, ChevronUp, Terminal, Cpu, MemoryStick, GitBranch, ArrowUpCircle } from 'lucide-react';
 
 interface App { name: string; type: string; domain: string; port: number; start_script: string; working_dir: string; status: string; cpu?: number; memory?: number; uptime?: number; restarts?: number }
@@ -20,6 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function AppManager() {
   const { success, error } = useToast();
+  const confirm = useConfirm();
   const [apps, setApps] = useState<App[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -28,12 +30,22 @@ export default function AppManager() {
   const [stagings, setStagings] = useState<Record<string, any>>({});
   const [stageForm, setStageForm] = useState<Record<string, { port: string; branch: string }>>({});
   const [showStageForm, setShowStageForm] = useState<string | null>(null);
+  const [controlling, setControlling] = useState<string | null>(null);
+  const [deletingApp, setDeletingApp] = useState<string | null>(null);
+  const [deletingStaging, setDeletingStaging] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'App Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     try { const r = await api('/api/apps/'); setApps(r.data); }
     catch (e: any) { error(e.response?.data?.error || 'Failed to load apps'); }
+    finally { setPageLoading(false); }
   }
 
   async function createApp() {
@@ -48,14 +60,18 @@ export default function AppManager() {
   }
 
   async function control(name: string, action: 'start' | 'stop' | 'restart') {
+    setControlling(name);
     try { await apost(`/api/apps/${name}/${action}`); success(`App ${action}ed`); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setControlling(null); }
   }
 
   async function remove(name: string) {
-    if (!confirm(`Delete app "${name}"?`)) return;
+    if (!await confirm(`Delete app "${name}"?`)) return;
+    setDeletingApp(name);
     try { await adel(`/api/apps/${name}`); success('App deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingApp(null); }
   }
 
   async function fetchLogs(name: string) {
@@ -78,15 +94,17 @@ export default function AppManager() {
   }
 
   async function promoteStaging(name: string) {
-    if (!confirm(`Promote staging to production for "${name}"? Production will be restarted.`)) return;
+    if (!await confirm(`Promote staging to production for "${name}"? Production will be restarted.`)) return;
     try { await apost(`/api/apps/${name}/promote`); success('Staging promoted to production'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function deleteStaging(name: string) {
-    if (!confirm(`Delete staging environment for "${name}"?`)) return;
+    if (!await confirm(`Delete staging environment for "${name}"?`)) return;
+    setDeletingStaging(name);
     try { await adel(`/api/apps/${name}/staging`); success('Staging deleted'); setStagings(p => ({ ...p, [name]: null })); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeletingStaging(null); }
   }
 
   return (
@@ -98,6 +116,13 @@ export default function AppManager() {
         </div>
         <button className="btn-primary" onClick={() => setShowForm(true)}><Plus size={14} /> Deploy App</button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {showForm && (
         <div className="card p-5 space-y-4">
@@ -151,13 +176,13 @@ export default function AppManager() {
               </div>
 
               <div className="flex items-center gap-1">
-                {app.status !== 'running' && <button className="btn-ghost text-emerald-600" title="Start" onClick={() => control(app.name, 'start')}><Play size={14} /></button>}
-                {app.status === 'running'  && <button className="btn-ghost text-orange-500" title="Stop"  onClick={() => control(app.name, 'stop')}><Square size={14} /></button>}
-                <button className="btn-ghost text-blue-500" title="Restart" onClick={() => control(app.name, 'restart')}><RotateCcw size={14} /></button>
+                {app.status !== 'running' && <button className="btn-ghost text-emerald-600" title="Start" disabled={controlling === app.name} onClick={() => control(app.name, 'start')}><Play size={14} /></button>}
+                {app.status === 'running'  && <button className="btn-ghost text-orange-500" title="Stop"  disabled={controlling === app.name} onClick={() => control(app.name, 'stop')}><Square size={14} /></button>}
+                <button className="btn-ghost text-blue-500" title="Restart" disabled={controlling === app.name} onClick={() => control(app.name, 'restart')}><RotateCcw size={14} /></button>
                 <button className="btn-ghost" title="Logs" onClick={() => { setExpanded(expanded === app.name ? null : app.name); fetchLogs(app.name); }}>
                   <Terminal size={14} />
                 </button>
-                <button className="btn-icon text-red-500" title="Delete" onClick={() => remove(app.name)}><Trash2 size={14} /></button>
+                <button className="btn-icon text-red-500" title="Delete" disabled={deletingApp === app.name} onClick={() => remove(app.name)}><Trash2 size={14} /></button>
                 <button className="btn-ghost" onClick={() => { const next = expanded === app.name ? null : app.name; setExpanded(next); if (next) loadStaging(app.name); }}>
                   {expanded === app.name ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </button>
@@ -197,7 +222,7 @@ export default function AppManager() {
                       <span className={`badge-${stagings[app.name].status === 'running' ? 'success' : 'warning'} text-xs`}>{stagings[app.name].status}</span>
                       <div className="flex gap-1 ml-auto">
                         <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => promoteStaging(app.name)}><ArrowUpCircle size={11} /> Promote</button>
-                        <button className="btn-icon text-red-500" onClick={() => deleteStaging(app.name)}><Trash2 size={12} /></button>
+                        <button className="btn-icon text-red-500" disabled={deletingStaging === app.name} onClick={() => deleteStaging(app.name)}><Trash2 size={12} /></button>
                       </div>
                     </div>
                   ) : (
@@ -209,6 +234,8 @@ export default function AppManager() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Search, AlertCircle, CheckCircle, XCircle, FileText } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string) =>
-  fetch(`/api/mail-tools${p}`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` },
-  });
+import { fetchApi } from '../lib/api';
 
 export default function MailTools() {
   const toast = useToast();
   const [tab, setTab] = useState<'mx' | 'dnsbl' | 'authlog'>('mx');
+
+  useEffect(() => {
+    document.title = 'Mail Tools — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   // MX Check
   const [mxDomain, setMxDomain] = useState('');
@@ -29,7 +30,7 @@ export default function MailTools() {
   async function checkMx() {
     if (!mxDomain.trim()) return;
     setMxLoading(true); setMxResult(null);
-    const r = await api(`/mx-check/${encodeURIComponent(mxDomain.trim())}`);
+    const r = await fetchApi(`/api/mail-tools/mx-check/${encodeURIComponent(mxDomain.trim())}`);
     const d = await r.json();
     if (d.error) toast.error(d.error); else setMxResult(d);
     setMxLoading(false);
@@ -38,7 +39,7 @@ export default function MailTools() {
   async function checkDnsbl() {
     if (!dnsblIp.trim()) return;
     setDnsblLoading(true); setDnsblResult([]);
-    const r = await api(`/dnsbl/${encodeURIComponent(dnsblIp.trim())}`);
+    const r = await fetchApi(`/api/mail-tools/dnsbl/${encodeURIComponent(dnsblIp.trim())}`);
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else setDnsblResult(Array.isArray(d) ? d : []);
@@ -48,7 +49,7 @@ export default function MailTools() {
   async function loadAuthLog() {
     setAuthLoading(true);
     const q = authSearch.trim() ? `?search=${encodeURIComponent(authSearch.trim())}` : '';
-    const r = await api(`/smtp-auth-log${q}`);
+    const r = await fetchApi(`/api/mail-tools/smtp-auth-log${q}`);
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else setAuthLog(Array.isArray(d) ? d : []);

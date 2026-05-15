@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Activity, RefreshCw, Trash2 } from 'lucide-react';
+import { Activity, RefreshCw, Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Process {
   user: string;
@@ -11,6 +12,8 @@ interface Process {
   stat: string;
   command: string;
 }
+
+const LIMIT = 50;
 
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700 sticky top-0 z-10';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
@@ -30,32 +33,55 @@ function cpuBar(val: string) {
 
 export default function ProcessManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [procs, setProcs] = useState<Process[]>([]);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [killing, setKilling] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
-  async function load() {
+  async function load(p = page) {
     setLoading(true);
     try {
-      const { data } = await axios.get<Process[]>('/api/processes/list');
-      setProcs(data);
-    } catch (err: any) { toast.error('Failed to load processes'); }
+      const { data } = await axios.get<{ data: Process[]; total: number; page: number; limit: number }>(
+        `/api/processes/list?page=${p}&limit=${LIMIT}`
+      );
+      setProcs(data.data);
+      setTotal(data.total);
+    } catch { toast.error('Failed to load processes'); }
     finally { setLoading(false); }
   }
+
+  useEffect(() => {
+    document.title = 'Process Manager — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
+  function goToPage(p: number) {
+    setPage(p);
+    setFilter('');
+    load(p);
+  }
+
   async function killProcess(pid: string, cmd: string) {
-    if (!confirm(`Kill process ${pid} (${cmd.slice(0, 40)})?`)) return;
+    if (!await confirm(`Kill process ${pid} (${cmd.slice(0, 40)})?`)) return;
+    setKilling(pid);
     try {
       await axios.delete(`/api/processes/${pid}`);
       toast.success(`Process ${pid} terminated`);
       load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setKilling(null); }
   }
 
   const filtered = filter
     ? procs.filter(p => p.command.toLowerCase().includes(filter.toLowerCase()) || p.user.includes(filter) || p.pid === filter)
     : procs;
+
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
   return (
     <div className="space-y-5">
@@ -65,9 +91,12 @@ export default function ProcessManager() {
           <p className="page-subtitle">View and manage running server processes</p>
         </div>
         <div className="flex gap-2">
-          <input className="input w-56" placeholder="Filter by user, PID, or command…"
-            value={filter} onChange={e => setFilter(e.target.value)} />
-          <button onClick={load} className="btn-secondary">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-56" placeholder="Filter by user, PID, or command…"
+              value={filter} onChange={e => setFilter(e.target.value)} />
+          </div>
+          <button onClick={() => load()} className="btn-secondary">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -109,6 +138,7 @@ export default function ProcessManager() {
                   </td>
                   <td className="px-3 py-3">
                     <button onClick={() => killProcess(p.pid, p.command)}
+                      disabled={killing === p.pid}
                       className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"
                       title="Kill process">
                       <Trash2 size={13} />
@@ -119,6 +149,16 @@ export default function ProcessManager() {
             </tbody>
           </table>
         </div>
+
+        {!filter && totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 dark:border-slate-700 text-sm text-slate-500">
+            <span>{total} processes · page {page} of {totalPages}</span>
+            <div className="flex gap-1">
+              <button className="btn-icon" onClick={() => goToPage(page - 1)} disabled={page <= 1}><ChevronLeft size={14} /></button>
+              <button className="btn-icon" onClick={() => goToPage(page + 1)} disabled={page >= totalPages}><ChevronRight size={14} /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

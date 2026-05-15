@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield } from 'lucide-react';
+import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil, Search } from 'lucide-react';
 
 type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all';
 
@@ -28,6 +28,8 @@ export default function EmailExtras() {
   const [autoresponders, setAutoresponders] = useState<Autoresponder[]>([]);
   const [arForm, setArForm] = useState({ email: '', subject: 'Auto Reply', body: '', start_date: '', end_date: '' });
   const [showArForm, setShowArForm] = useState(false);
+  const [editingArId, setEditingArId] = useState<number | null>(null);
+  const [editArForm, setEditArForm] = useState({ email: '', subject: '', body: '', start_date: '', end_date: '' });
 
   // Spam
   const [spam, setSpam] = useState<SpamConfig>({ required_score: '5.0', rewrite_header: 'Subject ***SPAM***', report_safe: '0', use_bayes: '1', bayes_auto_learn: '1' });
@@ -44,10 +46,25 @@ export default function EmailExtras() {
   const [catchAlls, setCatchAlls] = useState<{ domain: string; destination: string }[]>([]);
   const [caForm, setCaForm] = useState({ domain: '', destination: '' });
 
+  // Search
+  const [fwSearch, setFwSearch] = useState('');
+  const [arSearch, setArSearch] = useState('');
+  const [caSearch, setCaSearch] = useState('');
+
+  // Delete tracking
+  const [deleting, setDeleting] = useState<string | number | null>(null);
+  const [addingSpamRule, setAddingSpamRule] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Email Extras — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { loadTab(tab); }, [tab]);
 
   function loadTab(t: Tab) {
-    if (t === 'forwarders') api('/api/email-extras/forwarders').then(r => setForwarders(r.data)).catch(() => {});
+    if (t === 'forwarders') api('/api/email-extras/forwarders').then(r => setForwarders(r.data)).catch(() => {}).finally(() => setPageLoading(false));
     if (t === 'autoresponders') api('/api/email-extras/autoresponders').then(r => setAutoresponders(r.data)).catch(() => {});
     if (t === 'spam') api('/api/email-extras/spam').then(r => setSpam(r.data)).catch(() => {});
     if (t === 'quotas') api('/api/email-extras/quotas').then(r => setQuotas(r.data)).catch(() => {});
@@ -61,8 +78,10 @@ export default function EmailExtras() {
   }
 
   async function deleteCatchAll(domain: string) {
+    setDeleting(domain);
     try { await del(`/api/email-extras/catch-all/${encodeURIComponent(domain)}`); success('Removed'); loadTab('catch-all'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function addForwarder() {
@@ -72,8 +91,10 @@ export default function EmailExtras() {
   }
 
   async function deleteForwarder(source: string) {
+    setDeleting(source);
     try { await del(`/api/email-extras/forwarders/${encodeURIComponent(source)}`); success('Deleted'); loadTab('forwarders'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   async function saveAutoresponder() {
@@ -87,8 +108,19 @@ export default function EmailExtras() {
   }
 
   async function deleteAutoresponder(id: number) {
+    setDeleting(id);
     try { await del(`/api/email-extras/autoresponders/${id}`); success('Deleted'); loadTab('autoresponders'); }
     catch (e: any) { error('Failed'); }
+    finally { setDeleting(null); }
+  }
+
+  async function updateAutoresponder(id: number) {
+    try {
+      await put(`/api/email-extras/autoresponders/${id}`, { ...editArForm, enabled: autoresponders.find(a => a.id === id)?.enabled ?? 1 });
+      success('Autoresponder updated');
+      setEditingArId(null);
+      loadTab('autoresponders');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function saveSpam() {
@@ -100,6 +132,13 @@ export default function EmailExtras() {
     if (!dsDomain.trim()) return;
     try { const r = await api(`/api/email-extras/spam-rules/${dsDomain.trim()}`); setDsRules(r.data); }
     catch { setDsRules([]); }
+  }
+
+  async function deleteSpamRule(id: number) {
+    setDeleting(id);
+    try { await del(`/api/email-extras/spam-rules/${dsDomain}/${id}`); success('Rule removed'); loadDomainSpam(); }
+    catch (e: any) { error('Failed'); }
+    finally { setDeleting(null); }
   }
 
   const tabs: { id: Tab; label: string; icon: any }[] = [
@@ -117,6 +156,13 @@ export default function EmailExtras() {
         <h1 className="page-title">Email Extras</h1>
         <p className="page-subtitle">Manage forwarders, autoresponders, spam filtering, and disk quotas</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -138,20 +184,33 @@ export default function EmailExtras() {
               <button className="btn-primary" onClick={addForwarder}><Plus size={14} /> Add</button>
             </div>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Source</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
-              <tbody>
-                {forwarders.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No forwarders configured</td></tr>}
-                {forwarders.map(f => (
-                  <tr key={f.source} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-medium">{f.source}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{f.dest}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteForwarder(f.source)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search forwarders…" value={fwSearch} onChange={e => setFwSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Source</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = fwSearch.trim().toLowerCase();
+                    const visible = q ? forwarders.filter(f => [f.source, f.dest].some(v => v.toLowerCase().includes(q))) : forwarders;
+                    if (forwarders.length === 0) return <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No forwarders configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No forwarders match "{fwSearch}"</td></tr>;
+                    return visible.map(f => (
+                      <tr key={f.source} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell font-medium">{f.source}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{f.dest}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deleting === f.source} onClick={() => deleteForwarder(f.source)}><Trash2 size={14} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -177,23 +236,64 @@ export default function EmailExtras() {
             </div>
           )}
 
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Email</th><th className="table-header-cell">Subject</th><th className="table-header-cell">Active</th><th className="table-header-cell w-20"></th></tr></thead>
-              <tbody>
-                {autoresponders.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>}
-                {autoresponders.map(ar => (
-                  <tr key={ar.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-medium">{ar.email}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
-                    <td className="table-cell">
-                      <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
-                    </td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search autoresponders…" value={arSearch} onChange={e => setArSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Email</th><th className="table-header-cell">Subject</th><th className="table-header-cell">Active</th><th className="table-header-cell w-20"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = arSearch.trim().toLowerCase();
+                    const visible = q ? autoresponders.filter(ar => [ar.email, ar.subject].some(v => v.toLowerCase().includes(q))) : autoresponders;
+                    if (autoresponders.length === 0) return <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No autoresponders configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No autoresponders match "{arSearch}"</td></tr>;
+                    return visible.map(ar => (
+                      <Fragment key={ar.id}>
+                        <tr className="border-b border-slate-100 dark:border-slate-800">
+                          <td className="table-cell font-medium">{ar.email}</td>
+                          <td className="table-cell text-slate-600 dark:text-slate-400">{ar.subject}</td>
+                          <td className="table-cell">
+                            <button onClick={() => toggleAutoresponder(ar)}>{ar.enabled ? <ToggleRight size={20} className="text-emerald-500" /> : <ToggleLeft size={20} className="text-slate-400" />}</button>
+                          </td>
+                          <td className="table-cell">
+                            <div className="flex gap-1">
+                              <button className="btn-icon hover:!text-sky-600 hover:!bg-sky-50 dark:hover:!bg-sky-900/30" title="Edit" onClick={() => {
+                                if (editingArId === ar.id) { setEditingArId(null); return; }
+                                setEditingArId(ar.id);
+                                setEditArForm({ email: ar.email, subject: ar.subject, body: ar.body, start_date: ar.start_date || '', end_date: ar.end_date || '' });
+                              }}><Pencil size={13} /></button>
+                              <button className="btn-icon text-red-500" disabled={deleting === ar.id} onClick={() => deleteAutoresponder(ar.id)}><Trash2 size={14} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                        {editingArId === ar.id && (
+                          <tr className="bg-slate-50 dark:bg-slate-800/30">
+                            <td colSpan={4} className="px-4 py-3 space-y-3">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div><label className="label">Email Address</label><input className="input" value={editArForm.email} onChange={e => setEditArForm(f => ({ ...f, email: e.target.value }))} /></div>
+                                <div><label className="label">Subject</label><input className="input" value={editArForm.subject} onChange={e => setEditArForm(f => ({ ...f, subject: e.target.value }))} /></div>
+                                <div><label className="label">Start Date</label><input type="date" className="input" value={editArForm.start_date} onChange={e => setEditArForm(f => ({ ...f, start_date: e.target.value }))} /></div>
+                                <div><label className="label">End Date</label><input type="date" className="input" value={editArForm.end_date} onChange={e => setEditArForm(f => ({ ...f, end_date: e.target.value }))} /></div>
+                                <div className="col-span-2"><label className="label">Message Body</label><textarea className="input min-h-[80px]" value={editArForm.body} onChange={e => setEditArForm(f => ({ ...f, body: e.target.value }))} /></div>
+                              </div>
+                              <div className="flex gap-2">
+                                <button className="btn-primary text-sm" onClick={() => updateAutoresponder(ar.id)}>Save</button>
+                                <button className="btn-ghost text-sm" onClick={() => setEditingArId(null)}>Cancel</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -253,10 +353,14 @@ export default function EmailExtras() {
                   <option value="blacklist">Blacklist</option>
                 </select>
                 <input className="input flex-1" placeholder="email@example.com or *@domain.com" value={dsForm.address} onChange={e => setDsForm(f => ({ ...f, address: e.target.value }))} />
-                <button className="btn-primary" onClick={async () => {
-                  await post(`/api/email-extras/spam-rules/${dsDomain}`, dsForm);
-                  setDsForm({ type: 'whitelist', address: '' });
-                  success('Rule added'); loadDomainSpam();
+                <button className="btn-primary" disabled={addingSpamRule} onClick={async () => {
+                  setAddingSpamRule(true);
+                  try {
+                    await post(`/api/email-extras/spam-rules/${dsDomain}`, dsForm);
+                    setDsForm({ type: 'whitelist', address: '' });
+                    success('Rule added'); loadDomainSpam();
+                  } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+                  finally { setAddingSpamRule(false); }
                 }}><Plus size={14} /> Add</button>
               </div>
 
@@ -273,10 +377,7 @@ export default function EmailExtras() {
                       <td className="table-cell"><span className={`badge-${r.type === 'whitelist' ? 'success' : 'danger'} text-xs`}>{r.type}</span></td>
                       <td className="table-cell font-mono text-xs">{r.address}</td>
                       <td className="table-cell">
-                        <button className="btn-icon text-red-500" onClick={async () => {
-                          await del(`/api/email-extras/spam-rules/${dsDomain}/${r.id}`);
-                          success('Rule removed'); loadDomainSpam();
-                        }}><Trash2 size={13} /></button>
+                        <button className="btn-icon text-red-500" disabled={deleting === r.id} onClick={() => deleteSpamRule(r.id)}><Trash2 size={13} /></button>
                       </td>
                     </tr>
                   ))}
@@ -303,22 +404,37 @@ export default function EmailExtras() {
               <button className="btn-primary self-end" onClick={addCatchAll}><Plus size={14} /> Set</button>
             </div>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Domain</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
-              <tbody>
-                {catchAlls.length === 0 && <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No catch-all addresses configured</td></tr>}
-                {catchAlls.map(ca => (
-                  <tr key={ca.domain} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-mono">@{ca.domain}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{ca.destination}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => deleteCatchAll(ca.domain)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search catch-alls…" value={caSearch} onChange={e => setCaSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">Domain</th><th className="table-header-cell">Destination</th><th className="table-header-cell w-16"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = caSearch.trim().toLowerCase();
+                    const visible = q ? catchAlls.filter(ca => [ca.domain, ca.destination].some(v => v.toLowerCase().includes(q))) : catchAlls;
+                    if (catchAlls.length === 0) return <tr><td colSpan={3} className="table-cell text-slate-400 text-center py-8">No catch-all addresses configured</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No catch-alls match "{caSearch}"</td></tr>;
+                    return visible.map(ca => (
+                      <tr key={ca.domain} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell font-mono">@{ca.domain}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{ca.destination}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={deleting === ca.domain} onClick={() => deleteCatchAll(ca.domain)}><Trash2 size={14} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

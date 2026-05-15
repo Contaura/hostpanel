@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Zap, Server, Shield, Cpu } from 'lucide-react';
+import { Zap, Server, Shield, Cpu, ShieldCheck } from 'lucide-react';
 
 // Reusable animation style helper
 function anim(name: string, duration: string, delay = '0s', easing = 'ease-out') {
@@ -30,18 +30,30 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
+  const [needsTotp, setNeedsTotp] = useState(false);
+  const [totpCode, setTotpCode]   = useState('');
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, needsTotp ? totpCode : undefined);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Login failed — check your credentials');
+      if (err.requires2FA) {
+        setNeedsTotp(true);
+      } else {
+        setError(err.response?.data?.error || 'Login failed — check your credentials');
+      }
     } finally {
       setLoading(false);
     }
+  }
+
+  function backToCredentials() {
+    setNeedsTotp(false);
+    setTotpCode('');
+    setError('');
   }
 
   return (
@@ -175,47 +187,86 @@ export default function Login() {
 
           {/* Heading */}
           <div className="mb-8" style={anim('fade-up', '0.55s', '0.35s')}>
-            <h1 className="text-2xl font-bold text-white">Welcome back</h1>
-            <p className="text-slate-400 mt-1 text-sm">Sign in to your control panel</p>
+            {needsTotp ? (
+              <>
+                <div className="flex items-center gap-2.5 mb-2">
+                  <ShieldCheck size={22} className="text-indigo-400" />
+                  <h1 className="text-2xl font-bold text-white">Two-factor auth</h1>
+                </div>
+                <p className="text-slate-400 mt-1 text-sm">Enter the 6-digit code from your authenticator app</p>
+              </>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold text-white">Welcome back</h1>
+                <p className="text-slate-400 mt-1 text-sm">Sign in to your control panel</p>
+              </>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username */}
-            <div style={anim('fade-up', '0.5s', '0.45s')}>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
-                Username
-              </label>
-              <input
-                type="text"
-                className="block w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm
-                           text-white placeholder-slate-500 shadow-sm
-                           focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
-                           hover:border-slate-600 transition-all duration-200"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="admin"
-                required
-                autoFocus
-              />
-            </div>
+            {!needsTotp && (
+              <>
+                {/* Username */}
+                <div style={anim('fade-up', '0.5s', '0.45s')}>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    className="block w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm
+                               text-white placeholder-slate-500 shadow-sm
+                               focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
+                               hover:border-slate-600 transition-all duration-200"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    placeholder="admin"
+                    required
+                    autoFocus
+                  />
+                </div>
 
-            {/* Password */}
-            <div style={anim('fade-up', '0.5s', '0.55s')}>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
-                Password
-              </label>
-              <input
-                type="password"
-                className="block w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm
-                           text-white placeholder-slate-500 shadow-sm
-                           focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
-                           hover:border-slate-600 transition-all duration-200"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </div>
+                {/* Password */}
+                <div style={anim('fade-up', '0.5s', '0.55s')}>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    className="block w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm
+                               text-white placeholder-slate-500 shadow-sm
+                               focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
+                               hover:border-slate-600 transition-all duration-200"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            {needsTotp && (
+              <div style={anim('fade-up', '0.4s', '0s')}>
+                <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">
+                  Authentication Code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  className="block w-full rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm
+                             text-white placeholder-slate-500 shadow-sm text-center tracking-[0.5em] font-mono text-lg
+                             focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30
+                             hover:border-slate-600 transition-all duration-200"
+                  value={totpCode}
+                  onChange={e => setTotpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="000000"
+                  required
+                  autoFocus
+                />
+              </div>
+            )}
 
             {error && (
               <div
@@ -230,7 +281,7 @@ export default function Login() {
             <div style={anim('fade-up', '0.5s', '0.65s')}>
               <button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (needsTotp && totpCode.length !== 6)}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 mt-2
                            text-sm font-semibold text-white
                            shadow-lg shadow-indigo-950/60
@@ -246,10 +297,19 @@ export default function Login() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                     </svg>
-                    Signing in…
+                    {needsTotp ? 'Verifying…' : 'Signing in…'}
                   </>
-                ) : 'Sign in'}
+                ) : needsTotp ? 'Verify' : 'Sign in'}
               </button>
+              {needsTotp && (
+                <button
+                  type="button"
+                  className="w-full mt-2 text-sm text-slate-500 hover:text-slate-300 transition-colors"
+                  onClick={backToCredentials}
+                >
+                  ← Back
+                </button>
+              )}
             </div>
           </form>
 

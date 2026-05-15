@@ -97,6 +97,15 @@ router.get('/logo', (_req: Request, res: Response) => {
   res.sendFile(logoPath);
 });
 
+router.delete('/logo', (req: Request, res: Response) => {
+  const logoPath = path.join(DATA_DIR, 'uploads', 'logo.png');
+  try {
+    if (existsSync(logoPath)) require('fs').unlinkSync(logoPath);
+  } catch {}
+  db.prepare("DELETE FROM settings WHERE key='company_logo'").run();
+  res.json({ success: true });
+});
+
 /* ── Postfix SMTP relay (outbound relayhost) ─────────────── */
 
 router.get('/relay', async (_req: Request, res: Response) => {

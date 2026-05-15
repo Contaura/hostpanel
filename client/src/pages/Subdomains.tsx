@@ -1,7 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
-import { Globe, Plus, Trash2 } from 'lucide-react';
+import { Globe, Plus, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Subdomain {
   subdomain: string;
@@ -14,11 +15,14 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function Subdomains() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [subs, setSubs] = useState<Subdomain[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subdomain: '', domain: '', docRoot: '' });
   const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -30,6 +34,11 @@ export default function Subdomains() {
       setDomains(domsRes.data);
     } catch { setSubs([]); }
   }
+  useEffect(() => {
+    document.title = 'Subdomains — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
   useEffect(() => { load(); }, []);
 
   async function create(e: FormEvent) {
@@ -44,11 +53,13 @@ export default function Subdomains() {
   }
 
   async function remove(fqdn: string) {
-    if (!confirm(`Remove subdomain ${fqdn}?`)) return;
+    if (!await confirm(`Remove subdomain ${fqdn}?`)) return;
+    setDeleting(fqdn);
     try {
       await axios.delete(`/api/subdomains/${fqdn}`);
       toast.success(`${fqdn} removed`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   return (
@@ -101,40 +112,54 @@ export default function Subdomains() {
         </form>
       )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className={theadCls}><tr>
-            <th className="table-header-cell">Subdomain</th>
-            <th className="table-header-cell hidden md:table-cell">Parent Domain</th>
-            <th className="px-4 py-3 w-12" />
-          </tr></thead>
-          <tbody>
-            {subs.length === 0 ? (
-              <tr><td colSpan={3} className="px-4 py-16 text-center">
-                <Globe className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
-                <p className="text-slate-400 text-sm">No subdomains configured</p>
-              </td></tr>
-            ) : subs.map(s => (
-              <tr key={s.fqdn} className={rowCls}>
-                <td className="table-cell">
-                  <div className="flex items-center gap-2.5">
-                    <div className="h-7 w-7 rounded-lg bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
-                      <Globe size={13} className="text-violet-600 dark:text-violet-400" />
-                    </div>
-                    <span className="font-semibold text-slate-900 dark:text-slate-100">{s.fqdn}</span>
-                  </div>
-                </td>
-                <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{s.domain}</td>
-                <td className="px-3 py-3">
-                  <button onClick={() => remove(s.fqdn)}
-                    className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
-                    <Trash2 size={13} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search subdomains…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className={theadCls}><tr>
+              <th className="table-header-cell">Subdomain</th>
+              <th className="table-header-cell hidden md:table-cell">Parent Domain</th>
+              <th className="px-4 py-3 w-12" />
+            </tr></thead>
+            <tbody>
+              {(() => {
+                const q = search.trim().toLowerCase();
+                const visible = q ? subs.filter(s => [s.fqdn, s.domain].some(v => v?.toLowerCase().includes(q))) : subs;
+                if (subs.length === 0) return (
+                  <tr><td colSpan={3} className="px-4 py-16 text-center">
+                    <Globe className="mx-auto mb-2 text-slate-300 dark:text-slate-600" size={32} />
+                    <p className="text-slate-400 text-sm">No subdomains configured</p>
+                  </td></tr>
+                );
+                if (visible.length === 0) return <tr><td colSpan={3} className="px-4 py-6 text-center text-sm text-slate-400">No subdomains match "{search}"</td></tr>;
+                return visible.map(s => (
+                  <tr key={s.fqdn} className={rowCls}>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-7 w-7 rounded-lg bg-violet-50 dark:bg-violet-900/30 flex items-center justify-center flex-shrink-0">
+                          <Globe size={13} className="text-violet-600 dark:text-violet-400" />
+                        </div>
+                        <span className="font-semibold text-slate-900 dark:text-slate-100">{s.fqdn}</span>
+                      </div>
+                    </td>
+                    <td className="table-cell text-slate-500 dark:text-slate-400 hidden md:table-cell">{s.domain}</td>
+                    <td className="px-3 py-3">
+                      <button onClick={() => remove(s.fqdn)} disabled={deleting === s.fqdn}
+                        className="btn-icon opacity-0 group-hover:opacity-100 hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30">
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

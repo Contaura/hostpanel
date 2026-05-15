@@ -87,6 +87,7 @@ router.post('/:name/start', async (req: Request, res: Response) => {
 });
 
 router.post('/:name/stop', async (req: Request, res: Response) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
     await execAsync(`pm2 stop ${req.params.name} 2>&1`);
     db.prepare("UPDATE managed_apps SET status='stopped' WHERE name=?").run(req.params.name);
@@ -95,6 +96,7 @@ router.post('/:name/stop', async (req: Request, res: Response) => {
 });
 
 router.post('/:name/restart', async (req: Request, res: Response) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
     await execAsync(`pm2 restart ${req.params.name} 2>&1`);
     res.json({ success: true });
@@ -102,6 +104,7 @@ router.post('/:name/restart', async (req: Request, res: Response) => {
 });
 
 router.post('/:name/logs', async (req: Request, res: Response) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
     const { stdout } = await execAsync(`pm2 logs ${req.params.name} --lines 100 --nostream 2>&1`);
     res.json({ logs: stdout });

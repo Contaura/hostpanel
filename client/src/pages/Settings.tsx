@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock } from 'lucide-react';
+import { fetchApi } from '../lib/api';
+import { Settings as SettingsIcon, Mail, CreditCard, Building, Save, TestTube, Upload, Shield, Server, Lock, X } from 'lucide-react';
 
 type Tab = 'general' | 'smtp' | 'billing' | 'paypal' | 'security' | 'relay' | 'password-policy';
 
@@ -28,8 +29,13 @@ export default function Settings() {
   const [pwPolicyLoaded, setPwPolicyLoaded] = useState(false);
 
   useEffect(() => {
+    document.title = 'Settings — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     api('/api/settings/').then(r => { setSettings(r.data); setLoading(false); }).catch(() => setLoading(false));
-    fetch('/api/settings/logo', { headers: auth() }).then(r => r.ok ? r.json() : null).then(d => { if (d?.url) setLogoPreview(d.url); }).catch(() => {});
+    fetchApi('/api/settings/logo').then(r => r.ok ? r.json() : null).then(d => { if (d?.url) setLogoPreview(d.url); }).catch(() => {});
   }, []);
 
   async function uploadLogo(file: File) {
@@ -42,6 +48,14 @@ export default function Settings() {
       success('Logo uploaded');
     } catch (e: any) { error(e.response?.data?.error || 'Upload failed'); }
     setUploading(false);
+  }
+
+  async function removeLogo() {
+    try {
+      await axios.delete('/api/settings/logo', { headers: auth() });
+      setLogoPreview(null);
+      success('Logo removed');
+    } catch (e: any) { error(e.response?.data?.error || 'Failed to remove logo'); }
   }
 
   function set(key: string, value: string) { setSettings(p => ({ ...p, [key]: value })); }
@@ -70,7 +84,7 @@ export default function Settings() {
   async function loadRelay() {
     if (relayLoaded) return;
     try {
-      const r = await fetch('/api/settings/relay', { headers: auth() });
+      const r = await fetchApi('/api/settings/relay');
       const d = await r.json();
       setRelay(v => ({ ...v, relayhost: d.relayhost || '', sasl_user: d.sasl_user || '' }));
       setRelayLoaded(true);
@@ -80,7 +94,7 @@ export default function Settings() {
   async function loadPwPolicy() {
     if (pwPolicyLoaded) return;
     try {
-      const r = await fetch('/api/admin-users/password-policy', { headers: auth() });
+      const r = await fetchApi('/api/admin-users/password-policy');
       const d = await r.json();
       setPwPolicy({ min_length: d.min_length || 8, require_upper: !!d.require_upper, require_number: !!d.require_number, require_special: !!d.require_special });
       setPwPolicyLoaded(true);
@@ -96,7 +110,7 @@ export default function Settings() {
 
   async function saveRelay() {
     try {
-      await apost('/api/settings/relay', relay);
+      await aput('/api/settings/relay', relay);
       success('Postfix relay settings saved');
     } catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
@@ -143,6 +157,7 @@ export default function Settings() {
               {logoPreview && <img src={logoPreview} alt="Logo" className="h-10 object-contain rounded border border-slate-200 dark:border-slate-700 p-1" />}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) uploadLogo(f); }} />
               <button className="btn-secondary" onClick={() => fileRef.current?.click()} disabled={uploading}><Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Logo'}</button>
+              {logoPreview && <button className="btn-icon text-red-500 hover:!bg-red-50 dark:hover:!bg-red-900/30" title="Remove logo" onClick={removeLogo}><X size={14} /></button>}
               {logoPreview && <span className="text-xs text-slate-400">Logo active — shows in sidebar</span>}
             </div>
           </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Shield, Key, Lock, Plus, Trash2, Eye, EyeOff, QrCode, CheckCircle } from 'lucide-react';
+import { Shield, Key, Lock, Plus, Trash2, Eye, EyeOff, QrCode, CheckCircle, Search } from 'lucide-react';
 
 type Tab = 'password' | '2fa' | 'whitelist';
 
@@ -33,8 +33,16 @@ export default function SecurityPlus() {
   const [whitelist, setWhitelist] = useState<{ id: number; ip: string; label: string; created_at: string }[]>([]);
   const [newIp, setNewIp]         = useState('');
   const [newLabel, setNewLabel]   = useState('');
+  const [wlSearch, setWlSearch]   = useState('');
+  const [removingIp, setRemovingIp] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => { loadTab(tab); }, [tab]);
+  useEffect(() => {
+    document.title = 'Security — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => { loadTab(tab); setPageLoading(false); }, [tab]);
 
   function loadTab(t: Tab) {
     if (t === '2fa') {
@@ -85,8 +93,10 @@ export default function SecurityPlus() {
   }
 
   async function removeIp(id: number) {
+    setRemovingIp(id);
     try { await adel(`/api/security-extra/ip-whitelist/${id}`); success('Removed'); loadTab('whitelist'); }
     catch (e: any) { error('Failed'); }
+    finally { setRemovingIp(null); }
   }
 
   const tabs = [
@@ -101,6 +111,13 @@ export default function SecurityPlus() {
         <h1 className="page-title">Security</h1>
         <p className="page-subtitle">Manage admin password, two-factor authentication, and IP access restrictions</p>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       <div className="tab-bar">
         {tabs.map(t => (
@@ -204,23 +221,38 @@ export default function SecurityPlus() {
               <button className="btn-primary" onClick={addToWhitelist}><Plus size={14} /> Add</button>
             </div>
           </div>
-          <div className="card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">IP / CIDR</th><th className="table-header-cell">Label</th><th className="table-header-cell">Added</th><th className="table-header-cell w-16"></th></tr></thead>
-              <tbody>
-                {whitelist.length === 0 && <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No IP restrictions — all IPs are allowed</td></tr>}
-                {whitelist.map(ip => (
-                  <tr key={ip.id} className="border-b border-slate-100 dark:border-slate-800">
-                    <td className="table-cell font-mono text-xs">{ip.ip}</td>
-                    <td className="table-cell text-slate-600 dark:text-slate-400">{ip.label || '—'}</td>
-                    <td className="table-cell text-slate-400">{ip.created_at?.slice(0, 10)}</td>
-                    <td className="table-cell"><button className="btn-icon text-red-500" onClick={() => removeIp(ip.id)}><Trash2 size={14} /></button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <div className="relative">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input className="input pl-8 w-48 text-sm" placeholder="Search IPs…" value={wlSearch} onChange={e => setWlSearch(e.target.value)} />
+              </div>
+            </div>
+            <div className="card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-slate-200 dark:border-slate-700"><th className="table-header-cell">IP / CIDR</th><th className="table-header-cell">Label</th><th className="table-header-cell">Added</th><th className="table-header-cell w-16"></th></tr></thead>
+                <tbody>
+                  {(() => {
+                    const q = wlSearch.trim().toLowerCase();
+                    const visible = q ? whitelist.filter(ip => [ip.ip, ip.label].some(v => String(v ?? '').toLowerCase().includes(q))) : whitelist;
+                    if (whitelist.length === 0) return <tr><td colSpan={4} className="table-cell text-slate-400 text-center py-8">No IP restrictions — all IPs are allowed</td></tr>;
+                    if (visible.length === 0) return <tr><td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">No IPs match "{wlSearch}"</td></tr>;
+                    return visible.map(ip => (
+                      <tr key={ip.id} className="border-b border-slate-100 dark:border-slate-800">
+                        <td className="table-cell font-mono text-xs">{ip.ip}</td>
+                        <td className="table-cell text-slate-600 dark:text-slate-400">{ip.label || '—'}</td>
+                        <td className="table-cell text-slate-400">{ip.created_at?.slice(0, 10)}</td>
+                        <td className="table-cell"><button className="btn-icon text-red-500" disabled={removingIp === ip.id} onClick={() => removeIp(ip.id)}><Trash2 size={14} /></button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Users, Plus, Trash2, Edit2, Save, X, Shield, Eye, Clock, Lock } from 'lucide-react';
+import { useConfirm } from '../context/ConfirmContext';
+import { Users, Plus, Trash2, Edit2, Save, X, Shield, Eye, Clock, Lock, Search } from 'lucide-react';
 
 interface AdminUser { id: number; username: string; email: string; role: string; totp_enabled: number; last_login: string; created_at: string }
 
@@ -18,16 +19,25 @@ interface PasswordPolicy { min_length: number; require_upper: boolean; require_n
 
 export default function AdminUsers() {
   const { success, error } = useToast();
+  const confirm = useConfirm();
   const [users, setUsers]   = useState<AdminUser[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState<AdminUser | null>(null);
   const [form, setForm] = useState({ username: '', email: '', password: '', role: 'admin' });
   const [policy, setPolicy] = useState<PasswordPolicy>({ min_length: 8, require_upper: false, require_number: false, require_special: false });
   const [policySaving, setPolicySaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Admin Users — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); loadPolicy(); }, []);
 
-  async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} }
+  async function load() { try { const r = await api('/api/admin-users/'); setUsers(r.data); } catch {} finally { setPageLoading(false); } }
   async function loadPolicy() { try { const r = await api('/api/admin-users/password-policy'); setPolicy(r.data); } catch {} }
   async function savePolicy() {
     setPolicySaving(true);
@@ -50,9 +60,11 @@ export default function AdminUsers() {
   }
 
   async function remove(id: number, username: string) {
-    if (!confirm(`Delete admin user "${username}"?`)) return;
+    if (!await confirm(`Delete admin user "${username}"?`)) return;
+    setDeleting(id);
     try { await adel(`/api/admin-users/${id}`); success('User deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
+    finally { setDeleting(null); }
   }
 
   function startEdit(u: AdminUser) {
@@ -70,6 +82,13 @@ export default function AdminUsers() {
           <Plus size={14} /> New Admin
         </button>
       </div>
+
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
 
       {showForm && (
         <div className="card p-5 space-y-4 max-w-lg">
@@ -118,46 +137,61 @@ export default function AdminUsers() {
         </button>
       </div>
 
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-700">
-              <th className="table-header-cell">Username</th>
-              <th className="table-header-cell">Email</th>
-              <th className="table-header-cell">Role</th>
-              <th className="table-header-cell">2FA</th>
-              <th className="table-header-cell">Last Login</th>
-              <th className="table-header-cell w-20"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.length === 0 && (
-              <tr><td colSpan={6} className="table-cell text-slate-400 text-center py-8">
-                No admin users in database — using .env credentials
-              </td></tr>
-            )}
-            {users.map(u => (
-              <tr key={u.id} className="border-b border-slate-100 dark:border-slate-800">
-                <td className="table-cell font-medium flex items-center gap-2"><Users size={13} className="text-slate-400" /> {u.username}</td>
-                <td className="table-cell text-slate-600 dark:text-slate-400">{u.email}</td>
-                <td className="table-cell"><span className={ROLE_BADGE[u.role] || 'badge-info'}>{u.role}</span></td>
-                <td className="table-cell">
-                  {u.totp_enabled ? <span className="badge-success flex items-center gap-1 w-fit"><Shield size={11} /> On</span> : <span className="text-slate-400 text-xs">Off</span>}
-                </td>
-                <td className="table-cell text-slate-400 text-xs">
-                  <div className="flex items-center gap-1"><Clock size={11} /> {u.last_login?.slice(0, 16) || 'Never'}</div>
-                </td>
-                <td className="table-cell">
-                  <div className="flex gap-1">
-                    <button className="btn-icon" onClick={() => startEdit(u)}><Edit2 size={13} /></button>
-                    <button className="btn-icon text-red-500" onClick={() => remove(u.id, u.username)}><Trash2 size={13} /></button>
-                  </div>
-                </td>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input className="input pl-8 w-48 text-sm" placeholder="Search users…" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+        <div className="card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="table-header-cell">Username</th>
+                <th className="table-header-cell">Email</th>
+                <th className="table-header-cell">Role</th>
+                <th className="table-header-cell">2FA</th>
+                <th className="table-header-cell">Last Login</th>
+                <th className="table-header-cell w-20"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(() => {
+                const q = search.trim().toLowerCase();
+                const visible = q ? users.filter(u => [u.username, u.email, u.role].some(v => v?.toLowerCase().includes(q))) : users;
+                if (users.length === 0) return (
+                  <tr><td colSpan={6} className="table-cell text-slate-400 text-center py-8">No admin users in database — using .env credentials</td></tr>
+                );
+                if (visible.length === 0) return (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-400">No users match "{search}"</td></tr>
+                );
+                return visible.map(u => (
+                  <tr key={u.id} className="border-b border-slate-100 dark:border-slate-800">
+                    <td className="table-cell font-medium flex items-center gap-2"><Users size={13} className="text-slate-400" /> {u.username}</td>
+                    <td className="table-cell text-slate-600 dark:text-slate-400">{u.email}</td>
+                    <td className="table-cell"><span className={ROLE_BADGE[u.role] || 'badge-info'}>{u.role}</span></td>
+                    <td className="table-cell">
+                      {u.totp_enabled ? <span className="badge-success flex items-center gap-1 w-fit"><Shield size={11} /> On</span> : <span className="text-slate-400 text-xs">Off</span>}
+                    </td>
+                    <td className="table-cell text-slate-400 text-xs">
+                      <div className="flex items-center gap-1"><Clock size={11} /> {u.last_login?.slice(0, 16) || 'Never'}</div>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex gap-1">
+                        <button className="btn-icon" onClick={() => startEdit(u)}><Edit2 size={13} /></button>
+                        <button className="btn-icon text-red-500" disabled={deleting === u.id} onClick={() => remove(u.id, u.username)}><Trash2 size={13} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

@@ -1,55 +1,76 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Edit2, Building2, BarChart2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/resellers${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 const blank = { username: '', email: '', password: '', company: '', alloc_disk: 102400, alloc_bandwidth: 1024000, alloc_accounts: 10, alloc_emails: 50, alloc_dbs: 20 };
 
 export default function Reseller() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [resellers, setResellers] = useState<any[]>([]);
   const [form, setForm] = useState<any>(blank);
   const [editing, setEditing] = useState<any>(null);
   const [adding, setAdding] = useState(false);
   const [summaries, setSummaries] = useState<Record<number, any>>({});
   const [showSummary, setShowSummary] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+
+  useEffect(() => {
+    document.title = 'Resellers — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const r = await api('/');
-    setResellers(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    try {
+      const r = await fetchApi('/api/resellers/');
+      setResellers(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    } finally { setPageLoading(false); }
   }
 
   async function create() {
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
-    const d = await r.json();
-    if (d.error) { toast.error(d.error); return; }
-    toast.success('Reseller created');
-    setAdding(false); setForm(blank);
-    load();
+    setCreating(true);
+    try {
+      const r = await fetchApi('/api/resellers/', { method: 'POST', body: JSON.stringify(form) });
+      const d = await r.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success('Reseller created');
+      setAdding(false); setForm(blank);
+      load();
+    } finally { setCreating(false); }
   }
 
   async function update() {
-    const r = await api(`/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
-    const d = await r.json();
-    if (d.error) { toast.error(d.error); return; }
-    toast.success('Updated');
-    setEditing(null);
-    load();
+    setUpdating(true);
+    try {
+      const r = await fetchApi(`/api/resellers/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
+      const d = await r.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success('Updated');
+      setEditing(null);
+      load();
+    } finally { setUpdating(false); }
   }
 
   async function del(id: number) {
-    if (!confirm('Delete reseller? This removes the login account.')) return;
-    await api(`/${id}`, { method: 'DELETE' });
-    load();
+    if (!await confirm('Delete reseller? This removes the login account.')) return;
+    setDeleting(id);
+    try {
+      await fetchApi(`/api/resellers/${id}`, { method: 'DELETE' });
+      load();
+    } finally { setDeleting(null); }
   }
 
   async function loadSummary(id: number) {
     if (showSummary === id) { setShowSummary(null); return; }
     try {
-      const r = await api(`/${id}/summary`);
+      const r = await fetchApi(`/api/resellers/${id}/summary`);
       const d = await r.json();
       setSummaries(p => ({ ...p, [id]: d }));
       setShowSummary(id);
@@ -70,6 +91,13 @@ export default function Reseller() {
         <button className="btn-primary" onClick={() => setAdding(true)}><Plus size={14} className="mr-1" />New Reseller</button>
       </div>
 
+      {pageLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin h-5 w-5 rounded-full border-2 border-indigo-500 border-t-transparent" />
+        </div>
+      ) : (
+      <>
+
       {adding && (
         <div className="card space-y-4">
           <h2 className="font-semibold text-sm">Create Reseller Account</h2>
@@ -88,7 +116,7 @@ export default function Reseller() {
             <AllocField label="Databases" field="alloc_dbs" obj={form} setObj={setForm} />
           </div>
           <div className="flex gap-2">
-            <button className="btn-primary text-sm" onClick={create}>Create</button>
+            <button className="btn-primary text-sm" onClick={create} disabled={creating}>{creating ? 'Creating…' : 'Create'}</button>
             <button className="btn-ghost text-sm" onClick={() => setAdding(false)}>Cancel</button>
           </div>
         </div>
@@ -105,7 +133,7 @@ export default function Reseller() {
             <AllocField label="Databases" field="alloc_dbs" obj={editing} setObj={setEditing} />
           </div>
           <div className="flex gap-2">
-            <button className="btn-primary text-sm" onClick={update}>Save</button>
+            <button className="btn-primary text-sm" onClick={update} disabled={updating}>{updating ? 'Saving…' : 'Save'}</button>
             <button className="btn-ghost text-sm" onClick={() => setEditing(null)}>Cancel</button>
           </div>
         </div>
@@ -128,7 +156,7 @@ export default function Reseller() {
               <div className="flex gap-2">
                 <button className="btn-icon text-indigo-500" title="Usage stats" onClick={() => loadSummary(r.id)}><BarChart2 size={13} /></button>
                 <button className="btn-icon" onClick={() => setEditing({ ...r })}><Edit2 size={13} /></button>
-                <button className="btn-icon text-red-500" onClick={() => del(r.id)}><Trash2 size={13} /></button>
+                <button className="btn-icon text-red-500" disabled={deleting === r.id} onClick={() => del(r.id)}><Trash2 size={13} /></button>
               </div>
             </div>
             <div className="mt-3 grid grid-cols-5 gap-3 text-xs">
@@ -161,6 +189,8 @@ export default function Reseller() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }

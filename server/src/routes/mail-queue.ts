@@ -126,7 +126,7 @@ router.get('/delivery-log', async (req: Request, res: Response) => {
   if (!logPath) return res.json({ lines: [], source: 'none' });
 
   try {
-    const grepFlag = search ? `| grep -i "${search.replace(/"/g, '')}"` : '';
+    const grepFlag = search ? `| fgrep -i ${JSON.stringify(search)}` : '';
     const { stdout } = await execAsync(`tail -${limit} "${logPath}" ${grepFlag} 2>/dev/null || true`);
     const lines = stdout.trim().split('\n').filter(Boolean).reverse().map((line, i) => {
       const m = line.match(/^(\w+ +\d+ \d+:\d+:\d+).*postfix\S*: (\S+): (.+)/);

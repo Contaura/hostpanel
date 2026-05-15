@@ -78,6 +78,11 @@ export default function Dashboard() {
   const [history, setHistory] = useState<{ t: string; cpu: number; mem: number }[]>([]);
 
   useEffect(() => {
+    document.title = 'Dashboard — HostPanel';
+    return () => { document.title = 'HostPanel'; };
+  }, []);
+
+  useEffect(() => {
     // Seed chart from DB-persisted history so it isn't empty on page load
     axios.get<{ cpu: number; mem: number; created_at: string }[]>('/api/stats/history').then(r => {
       const seeded = r.data.map(row => ({
