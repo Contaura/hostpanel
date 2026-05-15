@@ -90,7 +90,8 @@ router.post('/:name/start', async (req: Request, res: Response) => {
   if (!app) return res.status(404).json({ error: 'App not found' });
   try {
     const envStr = Object.entries(JSON.parse(app.env_vars || '{}'))
-      .map(([k, v]) => `${k}=${v}`).join(',');
+      .filter(([k]) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k))
+      .map(([k, v]) => `${k}=${String(v).replace(/"/g, '')}`).join(',');
     const envFlag = envStr ? `--env-var="${envStr}"` : '';
     await execAsync(`pm2 start "${app.start_script}" --name "${app.name}" ${envFlag} --cwd "${app.working_dir}" 2>&1`);
     db.prepare("UPDATE managed_apps SET status='running', pm2_id=? WHERE name=?").run(app.name, app.name);
@@ -168,7 +169,9 @@ router.post('/:name/stage', async (req: Request, res: Response) => {
       await execAsync(`cp -r "${app.working_dir}" "${stagingDir}" 2>&1`);
     }
     // Start under PM2 with a different name
-    const envStr = Object.entries(JSON.parse(app.env_vars || '{}')).map(([k, v]) => `${k}=${v}`).join(',');
+    const envStr = Object.entries(JSON.parse(app.env_vars || '{}'))
+      .filter(([k]) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k))
+      .map(([k, v]) => `${k}=${String(v).replace(/"/g, '')}`).join(',');
     const envFlag = envStr ? `--env-var="${envStr}"` : '';
     await execAsync(`pm2 start "${app.start_script}" --name "${stagingName}" ${envFlag} --cwd "${stagingDir}" 2>&1`).catch(() => {});
     const r = db.prepare('INSERT OR REPLACE INTO app_staging (app_name, staging_name, staging_port, staging_dir, branch, status) VALUES (?, ?, ?, ?, ?, ?)').run(app.name, stagingName, parseInt(port), stagingDir, branch, 'running');

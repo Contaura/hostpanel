@@ -17,10 +17,15 @@ export function setupTerminal(httpServer: HttpServer): void {
       ws.close(4001, 'Unauthorized: no token');
       return;
     }
+    let payload: any;
     try {
-      jwt.verify(token, JWT_SECRET);
+      payload = jwt.verify(token, JWT_SECRET);
     } catch {
       ws.close(4001, 'Unauthorized: invalid token');
+      return;
+    }
+    if (!['admin', 'superadmin'].includes(payload?.role)) {
+      ws.close(4001, 'Unauthorized: insufficient permissions');
       return;
     }
 
