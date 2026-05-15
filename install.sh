@@ -28,7 +28,7 @@ echo "[2/9] Installing system packages..."
 dnf install -y epel-release 2>/dev/null || true
 dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
-               curl tar gzip openssl
+               curl tar gzip openssl make gcc-c++ python3
 
 systemctl enable --now httpd mariadb postfix named vsftpd
 
