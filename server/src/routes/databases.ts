@@ -42,13 +42,18 @@ router.get('/databases', async (_req: AuthRequest, res: Response) => {
   let conn;
   try {
     conn = await getConn();
+    // The previous form used `LEFT JOIN ... USING (table_schema)` but
+    // information_schema.SCHEMATA's column is named SCHEMA_NAME, not
+    // TABLE_SCHEMA, so MariaDB rejects with "Unknown column 'table_schema'".
+    // Use an explicit ON clause instead.
     const [rows] = await conn.query<mysql.RowDataPacket[]>(
-      `SELECT schema_name AS name,
-              ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb
-       FROM information_schema.SCHEMATA
-       LEFT JOIN information_schema.TABLES USING (table_schema)
-       WHERE schema_name NOT IN ('information_schema','performance_schema','mysql','sys')
-       GROUP BY schema_name`
+      `SELECT s.schema_name AS name,
+              COALESCE(ROUND(SUM(t.data_length + t.index_length) / 1024 / 1024, 2), 0) AS size_mb
+       FROM information_schema.SCHEMATA s
+       LEFT JOIN information_schema.TABLES t ON t.table_schema = s.schema_name
+       WHERE s.schema_name NOT IN ('information_schema','performance_schema','mysql','sys')
+       GROUP BY s.schema_name
+       ORDER BY s.schema_name`
     );
     res.json(rows);
   } catch (err: any) {

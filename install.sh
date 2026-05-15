@@ -60,6 +60,7 @@ MYCNF
 systemctl restart mariadb 2>/dev/null || true
 
 DB_ROOT_PASS=""
+DB_ROOT_ARGS=()
 if mysql -u root -e "SELECT 1" &>/dev/null; then
   echo "  MariaDB root is accessible without a password."
   echo "  It is strongly recommended to run mysql_secure_installation manually."
@@ -68,7 +69,22 @@ else
   mysql_secure_installation
   echo ""
   read -rsp "  Re-enter the MariaDB root password you just set (it will be saved to server/.env): " DB_ROOT_PASS; echo
+  DB_ROOT_ARGS=(-p"${DB_ROOT_PASS}")
 fi
+
+# Dedicated DB user for the panel. The Node process talks to MariaDB over
+# TCP (127.0.0.1), but skip-name-resolve makes MariaDB treat that as the
+# literal address "127.0.0.1" — which doesn't match a root@localhost
+# socket user. Give the panel its own user@127.0.0.1 with full privileges
+# (the Database Manager creates/drops databases and users on demand, so it
+# needs WITH GRANT OPTION). Captured into the .env later in step 6.
+DB_PANEL_USER=hostpanel
+DB_PANEL_PASS=$(openssl rand -base64 24 | tr -d '=+/' | head -c 24)
+mysql -u root "${DB_ROOT_ARGS[@]}" <<SQL
+CREATE USER IF NOT EXISTS '${DB_PANEL_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PANEL_PASS}';
+GRANT ALL PRIVILEGES ON *.* TO '${DB_PANEL_USER}'@'127.0.0.1' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+SQL
 
 # ── 4/9  Mail directories ────────────────────────────────────────────────────
 echo "[4/9] Configuring mail directories..."
@@ -149,9 +165,16 @@ if [[ ! -f server/.env ]]; then
   ")
   sed -i "s|\\\$2b\\\$12\\\$examplehashhere|${HASH//\//\\/}|" server/.env
 
-  # MariaDB root password
-  if [[ -n "${DB_ROOT_PASS}" ]]; then
-    sed -i "s|^DB_ROOT_PASS=.*|DB_ROOT_PASS=${DB_ROOT_PASS}|" server/.env
+  # MariaDB connection — point the panel at the dedicated hostpanel user we
+  # created in step 3 instead of root. The env var names stay DB_ROOT_USER /
+  # DB_ROOT_PASS for backward compatibility, but the actual user is now a
+  # non-root account with global privileges (it has to be — the Database
+  # Manager creates per-account DBs and users on demand).
+  sed -i "s|^DB_ROOT_USER=.*|DB_ROOT_USER=${DB_PANEL_USER}|" server/.env
+  if grep -q '^DB_ROOT_PASS=' server/.env; then
+    sed -i "s|^DB_ROOT_PASS=.*|DB_ROOT_PASS=${DB_PANEL_PASS}|" server/.env
+  else
+    echo "DB_ROOT_PASS=${DB_PANEL_PASS}" >> server/.env
   fi
 
   # Panel hostname — used for CORS (CLIENT_URL) and the Apache VirtualHost
