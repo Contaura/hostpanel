@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
-import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, Lock, Server, Globe, Mail, Plus, Trash2, KeyRound } from 'lucide-react';
+import { Zap, LogOut, FileText, Download, CreditCard, ExternalLink, CheckCircle, Clock, AlertCircle, Shield, Lock, Server, Globe, Mail, Plus, Trash2, KeyRound, RefreshCw } from 'lucide-react';
 import { useConfirm } from '../context/ConfirmContext';
 import { safeHttpUrl } from '../lib/safeUrl';
 import { openAuthenticatedDownload } from '../lib/api';
@@ -15,6 +15,15 @@ interface FtpUser { username: string; directory: string | null }
 interface DbRow { name: string }
 interface DbUserRow { User?: string; user?: string; Host?: string; host?: string }
 interface SslStatus { issued: boolean; expires?: string | null }
+interface PortalSub { fqdn: string; parent: string; docroot: string }
+interface PortalRedirect { id: number; domain: string; source: string; target: string; type: string; created_at: string }
+interface PortalAutoresponder { id: number; email: string; subject: string; body: string; enabled: number }
+interface MailAuth { domain: string; dkim: string | null; spf: string; dmarc: string }
+interface PortalBackup { name: string; size: number; created: string }
+interface FileItem { name: string; type: string; size: number; modified: string; permissions: string }
+interface SshKey { id: number; raw: string; comment: string }
+interface SshKeyGroup { user: string; keys: SshKey[] }
+interface CronGroup { user: string; jobs: { id: number; line: string }[] }
 
 function portalAuth() { return { Authorization: 'Bearer ' + (localStorage.getItem('hp_portal_token') || '') }; }
 const api   = (p: string) => axios.get(p, { headers: portalAuth() });
@@ -43,7 +52,7 @@ export default function ClientPortal() {
   const [accounts, setAccounts]                 = useState<PortalAccount[]>([]);
   const [accountsLoaded, setAccountsLoaded]     = useState(false);
   const [selectedAccount, setSelectedAccount]   = useState<PortalAccount | null>(null);
-  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'dns' | 'email' | 'ftp' | 'databases' | 'ssl'>('details');
+  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'files' | 'subdomains' | 'dns' | 'redirects' | 'errpages' | 'email' | 'mailauth' | 'ftp' | 'databases' | 'cron' | 'sshkeys' | 'backups' | 'scripts' | 'ssl'>('details');
   const [usage, setUsage]                       = useState<{ disk_bytes: number } | null>(null);
   const [dnsRecords, setDnsRecords]             = useState<DnsRecord[]>([]);
   const [dnsForm, setDnsForm]                   = useState({ name: '', type: 'A', value: '', ttl: '3600' });
@@ -58,6 +67,29 @@ export default function ClientPortal() {
   const [dbForm, setDbForm]                     = useState({ name: '' });
   const [dbUserForm, setDbUserForm]             = useState({ username: '', password: '', database: '' });
   const [sslStatus, setSslStatus]               = useState<SslStatus | null>(null);
+  // Round-4 additions: subdomains, redirects, files, errpages, mail-auth, cron, ssh keys, backups, scripts, autoresp+catchall
+  const [subdomains, setSubdomains]             = useState<PortalSub[]>([]);
+  const [subForm, setSubForm]                   = useState({ subdomain: '' });
+  const [redirects, setRedirects]               = useState<PortalRedirect[]>([]);
+  const [redForm, setRedForm]                   = useState({ source: '', target: '', type: '301' });
+  const [filePath, setFilePath]                 = useState('/');
+  const [files, setFiles]                       = useState<FileItem[]>([]);
+  const [fileEditor, setFileEditor]             = useState<{ path: string; content: string } | null>(null);
+  const [autoresp, setAutoresp]                 = useState<PortalAutoresponder[]>([]);
+  const [autorespForm, setAutorespForm]         = useState({ user: '', subject: '', body: '' });
+  const [catchall, setCatchall]                 = useState<{ destination: string | null } | null>(null);
+  const [catchallForm, setCatchallForm]         = useState({ destination: '' });
+  const [mailAuth, setMailAuth]                 = useState<MailAuth | null>(null);
+  const [spfForm, setSpfForm]                   = useState({ include: '' });
+  const [dmarcForm, setDmarcForm]               = useState({ policy: 'none', rua: '' });
+  const [errCode, setErrCode]                   = useState('404');
+  const [errContent, setErrContent]             = useState('');
+  const [cronGroups, setCronGroups]             = useState<CronGroup[]>([]);
+  const [cronForm, setCronForm]                 = useState({ user: '', schedule: '0 * * * *', command: '' });
+  const [sshGroups, setSshGroups]               = useState<SshKeyGroup[]>([]);
+  const [sshForm, setSshForm]                   = useState({ user: '', key: '' });
+  const [backups, setBackups]                   = useState<PortalBackup[]>([]);
+  const [scriptForm, setScriptForm]             = useState({ dbName: '', dbUser: '', dbPass: '', siteTitle: '', adminUser: '', adminPass: '', adminEmail: '' });
   const [hostingBusy, setHostingBusy]           = useState(false);
 
   // 2FA state
@@ -92,12 +124,22 @@ export default function ClientPortal() {
     if (!selectedAccount) return;
     setUsage(null); setDnsRecords([]); setEmailAccts([]); setForwarders([]);
     setFtpUsers([]); setDbs([]); setDbUsers([]); setSslStatus(null);
-    if (accountSubtab === 'details')   loadUsage(selectedAccount.id);
-    if (accountSubtab === 'dns')       loadDns(selectedAccount.domain);
-    if (accountSubtab === 'email')     { loadEmailAccts(selectedAccount.domain); loadForwarders(selectedAccount.domain); }
-    if (accountSubtab === 'ftp')       loadFtpUsers();
-    if (accountSubtab === 'databases') { loadDbs(); loadDbUsers(); }
-    if (accountSubtab === 'ssl')       loadSslStatus(selectedAccount.domain);
+    setSubdomains([]); setRedirects([]); setFiles([]); setFileEditor(null); setAutoresp([]);
+    setCatchall(null); setMailAuth(null); setCronGroups([]); setSshGroups([]); setBackups([]);
+    if (accountSubtab === 'details')    loadUsage(selectedAccount.id);
+    if (accountSubtab === 'dns')        loadDns(selectedAccount.domain);
+    if (accountSubtab === 'email')      { loadEmailAccts(selectedAccount.domain); loadForwarders(selectedAccount.domain); loadAutoresp(); loadCatchall(selectedAccount.domain); }
+    if (accountSubtab === 'mailauth')   loadMailAuth(selectedAccount.domain);
+    if (accountSubtab === 'ftp')        loadFtpUsers();
+    if (accountSubtab === 'databases')  { loadDbs(); loadDbUsers(); }
+    if (accountSubtab === 'ssl')        loadSslStatus(selectedAccount.domain);
+    if (accountSubtab === 'subdomains') loadSubdomains();
+    if (accountSubtab === 'redirects')  loadRedirects();
+    if (accountSubtab === 'files')      { setFilePath('/'); loadFiles(selectedAccount.domain, '/'); }
+    if (accountSubtab === 'errpages')   { setErrCode('404'); loadErrPage(selectedAccount.domain, '404'); }
+    if (accountSubtab === 'cron')       loadCron();
+    if (accountSubtab === 'sshkeys')    loadSshKeys();
+    if (accountSubtab === 'backups')    loadBackups();
   }, [selectedAccount, accountSubtab]);
 
   async function load() {
@@ -323,6 +365,210 @@ export default function ClientPortal() {
     setHostingBusy(false);
   }
 
+  /* ── Round-4 actions ────────────────────────────────────────────── */
+
+  async function loadSubdomains() { try { const r = await api('/api/portal/subdomains'); setSubdomains(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addSubdomain() {
+    if (!selectedAccount || !subForm.subdomain) return;
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/subdomains', { subdomain: subForm.subdomain, domain: selectedAccount.domain });
+      setToast({ type: 'success', msg: 'Subdomain created' }); setSubForm({ subdomain: '' }); await loadSubdomains();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteSubdomain(fqdn: string) {
+    if (!await confirm(`Delete subdomain ${fqdn}?`)) return;
+    setHostingBusy(true);
+    try { await adel(`/api/portal/subdomains/${encodeURIComponent(fqdn)}`); setToast({ type: 'success', msg: 'Subdomain deleted' }); await loadSubdomains(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadRedirects() { try { const r = await api('/api/portal/redirects'); setRedirects(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addRedirect() {
+    if (!selectedAccount || !redForm.source || !redForm.target) return;
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/redirects', { domain: selectedAccount.domain, source: redForm.source, target: redForm.target, type: redForm.type });
+      setToast({ type: 'success', msg: 'Redirect created' }); setRedForm({ source: '', target: '', type: '301' }); await loadRedirects();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteRedirect(id: number) {
+    if (!await confirm('Delete this redirect?')) return;
+    setHostingBusy(true);
+    try { await adel(`/api/portal/redirects/${id}`); setToast({ type: 'success', msg: 'Redirect removed' }); await loadRedirects(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadFiles(domain: string, p: string) {
+    try {
+      const r = await api(`/api/portal/files/${domain}/list?path=${encodeURIComponent(p)}`);
+      setFiles(r.data.items || []); setFilePath(r.data.path || p);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function openFile(name: string) {
+    if (!selectedAccount) return;
+    const full = filePath.replace(/\/$/, '') + '/' + name;
+    try {
+      const r = await api(`/api/portal/files/${selectedAccount.domain}/read?path=${encodeURIComponent(full)}`);
+      setFileEditor({ path: full, content: r.data.content });
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function saveFile() {
+    if (!selectedAccount || !fileEditor) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/files/${selectedAccount.domain}/write`, { path: fileEditor.path, content: fileEditor.content }); setToast({ type: 'success', msg: 'File saved' }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteFile(name: string, type: string) {
+    if (!selectedAccount) return;
+    if (!await confirm(`Delete ${type === 'directory' ? 'folder' : 'file'} "${name}"?`)) return;
+    const full = filePath.replace(/\/$/, '') + '/' + name;
+    setHostingBusy(true);
+    try {
+      await axios.delete(`/api/portal/files/${selectedAccount.domain}/delete`, { headers: portalAuth(), data: { path: full } });
+      setToast({ type: 'success', msg: 'Deleted' });
+      await loadFiles(selectedAccount.domain, filePath);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function mkdir() {
+    if (!selectedAccount) return;
+    const name = window.prompt('Folder name'); if (!name) return;
+    setHostingBusy(true);
+    try {
+      const full = filePath.replace(/\/$/, '') + '/' + name.replace(/[/\\]/g, '');
+      await apost(`/api/portal/files/${selectedAccount.domain}/mkdir`, { path: full });
+      setToast({ type: 'success', msg: 'Folder created' });
+      await loadFiles(selectedAccount.domain, filePath);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadAutoresp() { try { const r = await api('/api/portal/email/autoresponders'); setAutoresp(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addAutoresp() {
+    if (!selectedAccount || !autorespForm.user || !autorespForm.subject || !autorespForm.body) return;
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/email/autoresponders', { email: `${autorespForm.user}@${selectedAccount.domain}`, subject: autorespForm.subject, body: autorespForm.body });
+      setToast({ type: 'success', msg: 'Autoresponder created' }); setAutorespForm({ user: '', subject: '', body: '' }); await loadAutoresp();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteAutoresp(id: number) {
+    if (!await confirm('Delete this autoresponder?')) return;
+    try { await adel(`/api/portal/email/autoresponders/${id}`); setToast({ type: 'success', msg: 'Deleted' }); await loadAutoresp(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadCatchall(domain: string) { try { const r = await api(`/api/portal/email/catch-all?domain=${encodeURIComponent(domain)}`); setCatchall(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function saveCatchall() {
+    if (!selectedAccount || !catchallForm.destination) return;
+    setHostingBusy(true);
+    try { await apost('/api/portal/email/catch-all', { domain: selectedAccount.domain, destination: catchallForm.destination }); setToast({ type: 'success', msg: 'Catch-all updated' }); await loadCatchall(selectedAccount.domain); setCatchallForm({ destination: '' }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function clearCatchall() {
+    if (!selectedAccount) return;
+    if (!await confirm('Remove catch-all for this domain?')) return;
+    try { await adel(`/api/portal/email/catch-all/${selectedAccount.domain}`); setToast({ type: 'success', msg: 'Catch-all removed' }); await loadCatchall(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadMailAuth(domain: string) { try { const r = await api(`/api/portal/mail-auth/${domain}`); setMailAuth(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function genDkim() {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/mail-auth/${selectedAccount.domain}/dkim`); setToast({ type: 'success', msg: 'DKIM key generated' }); await loadMailAuth(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function saveSpf() {
+    if (!selectedAccount) return;
+    const include = spfForm.include.split(/[\s,]+/).filter(Boolean);
+    setHostingBusy(true);
+    try { await apost(`/api/portal/mail-auth/${selectedAccount.domain}/spf`, { include }); setToast({ type: 'success', msg: 'SPF saved' }); await loadMailAuth(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function saveDmarc() {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/mail-auth/${selectedAccount.domain}/dmarc`, dmarcForm); setToast({ type: 'success', msg: 'DMARC saved' }); await loadMailAuth(selectedAccount.domain); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadErrPage(domain: string, code: string) {
+    try { const r = await api(`/api/portal/errpages/${domain}/${code}`); setErrContent(r.data.content || ''); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function saveErrPage() {
+    if (!selectedAccount) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/errpages/${selectedAccount.domain}/${errCode}`, { content: errContent }); setToast({ type: 'success', msg: 'Error page saved' }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadCron() { try { const r = await api('/api/portal/cron'); setCronGroups(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addCron() {
+    if (!cronForm.user || !cronForm.schedule || !cronForm.command) return;
+    setHostingBusy(true);
+    try { await apost('/api/portal/cron', cronForm); setToast({ type: 'success', msg: 'Cron job added' }); setCronForm({ user: '', schedule: '0 * * * *', command: '' }); await loadCron(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteCron(user: string, index: number) {
+    if (!await confirm('Delete this cron job?')) return;
+    try { await adel(`/api/portal/cron/${user}/${index}`); setToast({ type: 'success', msg: 'Deleted' }); await loadCron(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadSshKeys() { try { const r = await api('/api/portal/sshkeys'); setSshGroups(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addSshKey() {
+    if (!sshForm.user || !sshForm.key) return;
+    setHostingBusy(true);
+    try { await apost('/api/portal/sshkeys', sshForm); setToast({ type: 'success', msg: 'SSH key added' }); setSshForm({ user: '', key: '' }); await loadSshKeys(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteSshKey(user: string, id: number) {
+    if (!await confirm('Delete this SSH key?')) return;
+    try { await adel(`/api/portal/sshkeys/${user}/${id}`); setToast({ type: 'success', msg: 'Deleted' }); await loadSshKeys(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function loadBackups() { try { const r = await api('/api/portal/backups'); setBackups(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function createBackup() {
+    if (!selectedAccount) return;
+    if (!await confirm(`Create a tar.gz of ${selectedAccount.domain}'s public_html tree? May take a minute.`)) return;
+    setHostingBusy(true);
+    try { await apost(`/api/portal/backups/${selectedAccount.domain}`); setToast({ type: 'success', msg: 'Backup created' }); await loadBackups(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteBackup(name: string) {
+    if (!await confirm(`Delete ${name}?`)) return;
+    try { await adel(`/api/portal/backups/${encodeURIComponent(name)}`); setToast({ type: 'success', msg: 'Deleted' }); await loadBackups(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+
+  async function installWordpress() {
+    if (!selectedAccount) return;
+    if (!scriptForm.dbName || !scriptForm.dbUser || !scriptForm.dbPass) { setToast({ type: 'error', msg: 'Fill in DB name, user, password' }); return; }
+    if (!await confirm(`Install WordPress into ${selectedAccount.domain}/public_html? This will overwrite existing files there.`)) return;
+    setHostingBusy(true);
+    try { await apost('/api/portal/scripts/install', { script: 'wordpress', domain: selectedAccount.domain, ...scriptForm }); setToast({ type: 'success', msg: 'WordPress installed' }); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
   /* ── Password change ───────────────────────────────────────── */
 
   async function changePassword() {
@@ -528,11 +774,27 @@ export default function ClientPortal() {
                     <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                       <Globe size={15} className="text-slate-500" />
                       <h3 className="font-semibold text-sm text-slate-900 dark:text-white">{selectedAccount.domain}</h3>
-                      <nav className="ml-auto flex items-center gap-1 flex-wrap">
-                        {(['details', 'dns', 'email', 'ftp', 'databases', 'ssl'] as const).map(t => (
-                          <button key={t} onClick={() => setAccountSubtab(t)}
+                      <nav className="ml-auto flex items-center gap-1 flex-wrap max-w-[70%] justify-end">
+                        {([
+                          ['details',    'Details'],
+                          ['files',      'Files'],
+                          ['subdomains', 'Subdomains'],
+                          ['dns',        'DNS'],
+                          ['redirects',  'Redirects'],
+                          ['errpages',   'Errors'],
+                          ['email',      'Email'],
+                          ['mailauth',   'Mail Auth'],
+                          ['ftp',        'FTP'],
+                          ['databases',  'Databases'],
+                          ['cron',       'Cron'],
+                          ['sshkeys',    'SSH'],
+                          ['backups',    'Backups'],
+                          ['scripts',    'Apps'],
+                          ['ssl',        'SSL'],
+                        ] as const).map(([t, label]) => (
+                          <button key={t} onClick={() => setAccountSubtab(t as any)}
                             className={`px-2.5 py-1 rounded text-xs font-medium ${accountSubtab === t ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                            {t === 'ssl' ? 'SSL' : t === 'dns' ? 'DNS' : t.charAt(0).toUpperCase() + t.slice(1)}
+                            {label}
                           </button>
                         ))}
                       </nav>
@@ -657,6 +919,52 @@ export default function ClientPortal() {
                               ))}
                             </tbody>
                           </table>
+                        </div>
+
+                        <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
+                          <p className="text-sm font-medium mb-2">Autoresponders</p>
+                          <p className="text-xs text-slate-500 mb-3">Auto-reply to incoming mail (vacation responder, "received your message", etc.).</p>
+                          <div className="grid grid-cols-12 gap-2 items-end">
+                            <div className="col-span-3">
+                              <label className="label text-xs">For mailbox</label>
+                              <div className="flex items-center">
+                                <input className="input rounded-r-none font-mono text-xs" placeholder="user" value={autorespForm.user} onChange={e => setAutorespForm(f => ({ ...f, user: e.target.value.replace(/[^a-zA-Z0-9._+-]/g, '') }))} />
+                                <span className="px-1 py-1.5 bg-slate-100 dark:bg-slate-800 border border-l-0 border-slate-300 dark:border-slate-700 rounded-r text-xs text-slate-500">@{selectedAccount.domain}</span>
+                              </div>
+                            </div>
+                            <div className="col-span-3"><label className="label text-xs">Subject</label><input className="input text-xs" placeholder="Out of office" value={autorespForm.subject} onChange={e => setAutorespForm(f => ({ ...f, subject: e.target.value }))} /></div>
+                            <div className="col-span-4"><label className="label text-xs">Body</label><input className="input text-xs" placeholder="I'll be back next week…" value={autorespForm.body} onChange={e => setAutorespForm(f => ({ ...f, body: e.target.value }))} /></div>
+                            <button className="btn-primary col-span-2 text-xs" onClick={addAutoresp} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                          </div>
+                          <table className="w-full text-sm mt-3">
+                            <tbody>
+                              {autoresp.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-slate-400 text-xs">No autoresponders</td></tr>}
+                              {autoresp.map(a => (
+                                <tr key={a.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                  <td className="py-2 px-1 font-mono text-xs">{a.email}</td>
+                                  <td className="text-xs text-slate-500 truncate max-w-[260px]">{a.subject}</td>
+                                  <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteAutoresp(a.id)}><Trash2 size={12} /></button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
+                          <p className="text-sm font-medium mb-2">Catch-all address</p>
+                          <p className="text-xs text-slate-500 mb-3">A single address that receives mail addressed to <em>anything</em>@{selectedAccount.domain} that doesn't have a real mailbox.</p>
+                          {catchall?.destination ? (
+                            <div className="flex items-center gap-2 text-sm">
+                              <span className="text-slate-500">Currently:</span> <code className="font-mono">{catchall.destination}</code>
+                              <button className="btn-secondary text-xs ml-auto" onClick={clearCatchall}>Remove</button>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-400">No catch-all set</p>
+                          )}
+                          <div className="flex gap-2 mt-2">
+                            <input className="input flex-1 text-xs" placeholder="forward unknown mail to…" value={catchallForm.destination} onChange={e => setCatchallForm({ destination: e.target.value })} />
+                            <button className="btn-primary text-xs" onClick={saveCatchall} disabled={hostingBusy || !catchallForm.destination}>Save</button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -785,6 +1093,250 @@ export default function ClientPortal() {
                             <button className="btn-secondary text-xs mt-2" onClick={issueSsl} disabled={hostingBusy}>Re-issue / renew</button>
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {accountSubtab === 'subdomains' && (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-9">
+                            <label className="label text-xs">Subdomain</label>
+                            <div className="flex items-center">
+                              <input className="input rounded-r-none font-mono" placeholder="blog" value={subForm.subdomain} onChange={e => setSubForm({ subdomain: e.target.value.replace(/[^a-z0-9-]/g, '') })} />
+                              <span className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border border-l-0 border-slate-300 dark:border-slate-700 rounded-r text-xs text-slate-500">.{selectedAccount.domain}</span>
+                            </div>
+                          </div>
+                          <button className="btn-primary col-span-3 text-xs" onClick={addSubdomain} disabled={hostingBusy || !subForm.subdomain}><Plus size={12} /> Create</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {subdomains.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400 text-xs">No subdomains</td></tr>}
+                            {subdomains.map(s => (
+                              <tr key={s.fqdn} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{s.fqdn}</td>
+                                <td className="text-xs text-slate-500 truncate max-w-[260px]">{s.docroot}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteSubdomain(s.fqdn)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'redirects' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Send visitors of one URL to another. Writes a <code>Redirect</code> directive into <code>.htaccess</code>.</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-4">
+                            <label className="label text-xs">Source path</label>
+                            <input className="input font-mono" placeholder="/old" value={redForm.source} onChange={e => setRedForm(f => ({ ...f, source: e.target.value }))} />
+                          </div>
+                          <div className="col-span-5">
+                            <label className="label text-xs">Target URL</label>
+                            <input className="input font-mono" placeholder="https://example.com/new" value={redForm.target} onChange={e => setRedForm(f => ({ ...f, target: e.target.value }))} />
+                          </div>
+                          <select className="input col-span-1 text-xs" value={redForm.type} onChange={e => setRedForm(f => ({ ...f, type: e.target.value }))}>
+                            <option value="301">301</option><option value="302">302</option>
+                          </select>
+                          <button className="btn-primary col-span-2 text-xs" onClick={addRedirect} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {redirects.length === 0 && <tr><td colSpan={4} className="py-4 text-center text-slate-400 text-xs">No redirects</td></tr>}
+                            {redirects.map(r => (
+                              <tr key={r.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{r.source}</td>
+                                <td className="text-xs">→ <span className="font-mono">{r.target}</span></td>
+                                <td className="text-xs text-slate-500">{r.type}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteRedirect(r.id)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'files' && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-slate-500">{selectedAccount.domain}:{filePath}</span>
+                          <button className="btn-secondary text-xs ml-auto" onClick={() => loadFiles(selectedAccount.domain, filePath)}><RefreshCw size={11} /> Refresh</button>
+                          <button className="btn-secondary text-xs" onClick={mkdir} disabled={hostingBusy}><Plus size={11} /> New folder</button>
+                          {filePath !== '/' && (
+                            <button className="btn-secondary text-xs" onClick={() => { const up = filePath.replace(/\/[^/]+\/?$/, '') || '/'; loadFiles(selectedAccount.domain, up); }}>↑ Up</button>
+                          )}
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                            <th className="text-left py-2 px-1">Name</th><th className="text-left">Size</th><th className="text-left">Modified</th><th></th>
+                          </tr></thead>
+                          <tbody>
+                            {files.length === 0 && <tr><td colSpan={4} className="py-4 text-center text-slate-400 text-xs">Empty</td></tr>}
+                            {files.map(f => (
+                              <tr key={f.name} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">
+                                  {f.type === 'directory' ? (
+                                    <button className="text-indigo-600 hover:underline" onClick={() => loadFiles(selectedAccount.domain, (filePath.replace(/\/$/, '') + '/' + f.name))}>{f.name}/</button>
+                                  ) : (
+                                    <button className="hover:underline" onClick={() => openFile(f.name)}>{f.name}</button>
+                                  )}
+                                </td>
+                                <td className="text-xs text-slate-500">{f.type === 'file' ? `${f.size} B` : '—'}</td>
+                                <td className="text-xs text-slate-500">{new Date(f.modified).toLocaleString()}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteFile(f.name, f.type)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {fileEditor && (
+                          <div className="card p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono">{fileEditor.path}</span>
+                              <button className="btn-secondary text-xs ml-auto" onClick={() => setFileEditor(null)}>Close</button>
+                              <button className="btn-primary text-xs" onClick={saveFile} disabled={hostingBusy}>Save</button>
+                            </div>
+                            <textarea className="input font-mono text-xs h-64" value={fileEditor.content} onChange={e => setFileEditor({ ...fileEditor, content: e.target.value })} />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {accountSubtab === 'errpages' && (
+                      <div className="space-y-4 max-w-2xl">
+                        <p className="text-xs text-slate-500">Custom HTML page Apache shows when one of these HTTP codes happens on <code className="font-mono">{selectedAccount.domain}</code>.</p>
+                        <div className="flex items-center gap-2">
+                          <label className="label text-xs">Code</label>
+                          <select className="input w-28 text-xs" value={errCode} onChange={e => { setErrCode(e.target.value); if (selectedAccount) loadErrPage(selectedAccount.domain, e.target.value); }}>
+                            {['400','401','403','404','500','502','503'].map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                          <button className="btn-primary text-xs ml-auto" onClick={saveErrPage} disabled={hostingBusy}>Save error page</button>
+                        </div>
+                        <textarea className="input font-mono text-xs h-64" placeholder="<html>…</html>" value={errContent} onChange={e => setErrContent(e.target.value)} />
+                      </div>
+                    )}
+
+                    {accountSubtab === 'mailauth' && (
+                      <div className="space-y-5">
+                        <p className="text-xs text-slate-500">Authenticate mail you send so it doesn't land in spam. DKIM uses a private key on this server; SPF and DMARC are TXT records in your DNS zone.</p>
+                        <div className="space-y-2">
+                          <p className="text-sm font-medium">DKIM</p>
+                          <p className="text-xs text-slate-500">{mailAuth?.dkim ? 'Key generated. Public key TXT record:' : 'No DKIM key yet.'}</p>
+                          {mailAuth?.dkim && <code className="block text-xs font-mono bg-slate-100 dark:bg-slate-800 p-2 rounded break-all">{mailAuth.dkim}</code>}
+                          <button className="btn-primary text-xs" onClick={genDkim} disabled={hostingBusy}>{mailAuth?.dkim ? 'Re-generate' : 'Generate DKIM key'}</button>
+                        </div>
+                        <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
+                          <p className="text-sm font-medium">SPF</p>
+                          <p className="text-xs text-slate-500">Current: <code className="font-mono">{mailAuth?.spf || '(none)'}</code></p>
+                          <div className="flex gap-2">
+                            <input className="input font-mono text-xs flex-1" placeholder="include domains, comma-separated (e.g. _spf.google.com, sendgrid.net)" value={spfForm.include} onChange={e => setSpfForm({ include: e.target.value })} />
+                            <button className="btn-primary text-xs" onClick={saveSpf} disabled={hostingBusy}>Save SPF</button>
+                          </div>
+                        </div>
+                        <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
+                          <p className="text-sm font-medium">DMARC</p>
+                          <p className="text-xs text-slate-500">Current: <code className="font-mono">{mailAuth?.dmarc || '(none)'}</code></p>
+                          <div className="grid grid-cols-12 gap-2">
+                            <select className="input col-span-3 text-xs" value={dmarcForm.policy} onChange={e => setDmarcForm(f => ({ ...f, policy: e.target.value }))}>
+                              <option value="none">none</option><option value="quarantine">quarantine</option><option value="reject">reject</option>
+                            </select>
+                            <input className="input col-span-7 text-xs" placeholder="rua: where to send aggregate reports" value={dmarcForm.rua} onChange={e => setDmarcForm(f => ({ ...f, rua: e.target.value }))} />
+                            <button className="btn-primary col-span-2 text-xs" onClick={saveDmarc} disabled={hostingBusy}>Save DMARC</button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'cron' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Scheduled tasks. <code>user</code> must be a real OS user prefixed with your account name (use the FTP tab to create one first).</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-3"><label className="label text-xs">OS user</label><input className="input font-mono text-xs" placeholder={`${selectedAccount.username}_web`} value={cronForm.user} onChange={e => setCronForm(f => ({ ...f, user: e.target.value }))} /></div>
+                          <div className="col-span-3"><label className="label text-xs">Schedule</label><input className="input font-mono text-xs" placeholder="0 * * * *" value={cronForm.schedule} onChange={e => setCronForm(f => ({ ...f, schedule: e.target.value }))} /></div>
+                          <div className="col-span-4"><label className="label text-xs">Command</label><input className="input font-mono text-xs" placeholder="curl https://example.com/cron" value={cronForm.command} onChange={e => setCronForm(f => ({ ...f, command: e.target.value }))} /></div>
+                          <button className="btn-primary col-span-2 text-xs" onClick={addCron} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                        </div>
+                        {cronGroups.length === 0 && <p className="text-center text-slate-400 text-xs py-2">No scheduled tasks</p>}
+                        {cronGroups.map(g => (
+                          <div key={g.user} className="space-y-1">
+                            <p className="text-xs font-mono text-slate-500">{g.user}</p>
+                            <table className="w-full text-sm">
+                              <tbody>
+                                {g.jobs.map(j => (
+                                  <tr key={j.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                    <td className="py-2 px-1 font-mono text-xs">{j.line}</td>
+                                    <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteCron(g.user, j.id)}><Trash2 size={12} /></button></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {accountSubtab === 'sshkeys' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">SSH public keys for an OS user. Only OS users prefixed with your account name (e.g. <code>{selectedAccount.username}_web</code>) — create them in the FTP tab first.</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-3"><label className="label text-xs">OS user</label><input className="input font-mono text-xs" placeholder={`${selectedAccount.username}_web`} value={sshForm.user} onChange={e => setSshForm(f => ({ ...f, user: e.target.value }))} /></div>
+                          <div className="col-span-7"><label className="label text-xs">Public key</label><input className="input font-mono text-xs" placeholder="ssh-ed25519 AAAA…" value={sshForm.key} onChange={e => setSshForm(f => ({ ...f, key: e.target.value }))} /></div>
+                          <button className="btn-primary col-span-2 text-xs" onClick={addSshKey} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                        </div>
+                        {sshGroups.length === 0 && <p className="text-center text-slate-400 text-xs py-2">No SSH keys</p>}
+                        {sshGroups.map(g => (
+                          <div key={g.user} className="space-y-1">
+                            <p className="text-xs font-mono text-slate-500">{g.user}</p>
+                            <table className="w-full text-sm">
+                              <tbody>
+                                {g.keys.length === 0 && <tr><td className="py-2 text-center text-slate-400 text-xs">No keys</td></tr>}
+                                {g.keys.map(k => (
+                                  <tr key={k.id} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                    <td className="py-2 px-1 font-mono text-xs truncate max-w-[420px]">{k.raw}</td>
+                                    <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteSshKey(g.user, k.id)}><Trash2 size={12} /></button></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {accountSubtab === 'backups' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">Create a tar.gz of your domain's webroot — files only, not databases (use the Databases tab to export those).</p>
+                        <button className="btn-primary text-xs" onClick={createBackup} disabled={hostingBusy}><Plus size={12} /> Create backup of {selectedAccount.domain}</button>
+                        <table className="w-full text-sm">
+                          <tbody>
+                            {backups.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400 text-xs">No backups</td></tr>}
+                            {backups.map(b => (
+                              <tr key={b.name} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{b.name}</td>
+                                <td className="text-xs text-slate-500">{(b.size / 1024).toFixed(1)} KB · {new Date(b.created).toLocaleString()}</td>
+                                <td className="text-right">
+                                  <button className="btn-icon" title="Download" onClick={() => openAuthenticatedDownload(`/api/portal/backups/${encodeURIComponent(b.name)}/download`, { tokenKey: 'hp_portal_token', filename: b.name }).catch(e => setToast({ type: 'error', msg: e.message }))}><Download size={12} /></button>
+                                  <button className="btn-icon text-rose-500" onClick={() => deleteBackup(b.name)}><Trash2 size={12} /></button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'scripts' && (
+                      <div className="space-y-4 max-w-2xl">
+                        <p className="text-xs text-slate-500">One-click WordPress install into <code className="font-mono">/var/www/{selectedAccount.domain}/public_html</code>. DB name and DB user must start with your account username (<code className="font-mono">{selectedAccount.username}_</code>).</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div><label className="label text-xs">DB name</label><input className="input font-mono text-xs" placeholder={`${selectedAccount.username}_wp`} value={scriptForm.dbName} onChange={e => setScriptForm(f => ({ ...f, dbName: e.target.value }))} /></div>
+                          <div><label className="label text-xs">DB user</label><input className="input font-mono text-xs" placeholder={`${selectedAccount.username}_wpu`} value={scriptForm.dbUser} onChange={e => setScriptForm(f => ({ ...f, dbUser: e.target.value }))} /></div>
+                          <div><label className="label text-xs">DB password</label><input className="input" type="password" value={scriptForm.dbPass} onChange={e => setScriptForm(f => ({ ...f, dbPass: e.target.value }))} /></div>
+                          <div><label className="label text-xs">Site title</label><input className="input text-xs" placeholder="My WordPress Site" value={scriptForm.siteTitle} onChange={e => setScriptForm(f => ({ ...f, siteTitle: e.target.value }))} /></div>
+                          <div><label className="label text-xs">WP admin user</label><input className="input text-xs" placeholder="admin" value={scriptForm.adminUser} onChange={e => setScriptForm(f => ({ ...f, adminUser: e.target.value }))} /></div>
+                          <div><label className="label text-xs">WP admin password</label><input className="input" type="password" value={scriptForm.adminPass} onChange={e => setScriptForm(f => ({ ...f, adminPass: e.target.value }))} /></div>
+                          <div className="col-span-2"><label className="label text-xs">WP admin email</label><input className="input text-xs" placeholder="you@example.com" value={scriptForm.adminEmail} onChange={e => setScriptForm(f => ({ ...f, adminEmail: e.target.value }))} /></div>
+                        </div>
+                        <button className="btn-primary text-sm" onClick={installWordpress} disabled={hostingBusy}>Install WordPress</button>
                       </div>
                     )}
                   </div>
