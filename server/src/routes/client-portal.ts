@@ -1,10 +1,29 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
+import path from 'path';
 import db from '../db';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
+
+const execAsync = promisify(exec);
+const PORTAL_DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$/;
+const PORTAL_EMAIL_RE  = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const PORTAL_NAMED_DIR  = process.env.NAMED_DIR  || '/etc/named';
+const PORTAL_VMAIL_DIR  = process.env.VMAIL_DIR  || '/etc/postfix/vmail';
+const PORTAL_PASSWD_FILE = process.env.MAIL_PASSWD || '/etc/dovecot/users';
+const PORTAL_WEBROOT     = process.env.WEBROOT    || '/var/www';
+
+// Ownership boundary for every per-domain portal route. A client may only act
+// on a domain that's attached (via accounts.client_id) to one of their hosting
+// accounts. Terminated accounts don't grant access.
+function clientOwnsDomain(clientId: number, domain: string): boolean {
+  return !!db.prepare("SELECT 1 FROM accounts WHERE client_id = ? AND domain = ? AND status != 'terminated'").get(clientId, domain);
+}
 
 db.prepare(`CREATE TABLE IF NOT EXISTS client_totp (
   client_id INTEGER PRIMARY KEY,
@@ -172,6 +191,175 @@ router.delete('/totp', clientAuth, async (req: Request, res: Response) => {
   const ok = await bcrypt.compare(password, client.password_hash);
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
   db.prepare('DELETE FROM client_totp WHERE client_id=?').run(clientId);
+  res.json({ success: true });
+});
+
+/* ── My Hosting (read-only) ─────────────────────────────────────── */
+
+router.get('/accounts', clientAuth, (req: Request, res: Response) => {
+  const rows = db.prepare(`
+    SELECT a.id, a.username, a.domain, a.status, a.notes, a.expires_at, a.created_at,
+           p.name as plan_name, p.price as plan_price, p.disk_quota, p.bandwidth,
+           p.email_accts, p.databases, p.ftp_accts
+    FROM accounts a
+    LEFT JOIN plans p ON a.plan_id = p.id
+    WHERE a.client_id = ?
+    ORDER BY a.created_at DESC
+  `).all((req as any).clientId);
+  res.json(rows);
+});
+
+router.get('/accounts/:id', clientAuth, (req: Request, res: Response) => {
+  const acc: any = db.prepare(`
+    SELECT a.*, p.name as plan_name, p.price as plan_price, p.disk_quota, p.bandwidth,
+           p.email_accts, p.databases, p.ftp_accts
+    FROM accounts a
+    LEFT JOIN plans p ON a.plan_id = p.id
+    WHERE a.id = ? AND a.client_id = ?
+  `).get(req.params.id, (req as any).clientId);
+  if (!acc) return res.status(404).json({ error: 'Not found' });
+  res.json(acc);
+});
+
+router.get('/accounts/:id/usage', clientAuth, async (req: Request, res: Response) => {
+  const acc: any = db.prepare('SELECT domain FROM accounts WHERE id = ? AND client_id = ?').get(req.params.id, (req as any).clientId);
+  if (!acc) return res.status(404).json({ error: 'Not found' });
+  const accountDir = path.join(PORTAL_WEBROOT, acc.domain);
+  let diskBytes = 0;
+  try {
+    const { stdout } = await execAsync(`du -sb "${accountDir}" 2>/dev/null`);
+    diskBytes = parseInt(stdout.split('\t')[0]) || 0;
+  } catch { /* directory missing — leave 0 */ }
+  res.json({ disk_bytes: diskBytes, directory: accountDir });
+});
+
+/* ── Self-service password change ───────────────────────────────── */
+
+router.post('/change-password', clientAuth, async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'currentPassword and newPassword required' });
+  if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  const clientId = (req as any).clientId;
+  const client: any = db.prepare('SELECT password_hash FROM clients WHERE id = ?').get(clientId);
+  if (!client?.password_hash) return res.status(401).json({ error: 'Invalid credentials' });
+  const ok = await bcrypt.compare(currentPassword, client.password_hash);
+  if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
+  const hash = await bcrypt.hash(newPassword, 12);
+  db.prepare('UPDATE clients SET password_hash = ? WHERE id = ?').run(hash, clientId);
+  res.json({ success: true });
+});
+
+/* ── DNS records for an owned domain ────────────────────────────── */
+
+router.get('/domains/:domain/dns', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const zoneFile = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
+  const content = await fs.readFile(zoneFile, 'utf-8').catch(() => null);
+  if (!content) return res.json({ records: [] });
+  const records: { type: string; name: string; value: string; ttl: string }[] = [];
+  for (const line of content.split('\n').filter(l => l.trim() && !l.startsWith(';'))) {
+    const m = line.match(/^(\S+)\s+(\d+)?\s*IN\s+(\w+)\s+(.+)$/);
+    if (m) records.push({ name: m[1], ttl: m[2] || '3600', type: m[3], value: m[4].trim() });
+  }
+  res.json({ records });
+});
+
+router.post('/domains/:domain/dns', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const { name, type, value, ttl = '3600' } = req.body;
+  // Clients are restricted to the safe record types — no NS / SRV — to keep
+  // a tenant from delegating their subdomain away or putting up service
+  // records that conflict with the operator's mail / SIP infrastructure.
+  const allowed = ['A', 'AAAA', 'CNAME', 'MX', 'TXT'];
+  if (!allowed.includes(type)) return res.status(400).json({ error: `Type must be one of: ${allowed.join(', ')}` });
+  if (typeof name !== 'string' || !name || /\s/.test(name)) return res.status(400).json({ error: 'name is required and must not contain whitespace' });
+  if (typeof value !== 'string' || !value.trim()) return res.status(400).json({ error: 'value is required' });
+  if (!/^\d+$/.test(String(ttl))) return res.status(400).json({ error: 'ttl must be a positive integer' });
+  const zoneFile = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
+  await fs.appendFile(zoneFile, `${name}\t${ttl}\tIN\t${type}\t${value}\n`);
+  await execAsync('rndc reload 2>/dev/null || true');
+  res.json({ message: 'DNS record added' });
+});
+
+router.delete('/domains/:domain/dns/:index', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  const idx = parseInt(req.params.index);
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  if (!Number.isFinite(idx) || idx < 0) return res.status(400).json({ error: 'Invalid index' });
+  const zoneFile = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
+  const content = await fs.readFile(zoneFile, 'utf-8').catch(() => null);
+  if (!content) return res.status(404).json({ error: 'No zone file' });
+  const all = content.split('\n');
+  const recordLines = all.filter(l => l.trim() && !l.startsWith(';'));
+  if (idx >= recordLines.length) return res.status(404).json({ error: 'Record not found' });
+  recordLines.splice(idx, 1);
+  const headerLines = all.filter(l => !l.trim() || l.startsWith(';'));
+  await fs.writeFile(zoneFile, [...headerLines, ...recordLines].join('\n') + '\n');
+  await execAsync('rndc reload 2>/dev/null || true');
+  res.json({ success: true });
+});
+
+/* ── Email accounts on an owned domain ──────────────────────────── */
+
+router.get('/email/accounts', clientAuth, async (req: Request, res: Response) => {
+  const domain = req.query.domain as string;
+  if (!domain || !PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'domain query param required' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const content = await fs.readFile(PORTAL_PASSWD_FILE, 'utf-8').catch(() => '');
+  const suffix = '@' + domain.toLowerCase();
+  const accounts = content
+    .split('\n')
+    .filter(Boolean)
+    .filter(l => l.split(':')[0].toLowerCase().endsWith(suffix))
+    .map(l => ({ email: l.split(':')[0] }));
+  res.json(accounts);
+});
+
+router.post('/email/accounts', clientAuth, async (req: Request, res: Response) => {
+  const { email, password, quota } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  if (!PORTAL_EMAIL_RE.test(email)) return res.status(400).json({ error: 'Invalid email' });
+  if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const [user, domain] = email.split('@');
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // doveadm pw hashes the password without it touching the shell command
+  // line — pipe via stdin so the value never lands in `ps` or err.message.
+  const { spawn } = await import('child_process');
+  const hash: string = await new Promise<string>((resolve, reject) => {
+    const p = spawn('doveadm', ['pw', '-s', 'SHA512-CRYPT']);
+    let out = '', err = '';
+    p.stdout.on('data', d => out += d);
+    p.stderr.on('data', d => err += d);
+    p.on('close', code => code === 0 ? resolve(out.trim()) : reject(new Error(err || `doveadm exit ${code}`)));
+    p.on('error', reject);
+    p.stdin.write(password + '\n'); p.stdin.end();
+  }).catch((e: any) => { throw new Error('Failed to hash password: ' + e.message); });
+  const quotaRule = quota ? `userdb_quota_rule=*:bytes=${quota}` : '';
+  const entry = `${email}:${hash}:5000:5000::${PORTAL_VMAIL_DIR}/${domain}/${user}::${quotaRule}`;
+  await fs.appendFile(PORTAL_PASSWD_FILE, entry + '\n');
+  await fs.appendFile(path.join(PORTAL_VMAIL_DIR, 'mailbox'), `${email}    ${domain}/${user}/\n`);
+  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
+  await fs.mkdir(path.join(PORTAL_VMAIL_DIR, domain, user), { recursive: true });
+  res.json({ message: `Mailbox ${email} created` });
+});
+
+router.delete('/email/accounts/:email', clientAuth, async (req: Request, res: Response) => {
+  const { email } = req.params;
+  if (!PORTAL_EMAIL_RE.test(email)) return res.status(400).json({ error: 'Invalid email' });
+  const domain = email.split('@')[1];
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // EMAIL_RE only allows [A-Za-z0-9._%+-] left of @ and [A-Za-z0-9.-] right
+  // of @, none of which are shell or sed metacharacters, so the sed pattern
+  // below is safe to interpolate. Mirror the admin email.ts delete flow.
+  const escaped = email.replace(/[.@]/g, '\\$&');
+  await execAsync(`sed -i '/^${escaped}:/d' ${PORTAL_PASSWD_FILE} 2>/dev/null || true`);
+  await execAsync(`sed -i '/^${escaped}/d' ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
+  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
   res.json({ success: true });
 });
 
