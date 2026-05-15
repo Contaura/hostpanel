@@ -1,13 +1,36 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import db from '../db';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
+
+// Mutating endpoints in /api/apps run pm2/cp/rsync against operator-supplied
+// paths and env vars. Keep them off reseller/readonly tokens — both the
+// env-var injection vector and the staging cp/rsync would otherwise be open
+// to anyone with a JWT.
+const adminOnly = requireRole('superadmin', 'admin');
+
+function buildEnvArg(envVarsJson: string | null | undefined): string[] {
+  // Build pm2 --env-var=KEY1=val1,KEY2=val2 as a single argv element. Strip
+  // characters that would be expanded inside double quotes if this ever lands
+  // back in a shell (`, $, \), and forbid commas/newlines that would break
+  // pm2's own parsing of the comma list.
+  const obj = (() => { try { return JSON.parse(envVarsJson || '{}'); } catch { return {}; } })();
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(obj)) {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k)) continue;
+    const safeV = String(v).replace(/[`$\\"\r\n,]/g, '');
+    parts.push(`${k}=${safeV}`);
+  }
+  return parts.length ? ['--env-var', parts.join(',')] : [];
+}
 
 /* ── List apps ───────────────────────────────────────────── */
 
@@ -43,7 +66,7 @@ function isSafePath(p: string): boolean {
   return SAFE_PATH_RE.test(p) && !/["$`\\!]/.test(p);
 }
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', adminOnly, async (req: Request, res: Response) => {
   const { name, type, domain, port, start_script, working_dir, env_vars } = req.body;
   if (!name || !domain || !port || !start_script || !working_dir) {
     return res.status(400).json({ error: 'name, domain, port, start_script, working_dir are required' });
@@ -85,33 +108,34 @@ router.post('/', async (req: Request, res: Response) => {
 
 /* ── Control (start / stop / restart) ───────────────────── */
 
-router.post('/:name/start', async (req: Request, res: Response) => {
+router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
   try {
-    const envStr = Object.entries(JSON.parse(app.env_vars || '{}'))
-      .filter(([k]) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k))
-      .map(([k, v]) => `${k}=${String(v).replace(/"/g, '')}`).join(',');
-    const envFlag = envStr ? `--env-var="${envStr}"` : '';
-    await execAsync(`pm2 start "${app.start_script}" --name "${app.name}" ${envFlag} --cwd "${app.working_dir}" 2>&1`);
+    await execFileAsync('pm2', [
+      'start', app.start_script,
+      '--name', app.name,
+      ...buildEnvArg(app.env_vars),
+      '--cwd', app.working_dir,
+    ]);
     db.prepare("UPDATE managed_apps SET status='running', pm2_id=? WHERE name=?").run(app.name, app.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:name/stop', async (req: Request, res: Response) => {
+router.post('/:name/stop', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
-    await execAsync(`pm2 stop ${req.params.name} 2>&1`);
+    await execFileAsync('pm2', ['stop', req.params.name]);
     db.prepare("UPDATE managed_apps SET status='stopped' WHERE name=?").run(req.params.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:name/restart', async (req: Request, res: Response) => {
+router.post('/:name/restart', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
-    await execAsync(`pm2 restart ${req.params.name} 2>&1`);
+    await execFileAsync('pm2', ['restart', req.params.name]);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -119,18 +143,18 @@ router.post('/:name/restart', async (req: Request, res: Response) => {
 router.post('/:name/logs', async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   try {
-    const { stdout } = await execAsync(`pm2 logs ${req.params.name} --lines 100 --nostream 2>&1`);
+    const { stdout } = await execFileAsync('pm2', ['logs', req.params.name, '--lines', '100', '--nostream']);
     res.json({ logs: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 /* ── Delete app ──────────────────────────────────────────── */
 
-router.delete('/:name', async (req: Request, res: Response) => {
+router.delete('/:name', adminOnly, async (req: Request, res: Response) => {
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
   try {
-    await execAsync(`pm2 delete ${app.name} 2>&1`).catch(() => {});
+    await execFileAsync('pm2', ['delete', app.name]).catch(() => {});
     const conf = path.join(VHOST_DIR, `app_${app.name}.conf`);
     if (existsSync(conf)) require('fs').unlinkSync(conf);
     await execAsync('apachectl graceful').catch(() => {});
@@ -156,7 +180,7 @@ router.get('/:name/staging', (req: Request, res: Response) => {
   res.json(db.prepare('SELECT * FROM app_staging WHERE app_name = ?').all(req.params.name));
 });
 
-router.post('/:name/stage', async (req: Request, res: Response) => {
+router.post('/:name/stage', adminOnly, async (req: Request, res: Response) => {
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
   const { port, branch = 'staging' } = req.body;
@@ -164,41 +188,39 @@ router.post('/:name/stage', async (req: Request, res: Response) => {
   const stagingName = `${app.name}-staging`;
   const stagingDir = app.working_dir.replace(/\/?$/, '-staging');
   try {
-    // Clone or sync working dir to staging dir
     if (!existsSync(stagingDir)) {
-      await execAsync(`cp -r "${app.working_dir}" "${stagingDir}" 2>&1`);
+      await execFileAsync('cp', ['-r', app.working_dir, stagingDir]);
     }
-    // Start under PM2 with a different name
-    const envStr = Object.entries(JSON.parse(app.env_vars || '{}'))
-      .filter(([k]) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k))
-      .map(([k, v]) => `${k}=${String(v).replace(/"/g, '')}`).join(',');
-    const envFlag = envStr ? `--env-var="${envStr}"` : '';
-    await execAsync(`pm2 start "${app.start_script}" --name "${stagingName}" ${envFlag} --cwd "${stagingDir}" 2>&1`).catch(() => {});
+    await execFileAsync('pm2', [
+      'start', app.start_script,
+      '--name', stagingName,
+      ...buildEnvArg(app.env_vars),
+      '--cwd', stagingDir,
+    ]).catch(() => {});
     const r = db.prepare('INSERT OR REPLACE INTO app_staging (app_name, staging_name, staging_port, staging_dir, branch, status) VALUES (?, ?, ?, ?, ?, ?)').run(app.name, stagingName, parseInt(port), stagingDir, branch, 'running');
     res.json(db.prepare('SELECT * FROM app_staging WHERE id = ?').get(r.lastInsertRowid));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:name/promote', async (req: Request, res: Response) => {
+router.post('/:name/promote', adminOnly, async (req: Request, res: Response) => {
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
   const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(app.name) as any;
   if (!staging) return res.status(404).json({ error: 'No staging environment found' });
   try {
-    // Stop production, sync staging dir → production dir, restart production
-    await execAsync(`pm2 stop "${app.name}" 2>&1`).catch(() => {});
-    await execAsync(`rsync -a --delete "${staging.staging_dir}/" "${app.working_dir}/" 2>&1`);
-    await execAsync(`pm2 restart "${app.name}" 2>&1`);
+    await execFileAsync('pm2', ['stop', app.name]).catch(() => {});
+    await execFileAsync('rsync', ['-a', '--delete', `${staging.staging_dir}/`, `${app.working_dir}/`]);
+    await execFileAsync('pm2', ['restart', app.name]);
     db.prepare("UPDATE managed_apps SET status='running' WHERE name=?").run(app.name);
     res.json({ success: true, message: `Staging promoted to production for ${app.name}` });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/:name/staging', async (req: Request, res: Response) => {
+router.delete('/:name/staging', adminOnly, async (req: Request, res: Response) => {
   const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(req.params.name) as any;
   if (!staging) return res.status(404).json({ error: 'No staging environment' });
   try {
-    await execAsync(`pm2 delete "${staging.staging_name}" 2>&1`).catch(() => {});
+    await execFileAsync('pm2', ['delete', staging.staging_name]).catch(() => {});
     db.prepare('DELETE FROM app_staging WHERE app_name = ?').run(req.params.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
