@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db';
 import { validatePassword, getPasswordPolicy } from '../utils/password-policy';
+import { AuthRequest, requireRole } from '../middleware/auth';
+
+const superadminOnly = requireRole('superadmin');
 
 const router = Router();
 
@@ -14,7 +17,7 @@ router.get('/', (_req: Request, res: Response) => {
 
 /* ── Create admin ────────────────────────────────────────── */
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', superadminOnly, async (req: AuthRequest, res: Response) => {
   const { username, email, password, role } = req.body;
   if (!username || !email || !password) return res.status(400).json({ error: 'username, email, password required' });
   const pwError = validatePassword(password);
@@ -32,7 +35,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 /* ── Update admin ────────────────────────────────────────── */
 
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', superadminOnly, async (req: AuthRequest, res: Response) => {
   const { email, password, role } = req.body;
   try {
     if (password) {
@@ -49,7 +52,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
 /* ── Delete admin ────────────────────────────────────────── */
 
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', superadminOnly, (req: AuthRequest, res: Response) => {
   const count = (db.prepare('SELECT COUNT(*) as n FROM admin_users').get() as any).n;
   if (count <= 1) return res.status(400).json({ error: 'Cannot delete the last admin user' });
   db.prepare('DELETE FROM admin_users WHERE id = ?').run(req.params.id);
@@ -62,7 +65,7 @@ router.get('/password-policy', (_req: Request, res: Response) => {
   res.json(getPasswordPolicy());
 });
 
-router.put('/password-policy', (req: Request, res: Response) => {
+router.put('/password-policy', superadminOnly, (req: AuthRequest, res: Response) => {
   const { min_length, require_upper, require_number, require_special } = req.body;
   const upsert = db.prepare("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at");
   if (min_length !== undefined) upsert.run('pw_min_length', String(Math.max(6, parseInt(min_length) || 8)));

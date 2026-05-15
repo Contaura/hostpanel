@@ -64,9 +64,13 @@ router.post('/login', async (req: Request, res: Response) => {
 
 router.post('/change-password', async (req: Request, res: Response) => {
   const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'currentPassword and newPassword are required' });
   }
+
+  const { validatePassword } = await import('../utils/password-policy');
+  const pwError = validatePassword(newPassword);
+  if (pwError) return res.status(400).json({ error: pwError });
 
   const ADMIN_PASS_HASH = process.env.ADMIN_PASS_HASH || bcrypt.hashSync('changeme', 10);
   const valid = await bcrypt.compare(currentPassword, ADMIN_PASS_HASH);
