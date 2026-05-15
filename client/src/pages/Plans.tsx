@@ -43,11 +43,12 @@ export default function Plans() {
   const [editing, setEditing] = useState<Plan | null>(null);
   const [form, setForm] = useState({ ...EMPTY_PLAN });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [deleting, setDeleting] = useState<number | null>(null);
 
   async function load() {
     try { const { data } = await axios.get<Plan[]>('/api/billing/plans'); setPlans(data); }
-    catch { toast.error('Failed to load plans'); }
+    catch { toast.error('Failed to load plans'); } finally { setPageLoading(false); }
   }
   useEffect(() => {
     document.title = 'Hosting Plans — HostPanel';
@@ -97,6 +98,8 @@ export default function Plans() {
         onChange={e => setForm({ ...form, [key]: type === 'number' ? +e.target.value : e.target.value })} />
     </div>
   );
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

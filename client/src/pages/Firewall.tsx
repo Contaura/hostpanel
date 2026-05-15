@@ -35,6 +35,7 @@ export default function Firewall() {
   const [portForm, setPortForm] = useState({ port: '', protocol: 'tcp' });
   const [ipForm, setIpForm] = useState({ ip: '' });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [geoBlocks, setGeoBlocks] = useState<string[]>([]);
   const [geoCode, setGeoCode] = useState('');
   const [ipv6Blocks, setIpv6Blocks] = useState<string[]>([]);
@@ -51,7 +52,7 @@ export default function Firewall() {
     try {
       const { data } = await axios.get<FirewallStatus>('/api/firewall/status');
       setStatus(data);
-    } catch (err: any) { toast.error('Failed to load firewall status'); }
+    } catch (err: any) { toast.error('Failed to load firewall status'); } finally { setPageLoading(false); }
   }
 
   async function loadGeo() {
@@ -127,6 +128,8 @@ export default function Firewall() {
       toast.success(`IP ${ip} unblocked`); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

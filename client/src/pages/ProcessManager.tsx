@@ -37,6 +37,7 @@ export default function ProcessManager() {
   const [procs, setProcs] = useState<Process[]>([]);
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [killing, setKilling] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -50,7 +51,7 @@ export default function ProcessManager() {
       setProcs(data.data);
       setTotal(data.total);
     } catch { toast.error('Failed to load processes'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setPageLoading(false); }
   }
 
   useEffect(() => {
@@ -82,6 +83,8 @@ export default function ProcessManager() {
     : procs;
 
   const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">

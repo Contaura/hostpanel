@@ -31,6 +31,7 @@ export default function ScriptInstaller() {
     siteTitle: '', adminUser: 'admin', adminPass: '', adminEmail: '',
   });
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(true);
   const [result, setResult] = useState<{ message: string; url: string } | null>(null);
 
   useEffect(() => {
@@ -39,8 +40,10 @@ export default function ScriptInstaller() {
   }, []);
 
   useEffect(() => {
-    axios.get<Script[]>('/api/scripts/available').then(r => setScripts(r.data));
-    axios.get<string[]>('/api/domains/domains').then(r => setDomains(r.data));
+    Promise.all([
+      axios.get<Script[]>('/api/scripts/available').then(r => setScripts(r.data)),
+      axios.get<string[]>('/api/domains/domains').then(r => setDomains(r.data)),
+    ]).finally(() => setPageLoading(false));
   }, []);
 
   async function install(e: FormEvent) {
@@ -76,6 +79,8 @@ export default function ScriptInstaller() {
       </div>
     );
   }
+
+  if (pageLoading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
 
   return (
     <div className="space-y-5">
