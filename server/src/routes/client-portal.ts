@@ -1,10 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
+import { existsSync } from 'fs';
 import path from 'path';
+import mysql from 'mysql2/promise';
 import db from '../db';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
@@ -23,6 +25,27 @@ const PORTAL_WEBROOT     = process.env.WEBROOT    || '/var/www';
 // accounts. Terminated accounts don't grant access.
 function clientOwnsDomain(clientId: number, domain: string): boolean {
   return !!db.prepare("SELECT 1 FROM accounts WHERE client_id = ? AND domain = ? AND status != 'terminated'").get(clientId, domain);
+}
+
+// Username prefixes the client is allowed to use for FTP / DB / DB-user
+// names. Same cPanel convention: every resource a tenant creates is
+// namespaced under their hosting account's username (e.g. `marcos_blog`).
+// Returns ['username1', 'username2', ...] for all of the client's non-
+// terminated accounts.
+function clientAccountUsernames(clientId: number): string[] {
+  const rows = db.prepare("SELECT DISTINCT username FROM accounts WHERE client_id = ? AND status != 'terminated'").all(clientId) as { username: string }[];
+  return rows.map(r => r.username).filter(u => /^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(u));
+}
+
+// Returns the account-username if `name` is prefixed with one of the
+// client's hosting account usernames followed by an underscore, otherwise
+// null. Used to scope DB / FTP namespace.
+function clientPrefixOwner(clientId: number, name: string): string | null {
+  if (!/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(name)) return null;
+  for (const u of clientAccountUsernames(clientId)) {
+    if (name === u || name.startsWith(u + '_')) return u;
+  }
+  return null;
 }
 
 db.prepare(`CREATE TABLE IF NOT EXISTS client_totp (
@@ -361,6 +384,269 @@ router.delete('/email/accounts/:email', clientAuth, async (req: Request, res: Re
   await execAsync(`sed -i '/^${escaped}/d' ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
   await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
   res.json({ success: true });
+});
+
+/* ── Email forwarders on owned domain ───────────────────────── */
+
+router.get('/email/forwarders', clientAuth, async (req: Request, res: Response) => {
+  const domain = req.query.domain as string;
+  if (!domain || !PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'domain query param required' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const content = await fs.readFile(path.join(PORTAL_VMAIL_DIR, 'aliases'), 'utf-8').catch(() => '');
+  const suffix = '@' + domain.toLowerCase();
+  const forwarders = content
+    .split('\n')
+    .filter(l => l.trim() && !l.startsWith('#'))
+    .map(l => { const [from, to] = l.split(/\s+/); return { from, to }; })
+    .filter(f => f.from?.toLowerCase().endsWith(suffix));
+  res.json(forwarders);
+});
+
+router.post('/email/forwarders', clientAuth, async (req: Request, res: Response) => {
+  const { from, to } = req.body;
+  if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+  if (!PORTAL_EMAIL_RE.test(from) || !PORTAL_EMAIL_RE.test(to)) return res.status(400).json({ error: 'Invalid email' });
+  const domain = from.split('@')[1];
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  await fs.appendFile(path.join(PORTAL_VMAIL_DIR, 'aliases'), `${from}    ${to}\n`);
+  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
+  res.json({ message: 'Forwarder created' });
+});
+
+router.delete('/email/forwarders/:from', clientAuth, async (req: Request, res: Response) => {
+  const { from } = req.params;
+  if (!PORTAL_EMAIL_RE.test(from)) return res.status(400).json({ error: 'Invalid email' });
+  const domain = from.split('@')[1];
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const escaped = from.replace(/[.@]/g, '\\$&');
+  await execAsync(`sed -i '/^${escaped}\\s/d' ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
+  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
+  res.json({ success: true });
+});
+
+/* ── FTP users (cPanel-style prefix, chrooted to owned domain) ── */
+
+const PORTAL_FTP_USER_DIR = process.env.FTP_USER_DIR || '/etc/vsftpd/users';
+const PORTAL_FTP_USER_LIST = '/etc/vsftpd/user_list';
+
+router.get('/ftp/users', clientAuth, async (req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((req as any).clientId);
+  if (!usernames.length) return res.json([]);
+  const content = await fs.readFile(PORTAL_FTP_USER_LIST, 'utf-8').catch(() => '');
+  const all = content.split('\n').map(s => s.trim()).filter(Boolean);
+  // Return only users whose name matches one of the client's account
+  // prefixes (e.g. marcos_*). Excludes the bare account-username itself
+  // unless the operator explicitly created an FTP user with that name.
+  const users = all
+    .filter(u => usernames.some(prefix => u === prefix || u.startsWith(prefix + '_')))
+    .map(username => {
+      const homeFromCfg = (() => {
+        try { return require('fs').readFileSync(path.join(PORTAL_FTP_USER_DIR, username), 'utf-8').match(/local_root=(.+)/)?.[1] || null; }
+        catch { return null; }
+      })();
+      return { username, directory: homeFromCfg };
+    });
+  res.json(users);
+});
+
+router.post('/ftp/users', clientAuth, async (req: Request, res: Response) => {
+  const { username, password, domain } = req.body;
+  if (!username || !password || !domain) return res.status(400).json({ error: 'username, password, domain required' });
+  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // Force the cPanel-style prefix. A client picks the *suffix*; we
+  // prepend their account-username so two tenants can't collide on a
+  // common name like "blog" or "test", and so the OS user always traces
+  // back to the right hosting account.
+  if (!/^[a-z][a-z0-9_]{0,30}$/.test(username)) return res.status(400).json({ error: 'username must be lowercase letters/digits/underscore (max 31 chars), start with a letter' });
+  const owner = clientAccountUsernames((req as any).clientId).find(u => db.prepare('SELECT 1 FROM accounts WHERE client_id = ? AND username = ? AND domain = ?').get((req as any).clientId, u, domain));
+  if (!owner) return res.status(403).json({ error: 'Not your domain' });
+  const fullUser = `${owner}_${username}`;
+  if (fullUser.length > 32) return res.status(400).json({ error: 'username too long when combined with account prefix' });
+  const homeDir = path.join(PORTAL_WEBROOT, domain, 'public_html');
+  try {
+    await execAsync(`id "${fullUser}" 2>/dev/null`);
+    return res.status(409).json({ error: 'FTP user already exists' });
+  } catch { /* expected — user doesn't exist yet */ }
+  // Create the OS user with /sbin/nologin shell so the only thing they
+  // can do is FTP. Use spawn+stdin for chpasswd so the password never
+  // touches the process command line.
+  await execAsync(`useradd -d "${homeDir}" -s /sbin/nologin -M "${fullUser}"`);
+  await new Promise<void>((resolve, reject) => {
+    const p = spawn('chpasswd');
+    p.stdin.write(`${fullUser}:${password}\n`); p.stdin.end();
+    p.on('close', code => code === 0 ? resolve() : reject(new Error(`chpasswd exit ${code}`)));
+    p.on('error', reject);
+  });
+  await fs.appendFile(PORTAL_FTP_USER_LIST, `${fullUser}\n`);
+  await fs.mkdir(PORTAL_FTP_USER_DIR, { recursive: true });
+  await fs.writeFile(path.join(PORTAL_FTP_USER_DIR, fullUser), `local_root=${homeDir}\nwrite_enable=YES\nanon_world_readable_only=NO\n`);
+  res.json({ message: `FTP user ${fullUser} created`, username: fullUser, directory: homeDir });
+});
+
+router.delete('/ftp/users/:username', clientAuth, async (req: Request, res: Response) => {
+  const { username } = req.params;
+  if (!/^[a-z][a-z0-9_]{0,31}$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (!clientPrefixOwner((req as any).clientId, username)) return res.status(403).json({ error: 'Not your FTP user' });
+  await execAsync(`userdel "${username}" 2>/dev/null || true`);
+  await execAsync(`sed -i '/^${username}$/d' ${PORTAL_FTP_USER_LIST} 2>/dev/null || true`);
+  await fs.unlink(path.join(PORTAL_FTP_USER_DIR, username)).catch(() => {});
+  res.json({ success: true });
+});
+
+/* ── Databases (cPanel-style prefix) ────────────────────────── */
+
+const PORTAL_DB_HOST = process.env.DB_HOST || '127.0.0.1';
+const PORTAL_DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
+const PORTAL_DB_USER = process.env.DB_ROOT_USER || 'root';
+const PORTAL_DB_PASS = process.env.DB_ROOT_PASS || '';
+
+async function getPortalDbConn() {
+  return mysql.createConnection({ host: PORTAL_DB_HOST, port: PORTAL_DB_PORT, user: PORTAL_DB_USER, password: PORTAL_DB_PASS });
+}
+
+router.get('/databases', clientAuth, async (req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((req as any).clientId);
+  if (!usernames.length) return res.json([]);
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    const [rows] = await conn.query<mysql.RowDataPacket[]>('SELECT schema_name AS name FROM information_schema.SCHEMATA');
+    const owned = (rows as any[]).filter(r => usernames.some(u => r.name === u || r.name.startsWith(u + '_')));
+    res.json(owned);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.post('/databases', clientAuth, async (req: Request, res: Response) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (!clientPrefixOwner((req as any).clientId, name)) return res.status(403).json({ error: 'Database name must start with your account username (e.g. <youruser>_<name>)' });
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    await conn.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    res.json({ message: `Database ${name} created` });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.delete('/databases/:name', clientAuth, async (req: Request, res: Response) => {
+  const { name } = req.params;
+  if (!clientPrefixOwner((req as any).clientId, name)) return res.status(403).json({ error: 'Not your database' });
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    await conn.query(`DROP DATABASE IF EXISTS \`${name}\``);
+    res.json({ message: `Database ${name} dropped` });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.get('/databases/users', clientAuth, async (req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((req as any).clientId);
+  if (!usernames.length) return res.json([]);
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    const [rows] = await conn.query<mysql.RowDataPacket[]>(
+      "SELECT user, host FROM mysql.user WHERE user NOT IN ('root','mysql','mariadb.sys') ORDER BY user",
+    );
+    // MariaDB returns the columns with their original casing (User, Host)
+    // regardless of how the SELECT was written, so we have to read both
+    // shapes here to stay tolerant. The admin /databases/users route does
+    // the same thing.
+    const owned = (rows as any[]).filter(r => {
+      const u = r.User ?? r.user;
+      return u && usernames.some(p => u === p || u.startsWith(p + '_'));
+    });
+    res.json(owned);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.post('/databases/users', clientAuth, async (req: Request, res: Response) => {
+  const { username, password, database } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  if (typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  if (!clientPrefixOwner((req as any).clientId, username)) return res.status(403).json({ error: 'Username must start with your account username (e.g. <youruser>_<name>)' });
+  if (database && !clientPrefixOwner((req as any).clientId, database)) return res.status(403).json({ error: 'Not your database' });
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    await conn.query('CREATE USER ?@? IDENTIFIED BY ?', [username, 'localhost', password]);
+    if (database) await conn.query(`GRANT ALL PRIVILEGES ON \`${database}\`.* TO ?@?`, [username, 'localhost']);
+    await conn.query('FLUSH PRIVILEGES');
+    res.json({ message: `DB user ${username} created` });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.delete('/databases/users/:username', clientAuth, async (req: Request, res: Response) => {
+  const { username } = req.params;
+  const host = (req.query.host as string) || 'localhost';
+  if (!clientPrefixOwner((req as any).clientId, username)) return res.status(403).json({ error: 'Not your DB user' });
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    await conn.query('DROP USER IF EXISTS ?@?', [username, host]);
+    await conn.query('FLUSH PRIVILEGES');
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+/* ── WHOIS (any domain) ─────────────────────────────────────── */
+
+router.get('/whois/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  try {
+    // /usr/bin/whois isn't always installed. Surface a clean 503 rather
+    // than ENOENT if it's missing.
+    if (!existsSync('/usr/bin/whois') && !existsSync('/usr/local/bin/whois')) {
+      return res.status(503).json({ error: 'whois binary not installed on this server' });
+    }
+    const { stdout } = await execAsync(`whois "${domain}" 2>/dev/null`, { timeout: 15000, maxBuffer: 1024 * 1024 });
+    res.json({ domain, raw: stdout });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── Self-service Let's Encrypt for owned domain ────────────── */
+
+router.get('/ssl/:domain/status', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  const certPath = `/etc/letsencrypt/live/${domain}/fullchain.pem`;
+  if (!existsSync(certPath)) return res.json({ issued: false });
+  try {
+    const { stdout } = await execAsync(`openssl x509 -in "${certPath}" -noout -enddate 2>/dev/null`);
+    const m = stdout.match(/notAfter=(.+)/);
+    res.json({ issued: true, expires: m?.[1]?.trim() || null });
+  } catch { res.json({ issued: true, expires: null }); }
+});
+
+router.post('/ssl/:domain', clientAuth, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
+  // The contact email goes to the LE registrar; use the client's account
+  // email rather than letting the tenant pass an arbitrary one (which
+  // would let them squat someone else's email on LE notifications).
+  const client: any = db.prepare('SELECT email FROM clients WHERE id = ?').get((req as any).clientId);
+  const email = client?.email;
+  if (!email) return res.status(400).json({ error: 'No contact email on file; ask your hosting provider to set one' });
+  try {
+    const { stdout, stderr } = await execAsync(
+      `certbot --apache -d "${domain}" --non-interactive --agree-tos -m "${email}" 2>&1`,
+      { timeout: 180000 },
+    );
+    res.json({ success: true, output: stdout + stderr });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message, output: (e.stdout || '') + (e.stderr || '') });
+  }
 });
 
 export default router;

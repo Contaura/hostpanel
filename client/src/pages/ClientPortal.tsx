@@ -10,6 +10,11 @@ interface Invoice { id: number; invoice_number: string; amount: number; currency
 interface PortalAccount { id: number; username: string; domain: string; status: string; expires_at: string | null; created_at: string; plan_name?: string; plan_price?: number; disk_quota?: number; email_accts?: number }
 interface DnsRecord { name: string; type: string; value: string; ttl: string }
 interface EmailAcct { email: string }
+interface Forwarder { from: string; to: string }
+interface FtpUser { username: string; directory: string | null }
+interface DbRow { name: string }
+interface DbUserRow { User?: string; user?: string; Host?: string; host?: string }
+interface SslStatus { issued: boolean; expires?: string | null }
 
 function portalAuth() { return { Authorization: 'Bearer ' + (localStorage.getItem('hp_portal_token') || '') }; }
 const api   = (p: string) => axios.get(p, { headers: portalAuth() });
@@ -38,12 +43,21 @@ export default function ClientPortal() {
   const [accounts, setAccounts]                 = useState<PortalAccount[]>([]);
   const [accountsLoaded, setAccountsLoaded]     = useState(false);
   const [selectedAccount, setSelectedAccount]   = useState<PortalAccount | null>(null);
-  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'dns' | 'email'>('details');
+  const [accountSubtab, setAccountSubtab]       = useState<'details' | 'dns' | 'email' | 'ftp' | 'databases' | 'ssl'>('details');
   const [usage, setUsage]                       = useState<{ disk_bytes: number } | null>(null);
   const [dnsRecords, setDnsRecords]             = useState<DnsRecord[]>([]);
   const [dnsForm, setDnsForm]                   = useState({ name: '', type: 'A', value: '', ttl: '3600' });
   const [emailAccts, setEmailAccts]             = useState<EmailAcct[]>([]);
   const [emailForm, setEmailForm]               = useState({ user: '', password: '' });
+  const [forwarders, setForwarders]             = useState<Forwarder[]>([]);
+  const [fwdForm, setFwdForm]                   = useState({ from: '', to: '' });
+  const [ftpUsers, setFtpUsers]                 = useState<FtpUser[]>([]);
+  const [ftpForm, setFtpForm]                   = useState({ username: '', password: '' });
+  const [dbs, setDbs]                           = useState<DbRow[]>([]);
+  const [dbUsers, setDbUsers]                   = useState<DbUserRow[]>([]);
+  const [dbForm, setDbForm]                     = useState({ name: '' });
+  const [dbUserForm, setDbUserForm]             = useState({ username: '', password: '', database: '' });
+  const [sslStatus, setSslStatus]               = useState<SslStatus | null>(null);
   const [hostingBusy, setHostingBusy]           = useState(false);
 
   // 2FA state
@@ -76,10 +90,14 @@ export default function ClientPortal() {
     // the matching slice — no point loading DNS for an account whose user
     // only wants to see the details pane.
     if (!selectedAccount) return;
-    setUsage(null); setDnsRecords([]); setEmailAccts([]);
-    if (accountSubtab === 'details') loadUsage(selectedAccount.id);
-    if (accountSubtab === 'dns')     loadDns(selectedAccount.domain);
-    if (accountSubtab === 'email')   loadEmailAccts(selectedAccount.domain);
+    setUsage(null); setDnsRecords([]); setEmailAccts([]); setForwarders([]);
+    setFtpUsers([]); setDbs([]); setDbUsers([]); setSslStatus(null);
+    if (accountSubtab === 'details')   loadUsage(selectedAccount.id);
+    if (accountSubtab === 'dns')       loadDns(selectedAccount.domain);
+    if (accountSubtab === 'email')     { loadEmailAccts(selectedAccount.domain); loadForwarders(selectedAccount.domain); }
+    if (accountSubtab === 'ftp')       loadFtpUsers();
+    if (accountSubtab === 'databases') { loadDbs(); loadDbUsers(); }
+    if (accountSubtab === 'ssl')       loadSslStatus(selectedAccount.domain);
   }, [selectedAccount, accountSubtab]);
 
   async function load() {
@@ -194,6 +212,114 @@ export default function ClientPortal() {
       setToast({ type: 'success', msg: 'Mailbox deleted' });
       if (selectedAccount) await loadEmailAccts(selectedAccount.domain);
     } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadForwarders(domain: string) {
+    try { const r = await api(`/api/portal/email/forwarders?domain=${encodeURIComponent(domain)}`); setForwarders(r.data); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed to load forwarders' }); }
+  }
+  async function addForwarder() {
+    if (!selectedAccount || !fwdForm.from || !fwdForm.to) return;
+    setHostingBusy(true);
+    try {
+      const from = fwdForm.from.includes('@') ? fwdForm.from : `${fwdForm.from}@${selectedAccount.domain}`;
+      await apost('/api/portal/email/forwarders', { from, to: fwdForm.to });
+      setToast({ type: 'success', msg: 'Forwarder created' });
+      setFwdForm({ from: '', to: '' });
+      await loadForwarders(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteForwarder(from: string) {
+    if (!await confirm(`Delete forwarder for ${from}?`)) return;
+    setHostingBusy(true);
+    try {
+      await adel(`/api/portal/email/forwarders/${encodeURIComponent(from)}`);
+      setToast({ type: 'success', msg: 'Forwarder removed' });
+      if (selectedAccount) await loadForwarders(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadFtpUsers() {
+    try { const r = await api('/api/portal/ftp/users'); setFtpUsers(r.data); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function addFtpUser() {
+    if (!selectedAccount || !ftpForm.username || !ftpForm.password) return;
+    if (ftpForm.password.length < 8) { setToast({ type: 'error', msg: 'Password must be ≥ 8 chars' }); return; }
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/ftp/users', { username: ftpForm.username, password: ftpForm.password, domain: selectedAccount.domain });
+      setToast({ type: 'success', msg: 'FTP user created' });
+      setFtpForm({ username: '', password: '' });
+      await loadFtpUsers();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteFtpUser(username: string) {
+    if (!await confirm(`Delete FTP user ${username}?`)) return;
+    setHostingBusy(true);
+    try {
+      await adel(`/api/portal/ftp/users/${encodeURIComponent(username)}`);
+      setToast({ type: 'success', msg: 'FTP user deleted' });
+      await loadFtpUsers();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadDbs()      { try { const r = await api('/api/portal/databases');        setDbs(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function loadDbUsers()  { try { const r = await api('/api/portal/databases/users');  setDbUsers(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function addDb() {
+    if (!dbForm.name) return;
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/databases', { name: dbForm.name });
+      setToast({ type: 'success', msg: 'Database created' }); setDbForm({ name: '' }); await loadDbs();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteDb(name: string) {
+    if (!await confirm(`Drop database ${name}? All data will be lost.`)) return;
+    setHostingBusy(true);
+    try { await adel(`/api/portal/databases/${encodeURIComponent(name)}`); setToast({ type: 'success', msg: 'Database dropped' }); await loadDbs(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function addDbUser() {
+    if (!dbUserForm.username || !dbUserForm.password) return;
+    if (dbUserForm.password.length < 8) { setToast({ type: 'error', msg: 'Password must be ≥ 8 chars' }); return; }
+    setHostingBusy(true);
+    try {
+      await apost('/api/portal/databases/users', dbUserForm);
+      setToast({ type: 'success', msg: 'DB user created' });
+      setDbUserForm({ username: '', password: '', database: '' });
+      await loadDbUsers();
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+  async function deleteDbUser(username: string) {
+    if (!await confirm(`Delete DB user ${username}?`)) return;
+    setHostingBusy(true);
+    try { await adel(`/api/portal/databases/users/${encodeURIComponent(username)}`); setToast({ type: 'success', msg: 'DB user deleted' }); await loadDbUsers(); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+    setHostingBusy(false);
+  }
+
+  async function loadSslStatus(domain: string) {
+    try { const r = await api(`/api/portal/ssl/${domain}/status`); setSslStatus(r.data); }
+    catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); }
+  }
+  async function issueSsl() {
+    if (!selectedAccount) return;
+    if (!await confirm(`Issue a Let's Encrypt certificate for ${selectedAccount.domain}? DNS must point to this server.`)) return;
+    setHostingBusy(true);
+    try {
+      await apost(`/api/portal/ssl/${selectedAccount.domain}`);
+      setToast({ type: 'success', msg: 'Certificate issued — your site now serves HTTPS' });
+      await loadSslStatus(selectedAccount.domain);
+    } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Issuance failed — check DNS' }); }
     setHostingBusy(false);
   }
 
@@ -402,11 +528,11 @@ export default function ClientPortal() {
                     <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
                       <Globe size={15} className="text-slate-500" />
                       <h3 className="font-semibold text-sm text-slate-900 dark:text-white">{selectedAccount.domain}</h3>
-                      <nav className="ml-auto flex items-center gap-1">
-                        {(['details', 'dns', 'email'] as const).map(t => (
+                      <nav className="ml-auto flex items-center gap-1 flex-wrap">
+                        {(['details', 'dns', 'email', 'ftp', 'databases', 'ssl'] as const).map(t => (
                           <button key={t} onClick={() => setAccountSubtab(t)}
                             className={`px-2.5 py-1 rounded text-xs font-medium ${accountSubtab === t ? 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
-                            {t.charAt(0).toUpperCase() + t.slice(1)}
+                            {t === 'ssl' ? 'SSL' : t === 'dns' ? 'DNS' : t.charAt(0).toUpperCase() + t.slice(1)}
                           </button>
                         ))}
                       </nav>
@@ -501,6 +627,164 @@ export default function ClientPortal() {
                             ))}
                           </tbody>
                         </table>
+
+                        <div className="border-t border-slate-200 dark:border-slate-700 pt-4 mt-4">
+                          <p className="text-sm font-medium mb-2">Forwarders</p>
+                          <p className="text-xs text-slate-500 mb-3">Forward mail addressed to one of your addresses on to another mailbox. Useful for catching mail at addresses you don't want a full inbox for.</p>
+                          <div className="grid grid-cols-12 gap-2 items-end">
+                            <div className="col-span-5">
+                              <label className="label text-xs">From</label>
+                              <div className="flex items-center">
+                                <input className="input rounded-r-none" placeholder="sales" value={fwdForm.from} onChange={e => setFwdForm(f => ({ ...f, from: e.target.value }))} />
+                                <span className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border border-l-0 border-slate-300 dark:border-slate-700 rounded-r text-xs text-slate-500">@{selectedAccount.domain}</span>
+                              </div>
+                            </div>
+                            <div className="col-span-5">
+                              <label className="label text-xs">Forward to</label>
+                              <input className="input" placeholder="you@elsewhere.com" value={fwdForm.to} onChange={e => setFwdForm(f => ({ ...f, to: e.target.value }))} />
+                            </div>
+                            <button className="btn-primary col-span-2 text-xs" onClick={addForwarder} disabled={hostingBusy}><Plus size={12} /> Add</button>
+                          </div>
+                          <table className="w-full text-sm mt-3">
+                            <tbody>
+                              {forwarders.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-slate-400 text-xs">No forwarders</td></tr>}
+                              {forwarders.map(f => (
+                                <tr key={f.from} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                  <td className="py-2 px-1 font-mono text-xs">{f.from}</td>
+                                  <td className="text-xs text-slate-500">→ {f.to}</td>
+                                  <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteForwarder(f.from)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'ftp' && (
+                      <div className="space-y-4">
+                        <p className="text-xs text-slate-500">FTP users are chrooted to <code className="font-mono">/var/www/{selectedAccount.domain}/public_html</code>. Your account username is prepended automatically (so a name like <code>web</code> becomes <code>{selectedAccount.username}_web</code>).</p>
+                        <div className="grid grid-cols-12 gap-2 items-end">
+                          <div className="col-span-4">
+                            <label className="label text-xs">Username</label>
+                            <div className="flex items-center">
+                              <span className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l text-xs text-slate-500 font-mono">{selectedAccount.username}_</span>
+                              <input className="input rounded-l-none font-mono" placeholder="suffix" value={ftpForm.username} onChange={e => setFtpForm(f => ({ ...f, username: e.target.value.replace(/[^a-z0-9_]/g, '') }))} />
+                            </div>
+                          </div>
+                          <div className="col-span-5">
+                            <label className="label text-xs">Password</label>
+                            <input className="input" type="password" placeholder="min 8 characters" value={ftpForm.password} onChange={e => setFtpForm(f => ({ ...f, password: e.target.value }))} />
+                          </div>
+                          <button className="btn-primary col-span-3 text-xs" onClick={addFtpUser} disabled={hostingBusy}><Plus size={12} /> Create</button>
+                        </div>
+                        <table className="w-full text-sm">
+                          <thead><tr className="text-xs text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                            <th className="text-left py-2 px-1">Username</th><th className="text-left">Home</th><th></th>
+                          </tr></thead>
+                          <tbody>
+                            {ftpUsers.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-slate-400 text-xs">No FTP users</td></tr>}
+                            {ftpUsers.map(u => (
+                              <tr key={u.username} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                <td className="py-2 px-1 font-mono text-xs">{u.username}</td>
+                                <td className="text-xs text-slate-500 font-mono truncate max-w-[260px]">{u.directory || '—'}</td>
+                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteFtpUser(u.username)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'databases' && (
+                      <div className="space-y-5">
+                        <p className="text-xs text-slate-500">Databases and users must start with your account username (<code className="font-mono">{selectedAccount.username}_</code>) — same cPanel-style namespacing.</p>
+
+                        <div>
+                          <p className="text-sm font-medium mb-2">Databases</p>
+                          <div className="grid grid-cols-12 gap-2 items-end mb-3">
+                            <div className="col-span-9">
+                              <label className="label text-xs">Database name</label>
+                              <div className="flex items-center">
+                                <span className="px-2 py-1.5 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l text-xs text-slate-500 font-mono">{selectedAccount.username}_</span>
+                                <input className="input rounded-l-none font-mono" placeholder="suffix" value={dbForm.name.replace(new RegExp('^' + selectedAccount.username + '_'), '')} onChange={e => setDbForm({ name: selectedAccount.username + '_' + e.target.value.replace(/[^a-z0-9_]/g, '') })} />
+                              </div>
+                            </div>
+                            <button className="btn-primary col-span-3 text-xs" onClick={addDb} disabled={hostingBusy || !dbForm.name}><Plus size={12} /> Create</button>
+                          </div>
+                          <table className="w-full text-sm">
+                            <tbody>
+                              {dbs.length === 0 && <tr><td colSpan={2} className="py-3 text-center text-slate-400 text-xs">No databases</td></tr>}
+                              {dbs.map(d => (
+                                <tr key={d.name} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                  <td className="py-2 px-1 font-mono text-xs">{d.name}</td>
+                                  <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteDb(d.name)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-medium mb-2">Database users</p>
+                          <div className="grid grid-cols-12 gap-2 items-end mb-3">
+                            <div className="col-span-3">
+                              <label className="label text-xs">Username</label>
+                              <div className="flex items-center">
+                                <span className="px-1.5 py-1.5 bg-slate-100 dark:bg-slate-800 border border-r-0 border-slate-300 dark:border-slate-700 rounded-l text-xs text-slate-500 font-mono">{selectedAccount.username}_</span>
+                                <input className="input rounded-l-none font-mono text-xs" placeholder="suffix" value={dbUserForm.username.replace(new RegExp('^' + selectedAccount.username + '_'), '')} onChange={e => setDbUserForm(f => ({ ...f, username: selectedAccount.username + '_' + e.target.value.replace(/[^a-z0-9_]/g, '') }))} />
+                              </div>
+                            </div>
+                            <div className="col-span-3">
+                              <label className="label text-xs">Password</label>
+                              <input className="input" type="password" placeholder="min 8" value={dbUserForm.password} onChange={e => setDbUserForm(f => ({ ...f, password: e.target.value }))} />
+                            </div>
+                            <div className="col-span-4">
+                              <label className="label text-xs">Grant on (optional)</label>
+                              <select className="input text-xs" value={dbUserForm.database} onChange={e => setDbUserForm(f => ({ ...f, database: e.target.value }))}>
+                                <option value="">— no grant —</option>
+                                {dbs.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                              </select>
+                            </div>
+                            <button className="btn-primary col-span-2 text-xs" onClick={addDbUser} disabled={hostingBusy || !dbUserForm.username || !dbUserForm.password}><Plus size={12} /> Create</button>
+                          </div>
+                          <table className="w-full text-sm">
+                            <tbody>
+                              {dbUsers.length === 0 && <tr><td colSpan={3} className="py-3 text-center text-slate-400 text-xs">No DB users</td></tr>}
+                              {dbUsers.map(u => {
+                                const name = u.User ?? u.user ?? '';
+                                const host = u.Host ?? u.host ?? '';
+                                return (
+                                  <tr key={`${name}@${host}`} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                    <td className="py-2 px-1 font-mono text-xs">{name}</td>
+                                    <td className="text-xs text-slate-500">@{host}</td>
+                                    <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteDbUser(name)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {accountSubtab === 'ssl' && (
+                      <div className="space-y-4 max-w-lg">
+                        <p className="text-xs text-slate-500">Issue a free Let's Encrypt certificate for <code className="font-mono">{selectedAccount.domain}</code>. DNS must already point to this server.</p>
+                        {sslStatus === null && <p className="text-sm text-slate-400">Loading certificate status…</p>}
+                        {sslStatus && !sslStatus.issued && (
+                          <button className="btn-primary text-sm" onClick={issueSsl} disabled={hostingBusy}>Issue certificate</button>
+                        )}
+                        {sslStatus?.issued && (
+                          <div className="card border-emerald-200 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-sm space-y-1">
+                            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300">
+                              <CheckCircle size={14} />
+                              <span className="font-medium">Certificate active</span>
+                            </div>
+                            {sslStatus.expires && <p className="text-xs text-emerald-700 dark:text-emerald-300">Expires: {sslStatus.expires}</p>}
+                            <button className="btn-secondary text-xs mt-2" onClick={issueSsl} disabled={hostingBusy}>Re-issue / renew</button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
