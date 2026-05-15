@@ -218,11 +218,36 @@ router.get('/users/:user/grants', async (req: AuthRequest, res: Response) => {
   finally { await conn?.end(); }
 });
 
+const VALID_PRIVILEGES = new Set([
+  'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP', 'RELOAD',
+  'SHUTDOWN', 'PROCESS', 'FILE', 'REFERENCES', 'INDEX', 'ALTER',
+  'SHOW DATABASES', 'SUPER', 'CREATE TEMPORARY TABLES', 'LOCK TABLES',
+  'EXECUTE', 'REPLICATION SLAVE', 'REPLICATION CLIENT', 'CREATE VIEW',
+  'SHOW VIEW', 'CREATE ROUTINE', 'ALTER ROUTINE', 'CREATE USER', 'EVENT',
+  'TRIGGER', 'CREATE TABLESPACE', 'ALL PRIVILEGES', 'ALL', 'USAGE',
+]);
+
+function validatePrivileges(privileges: unknown): string | null {
+  if (!Array.isArray(privileges) || !privileges.length) return 'privileges must be a non-empty array';
+  for (const p of privileges) {
+    if (typeof p !== 'string' || !VALID_PRIVILEGES.has(p.trim().toUpperCase())) {
+      return `Invalid privilege: ${p}`;
+    }
+  }
+  return null;
+}
+
+function safePrivList(privileges: string[]): string {
+  return privileges.map(p => p.trim().toUpperCase()).join(', ');
+}
+
 router.post('/users/:user/grants', async (req: AuthRequest, res: Response) => {
   const { user } = req.params;
   const { host = 'localhost', database, privileges } = req.body;
-  if (!privileges?.length) return res.status(400).json({ error: 'privileges required' });
-  const privList = (privileges as string[]).join(', ');
+  const privErr = validatePrivileges(privileges);
+  if (privErr) return res.status(400).json({ error: privErr });
+  if (database && !/^[a-zA-Z0-9_]+$/.test(database)) return res.status(400).json({ error: 'Invalid database name' });
+  const privList = safePrivList(privileges as string[]);
   const on = database ? `\`${database}\`.*` : '*.*';
   let conn;
   try {
@@ -237,7 +262,15 @@ router.post('/users/:user/grants', async (req: AuthRequest, res: Response) => {
 router.delete('/users/:user/grants', async (req: AuthRequest, res: Response) => {
   const { user } = req.params;
   const { host = 'localhost', database, privileges } = req.body;
-  const privList = privileges?.length ? (privileges as string[]).join(', ') : 'ALL PRIVILEGES';
+  if (database && !/^[a-zA-Z0-9_]+$/.test(database)) return res.status(400).json({ error: 'Invalid database name' });
+  let privList: string;
+  if (privileges?.length) {
+    const privErr = validatePrivileges(privileges);
+    if (privErr) return res.status(400).json({ error: privErr });
+    privList = safePrivList(privileges as string[]);
+  } else {
+    privList = 'ALL PRIVILEGES';
+  }
   const on = database ? `\`${database}\`.*` : '*.*';
   let conn;
   try {
@@ -316,7 +349,11 @@ router.post('/remote-access', async (req: AuthRequest, res: Response) => {
   if (!user || !host) return res.status(400).json({ error: 'user and host required' });
   if (!/^[a-zA-Z0-9_]+$/.test(user)) return res.status(400).json({ error: 'Invalid username' });
   if (!/^[a-zA-Z0-9._%*-]+$/.test(host)) return res.status(400).json({ error: 'Invalid host (use % for wildcard)' });
-  const privList = (Array.isArray(privileges) ? privileges : ['ALL PRIVILEGES']).join(', ');
+  if (database && database !== '*' && !/^[a-zA-Z0-9_]+$/.test(database)) return res.status(400).json({ error: 'Invalid database name' });
+  const privArr = Array.isArray(privileges) ? privileges : ['ALL PRIVILEGES'];
+  const privErr = validatePrivileges(privArr);
+  if (privErr) return res.status(400).json({ error: privErr });
+  const privList = safePrivList(privArr);
   const on = database && database !== '*' ? `\`${database}\`.*` : '*.*';
   let conn;
   try {
