@@ -3,8 +3,9 @@ import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import multer from 'multer';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, readFileSync, promises as fsp } from 'fs';
 import db from '../db';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -288,6 +289,76 @@ router.delete('/auto-updates/:domain', async (req: Request, res: Response) => {
   db.prepare('DELETE FROM wp_auto_updates WHERE domain = ?').run(req.params.domain);
   await syncWpCrontab();
   res.json({ success: true });
+});
+
+/* ── Uninstall WordPress from a domain ───────────────────────── */
+
+// Standard WordPress file/dir names — only these get removed, so anything
+// custom the user dropped into public_html (other apps, static files,
+// /.well-known) is preserved. Glob like wp-* would also catch unrelated
+// directories the operator may have named that way, so we list explicitly.
+const WP_PATHS = [
+  'wp-admin', 'wp-content', 'wp-includes',
+  'index.php', 'license.txt', 'readme.html', 'xmlrpc.php',
+  'wp-activate.php', 'wp-blog-header.php', 'wp-comments-post.php',
+  'wp-config.php', 'wp-config-sample.php', 'wp-cron.php', 'wp-links-opml.php',
+  'wp-load.php', 'wp-login.php', 'wp-mail.php', 'wp-settings.php',
+  'wp-signup.php', 'wp-trackback.php',
+];
+
+const adminOnly = requireRole('superadmin', 'admin');
+
+function parseWpConfigDb(installDir: string): string | null {
+  // Pull DB_NAME out of wp-config.php so we know which database to drop on
+  // uninstall. Returns null if the file is missing or the constant isn't set
+  // — in that case we just skip the DB drop.
+  try {
+    const content = readFileSync(path.join(installDir, 'wp-config.php'), 'utf8');
+    const m = content.match(/define\s*\(\s*['"]DB_NAME['"]\s*,\s*['"]([^'"]+)['"]\s*\)/);
+    return m && /^[a-zA-Z0-9_]+$/.test(m[1]) ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+router.delete('/:domain', adminOnly, async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const dropDb = req.query.dropDb !== '0' && req.query.dropDb !== 'false';
+
+  const installDir = wpPath(domain);
+  if (!existsSync(path.join(installDir, 'wp-includes', 'version.php'))) {
+    return res.status(404).json({ error: 'No WordPress install found at this domain' });
+  }
+
+  const dbName = dropDb ? parseWpConfigDb(installDir) : null;
+
+  try {
+    // Remove WP files / dirs one by one — never `rm -rf installDir` because
+    // public_html may also hold non-WordPress content the operator wants.
+    for (const name of WP_PATHS) {
+      await fsp.rm(path.join(installDir, name), { recursive: true, force: true });
+    }
+    // Drop the WP database if we found one and the caller didn't opt out.
+    // The DB user is left in place — it may be reused for other databases,
+    // and the operator can clean it up from the Database Manager.
+    let dbDropped = false;
+    if (dbName) {
+      const dbEnv: NodeJS.ProcessEnv = { ...process.env };
+      if (process.env.DB_ROOT_PASS) dbEnv.MYSQL_PWD = process.env.DB_ROOT_PASS;
+      const dbUser = process.env.DB_ROOT_USER || 'root';
+      await execFileAsync('mysql', [`-u${dbUser}`, '-e', `DROP DATABASE IF EXISTS \`${dbName}\``], { env: dbEnv });
+      dbDropped = true;
+    }
+    // Forget any auto-update schedule for this domain so syncWpCrontab
+    // doesn't keep trying to update files that no longer exist.
+    db.prepare('DELETE FROM wp_auto_updates WHERE domain = ?').run(domain);
+    await syncWpCrontab();
+
+    res.json({ success: true, dbDropped, dbName, domain });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;

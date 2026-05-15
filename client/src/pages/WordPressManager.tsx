@@ -22,6 +22,9 @@ export default function WordPressManager() {
   const [uploadOutput, setUploadOutput] = useState('');
   const [pluginSearch, setPluginSearch] = useState('');
   const [themeSearch, setThemeSearch] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [deleteDropDb, setDeleteDropDb] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [autoUpdateSaving, setAutoUpdateSaving] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const pluginZipRef = useRef<HTMLInputElement>(null);
@@ -104,6 +107,22 @@ export default function WordPressManager() {
     const d = await r.json();
     setOutput(d.output || d.error || 'Done');
     setLoading(false);
+  }
+
+  async function uninstallSite() {
+    if (deleteConfirm !== selected) return;
+    setDeleting(true);
+    try {
+      const r = await fetchApi(`/api/wordpress/${selected}?dropDb=${deleteDropDb ? '1' : '0'}`, { method: 'DELETE' });
+      const d = await r.json();
+      if (d.error) { toast.error(d.error); return; }
+      toast.success(`Removed WordPress from ${selected}${d.dbDropped ? ` (dropped database ${d.dbName})` : ''}`);
+      setDeleteConfirm('');
+      setSelected('');
+      setInfo(null); setPlugins([]); setThemes([]);
+      const sites = await fetchApi('/api/wordpress/sites').then(r => r.json());
+      setSites(Array.isArray(sites) ? sites : []);
+    } finally { setDeleting(false); }
   }
 
   return (
@@ -277,15 +296,41 @@ export default function WordPressManager() {
           )}
 
           {tab === 'tools' && (
-            <div className="card space-y-4">
-              <p className="text-sm font-medium">Search & Replace (URL migration)</p>
-              <p className="text-xs text-slate-500">Use when moving from staging to production. Runs <code>wp search-replace</code> across all tables.</p>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="label">Search</label><input className="input font-mono" placeholder="http://staging.example.com" value={srForm.search} onChange={e => setSrForm(f => ({ ...f, search: e.target.value }))} /></div>
-                <div><label className="label">Replace</label><input className="input font-mono" placeholder="https://example.com" value={srForm.replace} onChange={e => setSrForm(f => ({ ...f, replace: e.target.value }))} /></div>
+            <div className="space-y-4">
+              <div className="card space-y-4">
+                <p className="text-sm font-medium">Search & Replace (URL migration)</p>
+                <p className="text-xs text-slate-500">Use when moving from staging to production. Runs <code>wp search-replace</code> across all tables.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="label">Search</label><input className="input font-mono" placeholder="http://staging.example.com" value={srForm.search} onChange={e => setSrForm(f => ({ ...f, search: e.target.value }))} /></div>
+                  <div><label className="label">Replace</label><input className="input font-mono" placeholder="https://example.com" value={srForm.replace} onChange={e => setSrForm(f => ({ ...f, replace: e.target.value }))} /></div>
+                </div>
+                <button className="btn-primary" onClick={searchReplace} disabled={loading}>Run Search-Replace</button>
+                {output && <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{output}</pre>}
               </div>
-              <button className="btn-primary" onClick={searchReplace} disabled={loading}>Run Search-Replace</button>
-              {output && <pre className="bg-slate-900 text-emerald-400 text-xs p-3 rounded-lg max-h-40 overflow-y-auto whitespace-pre-wrap">{output}</pre>}
+
+              <div className="card border-red-300 space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-red-700 dark:text-red-300">Danger zone — Uninstall WordPress</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Removes all WordPress files (wp-admin, wp-content, wp-includes, wp-*.php, index.php, etc.) from <code className="font-mono">/var/www/{selected}/public_html</code>. Anything you added that isn't a standard WP file stays. The Apache vhost, SSL cert, and DNS records are not touched — manage those from the Domain or Account page.
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={deleteDropDb} onChange={e => setDeleteDropDb(e.target.checked)} />
+                  Also drop the WordPress database (from <code className="font-mono">wp-config.php</code>'s <code>DB_NAME</code>). The database user is left in place.
+                </label>
+                <div>
+                  <label className="label">Type the domain to confirm: <code className="font-mono">{selected}</code></label>
+                  <input className="input font-mono" placeholder={selected} value={deleteConfirm} onChange={e => setDeleteConfirm(e.target.value)} />
+                </div>
+                <button
+                  className="btn-danger"
+                  onClick={uninstallSite}
+                  disabled={deleting || deleteConfirm !== selected}
+                >
+                  <Trash2 size={14} /> {deleting ? 'Uninstalling…' : 'Uninstall WordPress'}
+                </button>
+              </div>
             </div>
           )}
 
