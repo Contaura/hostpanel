@@ -190,8 +190,6 @@ Alias /roundcube /usr/share/roundcubemail
     Options -Indexes
     AllowOverride All
     Require all granted
-    php_value upload_max_filesize 10M
-    php_value post_max_size 10M
 </Directory>
 RCUBE
   echo "  Roundcube webmail configured at /roundcube"
