@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Globe, Shield, Plus, Trash2, ShieldCheck, Edit2, Check, X, RefreshCw, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface DNSRecord { name: string; type: string; value: string; ttl: string }
 
@@ -16,6 +17,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function DomainManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [domains, setDomains] = useState<string[]>([]);
   const [tab, setTab] = useState<'domains' | 'dns' | 'ssl' | 'dnssec'>('domains');
   const [showForm, setShowForm] = useState(false);
@@ -57,7 +59,7 @@ export default function DomainManager() {
   }
 
   async function deleteDomain(domain: string) {
-    if (!confirm(`Remove domain ${domain}?`)) return;
+    if (!await confirm(`Remove domain ${domain}?`)) return;
     setDeletingDomain(domain);
     try { await axios.delete(`/api/domains/domains/${domain}`); toast.success(`${domain} removed`); loadDomains(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -107,7 +109,7 @@ export default function DomainManager() {
   }
 
   async function unsignZone(domain: string) {
-    if (!confirm(`Remove DNSSEC signing for "${domain}"?`)) return;
+    if (!await confirm(`Remove DNSSEC signing for "${domain}"?`)) return;
     setDnssecLoading(domain);
     try { await axios.post(`/api/domains/dnssec/${domain}/unsign`); toast.success('DNSSEC removed'); loadDnssecStatus(domain); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

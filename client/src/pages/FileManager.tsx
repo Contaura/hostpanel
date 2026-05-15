@@ -6,6 +6,7 @@ import {
   Archive, PackageOpen, Scissors, Clipboard, PenLine,
 } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface FileItem {
   name: string; type: 'file' | 'directory';
@@ -20,6 +21,7 @@ function formatSize(b: number) {
 
 export default function FileManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [currentPath, setCurrentPath] = useState('/');
   const [items, setItems] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,7 +65,7 @@ export default function FileManager() {
   }
 
   async function deleteItem(item: FileItem) {
-    if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
+    if (!await confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
     try {
       await axios.delete('/api/files/delete', { data: { path: `${currentPath}/${item.name}` } });
       toast.success(`"${item.name}" deleted`); loadDir(currentPath);
@@ -137,7 +139,7 @@ export default function FileManager() {
   }
 
   async function bulkDelete() {
-    if (!selected.size || !confirm(`Delete ${selected.size} item(s)? This cannot be undone.`)) return;
+    if (!selected.size || !await confirm(`Delete ${selected.size} item(s)? This cannot be undone.`)) return;
     const paths = Array.from(selected).map(n => `${currentPath}/${n}`);
     try {
       await axios.post('/api/files/bulk-delete', { paths });

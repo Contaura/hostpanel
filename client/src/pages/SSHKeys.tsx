@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Key, Plus, Trash2, Copy, User, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface SSHKey {
   id: number;
@@ -17,6 +18,7 @@ type Tab = 'admin' | 'account';
 
 export default function SSHKeys() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('admin');
   const [keys, setKeys] = useState<SSHKey[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -53,7 +55,7 @@ export default function SSHKeys() {
   }
 
   async function remove(id: number) {
-    if (!confirm('Remove this SSH key? You may lose SSH access if it\'s the only key.')) return;
+    if (!await confirm('Remove this SSH key? You may lose SSH access if it\'s the only key.')) return;
     setRemoving(id);
     try {
       await axios.delete(`/api/sshkeys/${id}`);
@@ -80,7 +82,7 @@ export default function SSHKeys() {
   }
 
   async function removeAcctKey(id: number) {
-    if (!confirm('Remove this SSH key?')) return;
+    if (!await confirm('Remove this SSH key?')) return;
     setRemovingAcct(id);
     try { await axios.delete(`/api/sshkeys/account/${acctUsername.trim()}/${id}`); toast.success('Removed'); loadAcctKeys(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

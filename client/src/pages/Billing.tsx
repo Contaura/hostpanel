@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { DollarSign, Users, Server, AlertTriangle, Plus, CheckCircle, Clock, XCircle, RefreshCw, CreditCard, ExternalLink, Download, Mail, Lock, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 function token() { return localStorage.getItem('hp_token') || ''; }
 const authHeaders = () => ({ Authorization: 'Bearer ' + token() });
@@ -54,6 +55,7 @@ function fmt(n: number, currency = 'USD') {
 
 export default function Billing() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<'overview' | 'invoices' | 'clients' | 'settings'>('overview');
   const [stripeConfigured, setStripeConfigured] = useState(false);
@@ -217,7 +219,7 @@ export default function Billing() {
   }
 
   async function deleteClient(id: number) {
-    if (!confirm('Delete this client? All related invoices will also be deleted.')) return;
+    if (!await confirm('Delete this client? All related invoices will also be deleted.')) return;
     try { await axios.delete(`/api/billing/clients/${id}`); toast.success('Client deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }
@@ -245,7 +247,7 @@ export default function Billing() {
   }
 
   async function deleteInvoice(id: number) {
-    if (!confirm('Delete this invoice?')) return;
+    if (!await confirm('Delete this invoice?')) return;
     try { await axios.delete(`/api/billing/invoices/${id}`); toast.success('Invoice deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
   }

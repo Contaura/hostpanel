@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Package, Plus, Trash2, Edit3, Check, X, HardDrive, Wifi, Mail, Database, Globe, FolderUp, Shield } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Plan {
   id: number;
@@ -36,6 +37,7 @@ const CYCLE_COLORS: Record<string, string> = {
 
 export default function Plans() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Plan | null>(null);
@@ -75,7 +77,7 @@ export default function Plans() {
   }
 
   async function deletePlan(id: number) {
-    if (!confirm('Delete this plan? Existing accounts using it will be unaffected.')) return;
+    if (!await confirm('Delete this plan? Existing accounts using it will be unaffected.')) return;
     setDeleting(id);
     try { await axios.delete(`/api/billing/plans/${id}`); toast.success('Plan deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

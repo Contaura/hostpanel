@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { ToastProvider } from './components/Toast';
+import { ConfirmProvider } from './context/ConfirmContext';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import NotFound from './pages/NotFound';
@@ -174,7 +175,9 @@ export default function App() {
       <ThemeProvider>
         <AuthProvider>
           <ToastProvider>
-            <AppRoutes />
+            <ConfirmProvider>
+              <AppRoutes />
+            </ConfirmProvider>
           </ToastProvider>
         </AuthProvider>
       </ThemeProvider>

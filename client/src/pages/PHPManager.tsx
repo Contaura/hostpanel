@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Code2, Settings, Package, Save, Sliders, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface PHPInfo {
   version: string;
@@ -25,6 +26,7 @@ const SETTING_LABELS: Record<string, { label: string; hint: string; type: 'text'
 
 export default function PHPManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'info' | 'settings' | 'extensions' | 'domain-ini' | 'fpm-pool'>('info');
   const [info, setInfo] = useState<PHPInfo | null>(null);
   const [settings, setSettings] = useState<Settings>({});
@@ -85,7 +87,7 @@ export default function PHPManager() {
   }
 
   async function deleteFpmPool() {
-    if (!confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
+    if (!await confirm(`Delete PHP-FPM pool for ${fpmDomain}?`)) return;
     setDeletingPool(true);
     try {
       await axios.delete(`/api/php/fpm-pool/${fpmDomain.trim()}`);

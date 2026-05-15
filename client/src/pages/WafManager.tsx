@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Shield, Ban, FileText, Power, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/waf${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 export default function WafManager() {
   const toast = useToast();
@@ -21,14 +20,14 @@ export default function WafManager() {
 
   async function load() {
     try {
-      const [w, f] = await Promise.all([api('/modsec').then(r => r.json()), api('/fail2ban').then(r => r.json())]);
+      const [w, f] = await Promise.all([fetchApi('/api/waf/modsec').then(r => r.json()), fetchApi('/api/waf/fail2ban').then(r => r.json())]);
       setWaf(w); setF2b(f);
     } finally { setPageLoading(false); }
   }
 
   async function loadRules() {
     if (rulesLoaded) return;
-    const r = await api('/modsec/rules');
+    const r = await fetchApi('/api/waf/modsec/rules');
     setRules(await r.json());
     setRulesLoaded(true);
   }
@@ -37,7 +36,7 @@ export default function WafManager() {
   useEffect(() => { if (tab === 'rules') loadRules(); }, [tab]);
 
   async function setWafMode(mode: string) {
-    const r = await api('/modsec', { method: 'PUT', body: JSON.stringify({ mode }) });
+    const r = await fetchApi('/api/waf/modsec', { method: 'PUT', body: JSON.stringify({ mode }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`ModSecurity set to ${mode}`); load(); }
@@ -45,14 +44,14 @@ export default function WafManager() {
 
   async function loadJail(name: string) {
     if (jailDetail[name]) return;
-    const r = await api(`/fail2ban/${name}`);
+    const r = await fetchApi(`/api/waf/fail2ban/${name}`);
     const data = await r.json();
     setJailDetail(j => ({ ...j, [name]: data }));
   }
 
   async function toggleJail(name: string, currentlyRunning: boolean) {
     setTogglingJail(name);
-    const r = await api(`/fail2ban/${name}/toggle`, { method: 'POST', body: JSON.stringify({ action: currentlyRunning ? 'stop' : 'start' }) });
+    const r = await fetchApi(`/api/waf/fail2ban/${name}/toggle`, { method: 'POST', body: JSON.stringify({ action: currentlyRunning ? 'stop' : 'start' }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`Jail ${name} ${currentlyRunning ? 'stopped' : 'started'}`); load(); }
@@ -60,14 +59,14 @@ export default function WafManager() {
   }
 
   async function ban() {
-    const r = await api('/fail2ban/ban', { method: 'POST', body: JSON.stringify({ jail: banJail, ip: banIp }) });
+    const r = await fetchApi('/api/waf/fail2ban/ban', { method: 'POST', body: JSON.stringify({ jail: banJail, ip: banIp }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`Banned ${banIp}`); setBanIp(''); load(); }
   }
 
   async function unban() {
-    const r = await api('/fail2ban/unban', { method: 'POST', body: JSON.stringify({ jail: f2b?.jails?.[0] || 'sshd', ip: unbanIp }) });
+    const r = await fetchApi('/api/waf/fail2ban/unban', { method: 'POST', body: JSON.stringify({ jail: f2b?.jails?.[0] || 'sshd', ip: unbanIp }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`Unbanned ${unbanIp}`); setUnbanIp(''); load(); }

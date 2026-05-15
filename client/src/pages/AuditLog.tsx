@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Search, Trash2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/audit-log${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function AuditLog() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -19,7 +20,7 @@ export default function AuditLog() {
       const params = new URLSearchParams({ page: String(p), per_page: String(perPage) });
       if (search) params.set('search', search);
       if (user) params.set('user', user);
-      const r = await api(`/?${params}`);
+      const r = await fetchApi(`/api/audit-log/?${params}`);
       const d = await r.json();
       setLogs(Array.isArray(d.logs) ? d.logs : []);
       setTotal(d.total || 0);
@@ -30,8 +31,8 @@ export default function AuditLog() {
   useEffect(() => { load(); }, []);
 
   async function clearOld() {
-    if (!confirm('Delete all audit log entries older than 90 days?')) return;
-    await api('/clear', { method: 'DELETE' });
+    if (!await confirm('Delete all audit log entries older than 90 days?')) return;
+    await fetchApi('/api/audit-log/clear', { method: 'DELETE' });
     toast.success('Old logs cleared');
     load();
   }

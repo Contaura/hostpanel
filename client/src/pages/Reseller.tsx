@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Edit2, Building2, BarChart2 } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/resellers${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 const blank = { username: '', email: '', password: '', company: '', alloc_disk: 102400, alloc_bandwidth: 1024000, alloc_accounts: 10, alloc_emails: 50, alloc_dbs: 20 };
 
 export default function Reseller() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [resellers, setResellers] = useState<any[]>([]);
   const [form, setForm] = useState<any>(blank);
   const [editing, setEditing] = useState<any>(null);
@@ -23,7 +24,7 @@ export default function Reseller() {
 
   async function load() {
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/resellers/');
       setResellers(Array.isArray(await r.json()) ? await r.clone().json() : []);
     } finally { setPageLoading(false); }
   }
@@ -31,7 +32,7 @@ export default function Reseller() {
   async function create() {
     setCreating(true);
     try {
-      const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+      const r = await fetchApi('/api/resellers/', { method: 'POST', body: JSON.stringify(form) });
       const d = await r.json();
       if (d.error) { toast.error(d.error); return; }
       toast.success('Reseller created');
@@ -43,7 +44,7 @@ export default function Reseller() {
   async function update() {
     setUpdating(true);
     try {
-      const r = await api(`/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
+      const r = await fetchApi(`/api/resellers/${editing.id}`, { method: 'PUT', body: JSON.stringify(editing) });
       const d = await r.json();
       if (d.error) { toast.error(d.error); return; }
       toast.success('Updated');
@@ -53,10 +54,10 @@ export default function Reseller() {
   }
 
   async function del(id: number) {
-    if (!confirm('Delete reseller? This removes the login account.')) return;
+    if (!await confirm('Delete reseller? This removes the login account.')) return;
     setDeleting(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/resellers/${id}`, { method: 'DELETE' });
       load();
     } finally { setDeleting(null); }
   }
@@ -64,7 +65,7 @@ export default function Reseller() {
   async function loadSummary(id: number) {
     if (showSummary === id) { setShowSummary(null); return; }
     try {
-      const r = await api(`/${id}/summary`);
+      const r = await fetchApi(`/api/resellers/${id}/summary`);
       const d = await r.json();
       setSummaries(p => ({ ...p, [id]: d }));
       setShowSummary(id);

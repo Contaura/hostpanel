@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Play, Copy, GitBranch, Pencil } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/git-deploy${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 const blank = { name: '', repo_url: '', branch: 'main', deploy_path: '', command: 'git pull && npm install && npm run build', auto_deploy: true };
 
 export default function GitDeploy() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [deps, setDeps] = useState<any[]>([]);
   const [form, setForm] = useState(blank);
   const [adding, setAdding] = useState(false);
@@ -22,13 +23,13 @@ export default function GitDeploy() {
 
   async function load() {
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/git-deploy/');
       setDeps(await r.json());
     } finally { setPageLoading(false); }
   }
 
   async function save() {
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/git-deploy/', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Deployment created');
@@ -40,7 +41,7 @@ export default function GitDeploy() {
     setDeploying(id);
     setLogs(l => ({ ...l, [id]: 'Deploying…' }));
     try {
-      const r = await api(`/${id}/deploy`, { method: 'POST' });
+      const r = await fetchApi(`/api/git-deploy/${id}/deploy`, { method: 'POST' });
       const d = await r.json();
       setLogs(l => ({ ...l, [id]: d.output || d.error || 'Done' }));
       if (d.error) toast.error(d.error);
@@ -49,16 +50,16 @@ export default function GitDeploy() {
   }
 
   async function del(id: number) {
-    if (!confirm('Delete deployment?')) return;
+    if (!await confirm('Delete deployment?')) return;
     setDeletingDep(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/git-deploy/${id}`, { method: 'DELETE' });
       load();
     } finally { setDeletingDep(null); }
   }
 
   async function update(id: number) {
-    const r = await api(`/${id}`, { method: 'PUT', body: JSON.stringify(editForm) });
+    const r = await fetchApi(`/api/git-deploy/${id}`, { method: 'PUT', body: JSON.stringify(editForm) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Deployment updated');

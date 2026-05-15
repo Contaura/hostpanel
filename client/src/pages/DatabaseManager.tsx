@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent, useRef } from 'react';
 import axios from 'axios';
 import { Database, User, Plus, Trash2, Download, Upload, Shield, ExternalLink, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface DB { name: string; size_mb: number | null }
 interface DBUser { user: string; host: string }
@@ -13,6 +14,7 @@ const ALL_PRIVS = ['SELECT','INSERT','UPDATE','DELETE','CREATE','DROP','INDEX','
 
 export default function DatabaseManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [databases, setDatabases] = useState<DB[]>([]);
   const [users, setUsers] = useState<DBUser[]>([]);
   const [tab, setTab] = useState<'databases' | 'users' | 'slow-query' | 'remote-access'>('databases');
@@ -64,7 +66,7 @@ export default function DatabaseManager() {
   }
 
   async function deleteDb(name: string) {
-    if (!confirm(`Drop database "${name}"? All data will be permanently deleted.`)) return;
+    if (!await confirm(`Drop database "${name}"? All data will be permanently deleted.`)) return;
     setDeletingDb(name);
     try { await axios.delete(`/api/databases/databases/${name}`); toast.success(`Database "${name}" dropped`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -82,7 +84,7 @@ export default function DatabaseManager() {
   }
 
   async function deleteUser(user: string, host: string) {
-    if (!confirm(`Delete user "${user}"?`)) return;
+    if (!await confirm(`Delete user "${user}"?`)) return;
     setDeletingUser(user);
     try { await axios.delete(`/api/databases/users/${user}`, { params: { host } }); toast.success(`User "${user}" deleted`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }
@@ -117,7 +119,7 @@ export default function DatabaseManager() {
 
   async function revokeAll() {
     if (!privTarget) return;
-    if (!confirm('Revoke ALL privileges for this user?')) return;
+    if (!await confirm('Revoke ALL privileges for this user?')) return;
     await axios.delete(`/api/databases/users/${privTarget.user}/grants`, { data: { host: privTarget.host } });
     toast.success('All privileges revoked');
     openPrivEditor(privTarget);
@@ -141,7 +143,7 @@ export default function DatabaseManager() {
   }
 
   async function revokeRemoteAccess(user: string, host: string) {
-    if (!confirm(`Revoke remote access for ${user}@${host}?`)) return;
+    if (!await confirm(`Revoke remote access for ${user}@${host}?`)) return;
     setRevokingAccess(`${user}@${host}`);
     try {
       await axios.delete(`/api/databases/remote-access/${user}/${encodeURIComponent(host)}`);

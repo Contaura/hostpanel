@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, ArrowRight, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/parked-domains${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function ParkedDomains() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [parked, setParked] = useState<any[]>([]);
   const [domains, setDomains] = useState<any[]>([]);
   const [adding, setAdding] = useState(false);
@@ -21,29 +20,28 @@ export default function ParkedDomains() {
   async function load() {
     try {
       await Promise.all([
-        api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : [])),
-        fetch('/api/domains/domains', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
-          .then(r => r.json()).then(d => setDomains(Array.isArray(d) ? d : [])),
+        fetchApi('/api/parked-domains/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : [])),
+        fetchApi('/api/domains/domains').then(r => r.json()).then(d => setDomains(Array.isArray(d) ? d : [])),
       ]);
     } finally { setPageLoading(false); }
   }
 
   async function add() {
     if (!form.domain || !form.primary_domain) return;
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/parked-domains/', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success(`${form.domain} parked`);
     setAdding(false);
     setForm({ domain: '', primary_domain: '' });
-    api('/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : []));
+    fetchApi('/api/parked-domains/').then(r => r.json()).then(d => setParked(Array.isArray(d) ? d : []));
   }
 
   async function del(id: number, domain: string) {
-    if (!confirm(`Remove parked domain ${domain}?`)) return;
+    if (!await confirm(`Remove parked domain ${domain}?`)) return;
     setDeleting(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/parked-domains/${id}`, { method: 'DELETE' });
       setParked(p => p.filter(x => x.id !== id));
       toast.success('Removed');
     } finally { setDeleting(null); }

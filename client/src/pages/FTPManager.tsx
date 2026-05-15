@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent, Fragment } from 'react';
 import axios from 'axios';
 import { FolderUp, Plus, Trash2, Key, Gauge, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface FTPUser { username: string; directory: string }
 interface FTPLimits { max_rate: string }
@@ -11,6 +12,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 hover:bg-sla
 
 export default function FTPManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [users, setUsers] = useState<FTPUser[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [passTarget, setPassTarget] = useState<string | null>(null);
@@ -46,7 +48,7 @@ export default function FTPManager() {
   }
 
   async function deleteUser(username: string) {
-    if (!confirm(`Delete FTP user "${username}"?`)) return;
+    if (!await confirm(`Delete FTP user "${username}"?`)) return;
     setDeleting(username);
     try { await axios.delete(`/api/ftp/users/${username}`); toast.success(`"${username}" deleted`); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Download, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/php-domains${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 export default function PhpVersions() {
   const toast = useToast();
@@ -23,7 +22,7 @@ export default function PhpVersions() {
 
   async function loadPhp() {
     try {
-      const [v, a] = await Promise.all([api('/versions').then(r => r.json()), api('/').then(r => r.json())]);
+      const [v, a] = await Promise.all([fetchApi('/api/php-domains/versions').then(r => r.json()), fetchApi('/api/php-domains/').then(r => r.json())]);
       setVersions(Array.isArray(v) ? v : []);
       setAssignments(Array.isArray(a) ? a : []);
       if (Array.isArray(v) && v.length) setPhpVer(v[0]);
@@ -32,7 +31,7 @@ export default function PhpVersions() {
 
   async function assign() {
     if (!domain || !phpVer) return;
-    const r = await api('/', { method: 'POST', body: JSON.stringify({ domain, php_version: phpVer }) });
+    const r = await fetchApi('/api/php-domains/', { method: 'POST', body: JSON.stringify({ domain, php_version: phpVer }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`${domain} → PHP ${phpVer}`); setDomain(''); loadPhp(); }
@@ -41,24 +40,24 @@ export default function PhpVersions() {
   async function removeAssign(d: string) {
     setRemovingAssign(d);
     try {
-      await api(`/${d}`, { method: 'DELETE' });
+      await fetchApi(`/api/php-domains/${d}`, { method: 'DELETE' });
       setAssignments(a => a.filter(x => x.domain !== d));
     } finally { setRemovingAssign(null); }
   }
 
   async function loadNode() {
-    const r = await api('/node-versions');
+    const r = await fetchApi('/api/php-domains/node-versions');
     setNodeInfo(await r.json());
   }
 
   async function loadPython() {
-    const r = await api('/python-versions');
+    const r = await fetchApi('/api/php-domains/python-versions');
     setPyInfo(await r.json());
   }
 
   async function installNode(version: string) {
     setInstalling(true); setInstallOutput('Installing…');
-    const r = await api('/node-install', { method: 'POST', body: JSON.stringify({ version }) });
+    const r = await fetchApi('/api/php-domains/node-install', { method: 'POST', body: JSON.stringify({ version }) });
     const d = await r.json();
     setInstallOutput(d.output || d.error || 'Done');
     setInstalling(false);
@@ -67,7 +66,7 @@ export default function PhpVersions() {
 
   async function installPython(version: string) {
     setInstalling(true); setInstallOutput('Installing…');
-    const r = await api('/python-install', { method: 'POST', body: JSON.stringify({ version }) });
+    const r = await fetchApi('/api/php-domains/python-install', { method: 'POST', body: JSON.stringify({ version }) });
     const d = await r.json();
     setInstallOutput(d.output || d.error || 'Done');
     setInstalling(false);

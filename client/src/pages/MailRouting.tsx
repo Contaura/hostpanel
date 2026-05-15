@@ -1,13 +1,12 @@
 import { useEffect, useState, Fragment } from 'react';
 import { Plus, Trash2, ExternalLink, Users, ChevronDown, ChevronUp, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/mail-routing${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function MailRouting() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'transport' | 'lists' | 'webmail'>('transport');
   const [rules, setRules] = useState<any[]>([]);
   const [lists, setLists] = useState<any[]>([]);
@@ -31,21 +30,21 @@ export default function MailRouting() {
 
   async function loadRules() {
     try {
-      const r = await api('/'); setRules(Array.isArray(await r.json()) ? await r.clone().json() : []);
+      const r = await fetchApi('/api/mail-routing/'); setRules(Array.isArray(await r.json()) ? await r.clone().json() : []);
     } finally { setPageLoading(false); }
   }
   async function loadLists() {
-    const r = await api('/lists'); setLists(Array.isArray(await r.json()) ? await r.clone().json() : []);
+    const r = await fetchApi('/api/mail-routing/lists'); setLists(Array.isArray(await r.json()) ? await r.clone().json() : []);
   }
   async function loadWebmail() {
-    const r = await api('/webmail'); setWebmail(await r.json());
+    const r = await fetchApi('/api/mail-routing/webmail'); setWebmail(await r.json());
   }
 
   async function addRule() {
     if (!newRule.domain || !newRule.transport) return;
     setRuleSubmitting(true);
     try {
-      const r = await api('/', { method: 'POST', body: JSON.stringify(newRule) });
+      const r = await fetchApi('/api/mail-routing/', { method: 'POST', body: JSON.stringify(newRule) });
       const d = await r.json();
       if (d.error) { toast.error(d.error); return; }
       toast.success('Transport rule added');
@@ -57,7 +56,7 @@ export default function MailRouting() {
   async function deleteRule(domain: string) {
     setDeletingRule(domain);
     try {
-      await api(`/${domain}`, { method: 'DELETE' });
+      await fetchApi(`/api/mail-routing/${domain}`, { method: 'DELETE' });
       loadRules();
     } finally { setDeletingRule(null); }
   }
@@ -66,7 +65,7 @@ export default function MailRouting() {
     if (!newList.name || !newList.domain) return;
     setListSubmitting(true);
     try {
-      const r = await api('/lists', { method: 'POST', body: JSON.stringify(newList) });
+      const r = await fetchApi('/api/mail-routing/lists', { method: 'POST', body: JSON.stringify(newList) });
       const d = await r.json();
       if (d.error) { toast.error(d.error); return; }
       toast.success('Mailing list created');
@@ -76,17 +75,17 @@ export default function MailRouting() {
   }
 
   async function deleteList(id: number) {
-    if (!confirm('Delete this mailing list?')) return;
+    if (!await confirm('Delete this mailing list?')) return;
     setDeletingList(id);
     try {
-      await api(`/lists/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/mail-routing/lists/${id}`, { method: 'DELETE' });
       loadLists();
     } finally { setDeletingList(null); }
   }
 
   async function loadMembers(id: number) {
     if (expandedList === id) { setExpandedList(null); return; }
-    const r = await api(`/lists/${id}/members`);
+    const r = await fetchApi(`/api/mail-routing/lists/${id}/members`);
     const d = await r.json();
     setListMembers(p => ({ ...p, [id]: Array.isArray(d) ? d : [] }));
     setExpandedList(id);
@@ -97,12 +96,12 @@ export default function MailRouting() {
     if (!memberForm.address) return;
     setMemberSubmitting(true);
     try {
-      const r = await api(`/lists/${listId}/members`, { method: 'POST', body: JSON.stringify(memberForm) });
+      const r = await fetchApi(`/api/mail-routing/lists/${listId}/members`, { method: 'POST', body: JSON.stringify(memberForm) });
       const d = await r.json();
       if (d.error) { toast.error(d.error); return; }
       toast.success('Member added');
       setMemberForm({ address: '', name: '' });
-      const r2 = await api(`/lists/${listId}/members`);
+      const r2 = await fetchApi(`/api/mail-routing/lists/${listId}/members`);
       const d2 = await r2.json();
       setListMembers(p => ({ ...p, [listId]: Array.isArray(d2) ? d2 : [] }));
     } finally { setMemberSubmitting(false); }
@@ -111,7 +110,7 @@ export default function MailRouting() {
   async function removeMember(listId: number, memberId: number) {
     setRemovingMember(memberId);
     try {
-      await api(`/lists/${listId}/members/${memberId}`, { method: 'DELETE' });
+      await fetchApi(`/api/mail-routing/lists/${listId}/members/${memberId}`, { method: 'DELETE' });
       setListMembers(p => ({ ...p, [listId]: (p[listId] || []).filter(m => m.id !== memberId) }));
     } finally { setRemovingMember(null); }
   }

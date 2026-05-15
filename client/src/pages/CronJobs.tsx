@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Clock, Plus, Trash2, ChevronDown, Play, FileText, RefreshCw, Bell, User, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface CronJob {
   id: number;
@@ -29,6 +30,7 @@ type Tab = 'jobs' | 'logs' | 'alerts' | 'account';
 
 export default function CronJobs() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('jobs');
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -102,7 +104,7 @@ export default function CronJobs() {
   }
 
   async function deleteAcctJob(index: number) {
-    if (!confirm('Remove this cron job?')) return;
+    if (!await confirm('Remove this cron job?')) return;
     setDeletingAcctJob(index);
     try {
       await axios.delete(`/api/cron/account/${encodeURIComponent(acctUser.trim())}/${index}`);
@@ -138,7 +140,7 @@ export default function CronJobs() {
   }
 
   async function deleteJob(id: number) {
-    if (!confirm('Remove this cron job?')) return;
+    if (!await confirm('Remove this cron job?')) return;
     setDeletingJob(id);
     try {
       await axios.delete(`/api/cron/${id}`);

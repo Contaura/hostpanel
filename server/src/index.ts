@@ -178,6 +178,11 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+// Global error handler — must be 4-argument to be recognized by Express
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
 const httpServer = createServer(app);
 setupTerminal(httpServer);
 

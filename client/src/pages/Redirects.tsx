@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { ArrowRight, Plus, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Redirect {
   id: number;
@@ -16,6 +17,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function Redirects() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [redirects, setRedirects] = useState<Redirect[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -48,7 +50,7 @@ export default function Redirects() {
   }
 
   async function remove(id: number) {
-    if (!confirm('Remove this redirect?')) return;
+    if (!await confirm('Remove this redirect?')) return;
     setDeleting(id);
     try { await axios.delete(`/api/redirects/${id}`); toast.success('Redirect removed'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

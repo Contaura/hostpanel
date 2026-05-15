@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Server, Cpu, HardDrive, Activity, RefreshCw } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string) => fetch(`/api/server-info${p}`, { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } });
+import { fetchApi } from '../lib/api';
 
 export default function ServerInfo() {
   const toast = useToast();
@@ -12,7 +11,7 @@ export default function ServerInfo() {
   async function load() {
     setLoading(true);
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/server-info/');
       const d = await r.json();
       setInfo(d);
     } catch { toast.error('Failed to load server info'); }

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/dkim${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 export default function DkimManager() {
   const toast = useToast();
@@ -15,13 +14,13 @@ export default function DkimManager() {
     if (!domain.trim()) return;
     setLoading(true);
     try {
-      const r = await api(`/${domain}`);
+      const r = await fetchApi(`/api/dkim/${domain}`);
       setData(await r.json());
     } finally { setLoading(false); }
   }
 
   async function generateDkim() {
-    const r = await api(`/${domain}/generate-dkim`, { method: 'POST' });
+    const r = await fetchApi(`/api/dkim/${domain}/generate-dkim`, { method: 'POST' });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('DKIM key generated — add the TXT record below to your DNS');
@@ -29,7 +28,7 @@ export default function DkimManager() {
   }
 
   async function saveSpf() {
-    const r = await api(`/${domain}/spf`, { method: 'POST', body: JSON.stringify(spf) });
+    const r = await fetchApi(`/api/dkim/${domain}/spf`, { method: 'POST', body: JSON.stringify(spf) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('SPF record generated');
@@ -37,7 +36,7 @@ export default function DkimManager() {
   }
 
   async function saveDmarc() {
-    const r = await api(`/${domain}/dmarc`, { method: 'POST', body: JSON.stringify(dmarc) });
+    const r = await fetchApi(`/api/dkim/${domain}/dmarc`, { method: 'POST', body: JSON.stringify(dmarc) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('DMARC record generated');
@@ -45,7 +44,7 @@ export default function DkimManager() {
   }
 
   async function verify() {
-    const r = await api(`/${domain}/verify`);
+    const r = await fetchApi(`/api/dkim/${domain}/verify`);
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     const msg = `DKIM: ${d.dkim ? '✓ propagated' : '✗ not found'} | SPF: ${d.spf ? '✓' : '✗'} | DMARC: ${d.dmarc ? '✓' : '✗'}`;

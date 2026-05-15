@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Globe, Plus, Trash2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Subdomain {
   subdomain: string;
@@ -14,6 +15,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function Subdomains() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [subs, setSubs] = useState<Subdomain[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -46,7 +48,7 @@ export default function Subdomains() {
   }
 
   async function remove(fqdn: string) {
-    if (!confirm(`Remove subdomain ${fqdn}?`)) return;
+    if (!await confirm(`Remove subdomain ${fqdn}?`)) return;
     setDeleting(fqdn);
     try {
       await axios.delete(`/api/subdomains/${fqdn}`);

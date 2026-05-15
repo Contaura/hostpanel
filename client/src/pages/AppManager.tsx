@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 import { Plus, Play, Square, RotateCcw, Trash2, ChevronDown, ChevronUp, Terminal, Cpu, MemoryStick, GitBranch, ArrowUpCircle } from 'lucide-react';
 
 interface App { name: string; type: string; domain: string; port: number; start_script: string; working_dir: string; status: string; cpu?: number; memory?: number; uptime?: number; restarts?: number }
@@ -20,6 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function AppManager() {
   const { success, error } = useToast();
+  const confirm = useConfirm();
   const [apps, setApps] = useState<App[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -60,7 +62,7 @@ export default function AppManager() {
   }
 
   async function remove(name: string) {
-    if (!confirm(`Delete app "${name}"?`)) return;
+    if (!await confirm(`Delete app "${name}"?`)) return;
     setDeletingApp(name);
     try { await adel(`/api/apps/${name}`); success('App deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
@@ -87,13 +89,13 @@ export default function AppManager() {
   }
 
   async function promoteStaging(name: string) {
-    if (!confirm(`Promote staging to production for "${name}"? Production will be restarted.`)) return;
+    if (!await confirm(`Promote staging to production for "${name}"? Production will be restarted.`)) return;
     try { await apost(`/api/apps/${name}/promote`); success('Staging promoted to production'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
   }
 
   async function deleteStaging(name: string) {
-    if (!confirm(`Delete staging environment for "${name}"?`)) return;
+    if (!await confirm(`Delete staging environment for "${name}"?`)) return;
     setDeletingStaging(name);
     try { await adel(`/api/apps/${name}/staging`); success('Staging deleted'); setStagings(p => ({ ...p, [name]: null })); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }

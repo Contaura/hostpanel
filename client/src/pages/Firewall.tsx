@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { ShieldCheck, Plus, Trash2, Globe, Layers, Ban, RefreshCw, MapPin, Wifi, Play, Square, RotateCcw, Server, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface FirewallStatus {
   active: boolean;
@@ -28,6 +29,7 @@ const KNOWN_PORTS = [
 
 export default function Firewall() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'ports' | 'ips' | 'geo' | 'ipv6' | 'services'>('ports');
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [portForm, setPortForm] = useState({ port: '', protocol: 'tcp' });
@@ -80,7 +82,7 @@ export default function Firewall() {
 
   async function removePort(port: string) {
     const [num, proto] = port.split('/');
-    if (!confirm(`Close port ${port}?`)) return;
+    if (!await confirm(`Close port ${port}?`)) return;
     try {
       await axios.delete(`/api/firewall/ports/${num}/${proto}`);
       toast.success(`Port ${port} closed`); load();

@@ -1,8 +1,7 @@
 import { useEffect, useState, Fragment } from 'react';
 import { Plus, Trash2, Play, Tag, CreditCard, X, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/billing${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 const blankSchedule = { client_id: '', amount: '', currency: 'USD', cycle: 'monthly', next_run: '', notes: '' };
 const blankPromo = { code: '', type: 'percent', value: '', max_uses: '', expires_at: '' };
@@ -36,38 +35,38 @@ export default function RecurringBilling() {
   async function load() {
     try {
       await Promise.all([
-        api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])),
-        api('/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : [])),
-        api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : [])),
-        api('/clients').then(r => r.json()).then(d => setClients(Array.isArray(d) ? d : [])),
-        api('/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : [])),
+        fetchApi('/api/billing/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])),
+        fetchApi('/api/billing/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : [])),
+        fetchApi('/api/billing/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : [])),
+        fetchApi('/api/billing/clients').then(r => r.json()).then(d => setClients(Array.isArray(d) ? d : [])),
+        fetchApi('/api/billing/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : [])),
       ]);
     } finally { setPageLoading(false); }
   }
 
   async function saveSchedule() {
-    const r = await api('/recurring', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/billing/recurring', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Schedule created');
     setAdding(false); setForm(blankSchedule);
-    api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
   }
 
   async function runNow(id: number) {
     setRunningId(id);
     try {
-      const r = await api(`/recurring/${id}/run`, { method: 'POST' });
+      const r = await fetchApi(`/api/billing/recurring/${id}/run`, { method: 'POST' });
       const d = await r.json();
       if (d.error) toast.error(d.error);
-      else { toast.success('Invoice generated'); api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])); }
+      else { toast.success('Invoice generated'); fetchApi('/api/billing/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : [])); }
     } finally { setRunningId(null); }
   }
 
   async function deleteSchedule(id: number) {
     setDeleting(id);
     try {
-      await api(`/recurring/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/billing/recurring/${id}`, { method: 'DELETE' });
       setSchedules(ss => ss.filter(x => x.id !== id));
     } finally { setDeleting(null); }
   }
@@ -75,7 +74,7 @@ export default function RecurringBilling() {
   async function deleteCredit(id: number) {
     setDeleting(id);
     try {
-      await api(`/credit-notes/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/billing/credit-notes/${id}`, { method: 'DELETE' });
       setCredits(cc => cc.filter(x => x.id !== id));
     } finally { setDeleting(null); }
   }
@@ -83,61 +82,61 @@ export default function RecurringBilling() {
   async function deletePromo(id: number) {
     setDeleting(id);
     try {
-      await api(`/promo-codes/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/billing/promo-codes/${id}`, { method: 'DELETE' });
       setPromos(pp => pp.filter(x => x.id !== id));
     } finally { setDeleting(null); }
   }
 
   async function savePromo() {
-    const r = await api('/promo-codes', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/billing/promo-codes', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Promo code created');
     setAdding(false); setForm(blankPromo);
-    api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
   }
 
   async function saveCredit() {
-    const r = await api('/credit-notes', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/billing/credit-notes', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Credit note created');
     setAdding(false); setForm(blankCredit);
-    api('/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : []));
   }
 
   async function togglePromo(id: number, active: boolean) {
-    await api(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: !active }) });
-    api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
+    await fetchApi(`/api/billing/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: !active }) });
+    fetchApi('/api/billing/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
   }
 
   async function updatePromo(id: number) {
-    const r = await api(`/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: promos.find(p => p.id === id)?.active ?? 1, max_uses: editPromoForm.max_uses || null, expires_at: editPromoForm.expires_at || null }) });
+    const r = await fetchApi(`/api/billing/promo-codes/${id}`, { method: 'PUT', body: JSON.stringify({ active: promos.find(p => p.id === id)?.active ?? 1, max_uses: editPromoForm.max_uses || null, expires_at: editPromoForm.expires_at || null }) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Promo updated');
     setEditingPromoId(null);
-    api('/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/promo-codes').then(r => r.json()).then(d => setPromos(Array.isArray(d) ? d : []));
   }
 
   async function updateSchedule(id: number) {
-    const r = await api(`/recurring/${id}`, { method: 'PUT', body: JSON.stringify(editScheduleForm) });
+    const r = await fetchApi(`/api/billing/recurring/${id}`, { method: 'PUT', body: JSON.stringify(editScheduleForm) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Schedule updated');
     setEditingScheduleId(null);
-    api('/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/recurring').then(r => r.json()).then(d => setSchedules(Array.isArray(d) ? d : []));
   }
 
   async function applyCredit(creditId: number) {
     if (!applyInvoiceId) { toast.error('Select an invoice'); return; }
-    const r = await api(`/credit-notes/${creditId}/apply`, { method: 'PATCH', body: JSON.stringify({ invoice_id: Number(applyInvoiceId) }) });
+    const r = await fetchApi(`/api/billing/credit-notes/${creditId}/apply`, { method: 'PATCH', body: JSON.stringify({ invoice_id: Number(applyInvoiceId) }) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success(`Credit applied — invoice new amount: ${d.new_amount}`);
     setApplyingCredit(null); setApplyInvoiceId('');
-    api('/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : []));
-    api('/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/credit-notes').then(r => r.json()).then(d => setCredits(Array.isArray(d) ? d : []));
+    fetchApi('/api/billing/invoices').then(r => r.json()).then(d => setInvoices(Array.isArray(d) ? d : []));
   }
 
   const clientName = (id: any) => clients.find(c => c.id === Number(id))?.name || id;

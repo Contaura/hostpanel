@@ -2,12 +2,14 @@ import { useEffect, useState, FormEvent } from 'react';
 import axios from 'axios';
 import { Mail, Plus, Trash2, ArrowRight, InboxIcon, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Account { email: string; domain: string; quota: string }
 interface Forwarder { from: string; to: string }
 
 export default function EmailManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [forwarders, setForwarders] = useState<Forwarder[]>([]);
   const [tab, setTab] = useState<'accounts' | 'forwarders'>('accounts');
@@ -43,7 +45,7 @@ export default function EmailManager() {
   }
 
   async function deleteAccount(email: string) {
-    if (!confirm(`Delete mailbox ${email}?`)) return;
+    if (!await confirm(`Delete mailbox ${email}?`)) return;
     setDeletingAcct(email);
     try {
       await axios.delete(`/api/email/accounts/${encodeURIComponent(email)}`);
@@ -64,7 +66,7 @@ export default function EmailManager() {
   }
 
   async function deleteForwarder(from: string) {
-    if (!confirm(`Delete forwarder ${from}?`)) return;
+    if (!await confirm(`Delete forwarder ${from}?`)) return;
     setDeletingFwd(from);
     try {
       await axios.delete(`/api/email/forwarders/${encodeURIComponent(from)}`);

@@ -1,15 +1,12 @@
 import { useState } from 'react';
 import { ShieldAlert, RefreshCw, Trash2, CheckCircle, XCircle, FileSearch } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) =>
-  fetch(`/api/security-scanner${p}`, {
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` },
-    ...o,
-  });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function SecurityScanner() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'scan' | 'integrity'>('scan');
 
   // Malware scan
@@ -27,7 +24,7 @@ export default function SecurityScanner() {
 
   async function runScan() {
     setScanning(true); setScanOutput('Running ClamAV scan…');
-    const r = await api('/scan', { method: 'POST', body: JSON.stringify({ path: scanPath }) });
+    const r = await fetchApi('/api/security-scanner/scan', { method: 'POST', body: JSON.stringify({ path: scanPath }) });
     const d = await r.json();
     setScanOutput(d.output || d.error || 'Done');
     if (d.error) toast.error(d.error); else toast.success('Scan complete');
@@ -36,16 +33,16 @@ export default function SecurityScanner() {
 
   async function updateDefs() {
     setUpdating(true);
-    const r = await api('/update-definitions', { method: 'POST' });
+    const r = await fetchApi('/api/security-scanner/update-definitions', { method: 'POST' });
     const d = await r.json();
     if (d.error) toast.error(d.error); else toast.success('Definitions updated');
     setUpdating(false);
   }
 
   async function createBaseline() {
-    if (!confirm(`Create integrity baseline from "${integrityPath}"? This will hash all files in that path.`)) return;
+    if (!await confirm(`Create integrity baseline from "${integrityPath}"? This will hash all files in that path.`)) return;
     setBaselineRunning(true);
-    const r = await api('/integrity/baseline', { method: 'POST', body: JSON.stringify({ path: integrityPath }) });
+    const r = await fetchApi('/api/security-scanner/integrity/baseline', { method: 'POST', body: JSON.stringify({ path: integrityPath }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else toast.success(`Baseline created — ${d.count ?? ''} files hashed`);
@@ -55,7 +52,7 @@ export default function SecurityScanner() {
 
   async function checkIntegrity() {
     setChecking(true); setCheckDone(false); setCheckResults([]);
-    const r = await api('/integrity/check');
+    const r = await fetchApi('/api/security-scanner/integrity/check');
     const d = await r.json();
     if (d.error) { toast.error(d.error); setChecking(false); return; }
     setCheckResults(Array.isArray(d) ? d : []);
@@ -67,8 +64,8 @@ export default function SecurityScanner() {
   }
 
   async function clearBaseline() {
-    if (!confirm('Delete all baseline hashes?')) return;
-    await api('/integrity/baseline', { method: 'DELETE' });
+    if (!await confirm('Delete all baseline hashes?')) return;
+    await fetchApi('/api/security-scanner/integrity/baseline', { method: 'DELETE' });
     toast.success('Baseline cleared');
     setCheckDone(false); setCheckResults([]);
   }

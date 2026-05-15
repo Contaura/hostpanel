@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertTriangle, Clock, Webhook, Send, History, Pencil, Search } from 'lucide-react';
 
 interface Token { id: number; name: string; token_prefix: string; permissions: string; last_used: string; expires_at: string; created_at: string }
@@ -20,6 +21,7 @@ const WEBHOOK_EVENTS = ['account.created', 'account.suspended', 'account.deleted
 
 export default function ApiTokens() {
   const { success, error } = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'tokens' | 'webhooks'>('tokens');
   const [tokens, setTokens] = useState<Token[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -57,7 +59,7 @@ export default function ApiTokens() {
   }
 
   async function deleteWebhook(id: number) {
-    if (!confirm('Delete this webhook?')) return;
+    if (!await confirm('Delete this webhook?')) return;
     setDeletingWh(id);
     try { await adel(`/api/api-tokens/webhooks/${id}`); success('Webhook deleted'); loadWebhooks(); }
     catch { error('Failed'); }
@@ -99,7 +101,7 @@ export default function ApiTokens() {
   }
 
   async function revoke(id: number, name: string) {
-    if (!confirm(`Revoke token "${name}"? This cannot be undone.`)) return;
+    if (!await confirm(`Revoke token "${name}"? This cannot be undone.`)) return;
     setRevoking(id);
     try { await adel(`/api/api-tokens/${id}`); success('Token revoked'); load(); }
     catch { error('Failed'); }

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, RefreshCw, Cloud, CloudOff, Zap, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/cloudflare${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function CloudflareManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [zones, setZones] = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [dns, setDns] = useState<any[]>([]);
@@ -21,14 +22,14 @@ export default function CloudflareManager() {
 
   async function loadZones() {
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/cloudflare/');
       setZones(await r.json());
     } finally { setPageLoading(false); }
   }
 
   async function addZone() {
     if (!token.trim()) return;
-    const r = await api('/', { method: 'POST', body: JSON.stringify({ api_token: token }) });
+    const r = await fetchApi('/api/cloudflare/', { method: 'POST', body: JSON.stringify({ api_token: token }) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Cloudflare zones imported');
@@ -38,39 +39,39 @@ export default function CloudflareManager() {
 
   async function selectZone(zone: any) {
     setSelected(zone);
-    const r = await api(`/${zone.cf_zone_id}/dns`);
+    const r = await fetchApi(`/api/cloudflare/${zone.cf_zone_id}/dns`);
     setDns(await r.json());
     if (tab === 'analytics') loadAnalytics(zone.cf_zone_id);
   }
 
   async function loadAnalytics(id: string) {
-    const r = await api(`/${id}/analytics`);
+    const r = await fetchApi(`/api/cloudflare/${id}/analytics`);
     setAnalytics(await r.json());
   }
 
   async function toggleProxy(zoneId: string, recordId: string, current: boolean) {
-    await api(`/${zoneId}/dns/${recordId}/proxy`, { method: 'PATCH', body: JSON.stringify({ proxied: !current }) });
+    await fetchApi(`/api/cloudflare/${zoneId}/dns/${recordId}/proxy`, { method: 'PATCH', body: JSON.stringify({ proxied: !current }) });
     toast.success(`Proxy ${!current ? 'enabled' : 'disabled'}`);
-    const r = await api(`/${zoneId}/dns`);
+    const r = await fetchApi(`/api/cloudflare/${zoneId}/dns`);
     setDns(await r.json());
   }
 
   async function purge(zoneId: string) {
-    await api(`/${zoneId}/purge`, { method: 'POST' });
+    await fetchApi(`/api/cloudflare/${zoneId}/purge`, { method: 'POST' });
     toast.success('Cache purged');
   }
 
   async function togglePause(zone: any) {
-    await api(`/${zone.cf_zone_id}/pause`, { method: 'PATCH', body: JSON.stringify({ paused: !zone.paused }) });
+    await fetchApi(`/api/cloudflare/${zone.cf_zone_id}/pause`, { method: 'PATCH', body: JSON.stringify({ paused: !zone.paused }) });
     toast.success(zone.paused ? 'Zone unpaused' : 'Zone paused');
     loadZones();
   }
 
   async function deleteZone(id: number) {
-    if (!confirm('Remove this zone from HostPanel?')) return;
+    if (!await confirm('Remove this zone from HostPanel?')) return;
     setDeletingZone(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/cloudflare/${id}`, { method: 'DELETE' });
       setSelected(null);
       loadZones();
     } finally { setDeletingZone(null); }

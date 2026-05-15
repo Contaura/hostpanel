@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent, Fragment } from 'react';
 import axios from 'axios';
 import { Server, Plus, Trash2, Power, UserCheck, AlertOctagon, Ban, RefreshCw, ChevronDown, ChevronUp, PackageOpen, Pencil, CalendarClock, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Account {
   id: number;
@@ -32,6 +33,7 @@ const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-
 
 export default function Accounts() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [plans, setPlans]       = useState<Plan[]>([]);
   const [clients, setClients]   = useState<Client[]>([]);
@@ -113,7 +115,7 @@ export default function Accounts() {
   }
 
   async function deleteAccount(id: number, username: string) {
-    if (!confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
+    if (!await confirm(`Delete account "${username}"? The vhost config will be removed (web files preserved).`)) return;
     setActioning(id);
     try { await axios.delete(`/api/accounts/${id}`); toast.success('Account deleted'); load(); }
     catch (err: any) { toast.error(err.response?.data?.error || 'Failed'); }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 import { Users, Plus, Trash2, Edit2, Save, X, Shield, Eye, Clock, Lock, Search } from 'lucide-react';
 
 interface AdminUser { id: number; username: string; email: string; role: string; totp_enabled: number; last_login: string; created_at: string }
@@ -18,6 +19,7 @@ interface PasswordPolicy { min_length: number; require_upper: boolean; require_n
 
 export default function AdminUsers() {
   const { success, error } = useToast();
+  const confirm = useConfirm();
   const [users, setUsers]   = useState<AdminUser[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState<AdminUser | null>(null);
@@ -53,7 +55,7 @@ export default function AdminUsers() {
   }
 
   async function remove(id: number, username: string) {
-    if (!confirm(`Delete admin user "${username}"?`)) return;
+    if (!await confirm(`Delete admin user "${username}"?`)) return;
     setDeleting(id);
     try { await adel(`/api/admin-users/${id}`); success('User deleted'); load(); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }

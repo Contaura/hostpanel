@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Archive, Plus, Trash2, Download, Database, FolderOpen, RefreshCw, RotateCcw, Clock, Upload, Cloud, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '../context/ConfirmContext';
 
 interface Backup {
   name: string;
@@ -21,6 +22,7 @@ function fmt(bytes: number) {
 
 export default function BackupManager() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'backups' | 'schedules' | 'remote'>('backups');
   const [backups, setBackups] = useState<Backup[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -102,7 +104,7 @@ export default function BackupManager() {
   }
 
   async function deleteBackup(name: string) {
-    if (!confirm(`Delete backup "${name}"?`)) return;
+    if (!await confirm(`Delete backup "${name}"?`)) return;
     setDeletingBackup(name);
     try {
       await axios.delete(`/api/backup/${encodeURIComponent(name)}`);
@@ -122,7 +124,7 @@ export default function BackupManager() {
   }
 
   async function restoreBackup(name: string) {
-    if (!confirm(`Restore "${name}"?\n\nThis will overwrite existing files or database contents. Proceed?`)) return;
+    if (!await confirm(`Restore "${name}"?\n\nThis will overwrite existing files or database contents. Proceed?`)) return;
     setRestoringBackup(name);
     try {
       await axios.post(`/api/backup/restore/${encodeURIComponent(name)}`);

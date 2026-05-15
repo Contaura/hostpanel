@@ -1,10 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, RefreshCw, Play, Square, RotateCcw, Trash2, FileText, Terminal, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/node-apps${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { fetchApi } from '../lib/api';
 
 type AppType = 'node' | 'python';
 
@@ -38,7 +35,7 @@ export default function NodeApps() {
 
   async function load() {
     setLoading(true);
-    const r = await api(`/${type}`);
+    const r = await fetchApi(`/api/node-apps/${type}`);
     setApps(Array.isArray(await r.json()) ? await r.clone().json() : []);
     setLoading(false);
   }
@@ -46,7 +43,7 @@ export default function NodeApps() {
   async function action(id: string, act: string) {
     setActioning(id);
     try {
-      await api(`/node/${id}/action`, { method: 'POST', body: JSON.stringify({ action: act }) });
+      await fetchApi(`/api/node-apps/node/${id}/action`, { method: 'POST', body: JSON.stringify({ action: act }) });
       toast.success(`${act} sent`);
       load();
     } finally { setActioning(null); }
@@ -54,7 +51,7 @@ export default function NodeApps() {
 
   async function addApp() {
     const body = type === 'node' ? nodeForm : pyForm;
-    const r = await api(`/${type}`, { method: 'POST', body: JSON.stringify(body) });
+    const r = await fetchApi(`/api/node-apps/${type}`, { method: 'POST', body: JSON.stringify(body) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('App started');
@@ -65,7 +62,7 @@ export default function NodeApps() {
   }
 
   async function loadLogs(id: string) {
-    const r = await api(`/node/${id}/logs`);
+    const r = await fetchApi(`/api/node-apps/node/${id}/logs`);
     const d = await r.json();
     setLogs({ id, lines: d.lines || [] });
   }
@@ -73,7 +70,7 @@ export default function NodeApps() {
   async function createVenv() {
     if (!venvPath) return;
     setCreatingVenv(true);
-    const r = await api('/python/create-venv', { method: 'POST', body: JSON.stringify({ path: venvPath }) });
+    const r = await fetchApi('/api/node-apps/python/create-venv', { method: 'POST', body: JSON.stringify({ path: venvPath }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`venv created at ${venvPath}`); setPyForm(f => ({ ...f, venv: venvPath })); }
@@ -81,7 +78,7 @@ export default function NodeApps() {
   }
 
   async function pm2Startup() {
-    const r = await api('/pm2-startup', { method: 'POST' });
+    const r = await fetchApi('/api/node-apps/pm2-startup', { method: 'POST' });
     const d = await r.json();
     toast.success('PM2 startup configured');
   }

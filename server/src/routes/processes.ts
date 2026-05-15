@@ -6,12 +6,12 @@ import { AuthRequest } from '../middleware/auth';
 const router = Router();
 const execAsync = promisify(exec);
 
-router.get('/list', async (_req: AuthRequest, res: Response) => {
+router.get('/list', async (req: AuthRequest, res: Response) => {
   try {
-    const { stdout } = await execAsync(
-      'ps aux --no-headers --sort=-%cpu | head -60'
-    );
-    const processes = stdout
+    const page  = Math.max(1, parseInt(String(req.query.page  || '1'), 10));
+    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10)));
+    const { stdout } = await execAsync('ps aux --no-headers --sort=-%cpu');
+    const all = stdout
       .split('\n')
       .filter(Boolean)
       .map(line => {
@@ -29,7 +29,9 @@ router.get('/list', async (_req: AuthRequest, res: Response) => {
           command: p.slice(10).join(' '),
         };
       });
-    res.json(processes);
+    const total = all.length;
+    const data  = all.slice((page - 1) * limit, page * limit);
+    res.json({ data, total, page, limit });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

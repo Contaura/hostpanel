@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Globe, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/addon-domains${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function AddonDomains() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [addons, setAddons] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [form, setForm] = useState({ account_id: '', domain: '', subdomain: '', document_root: '' });
@@ -21,29 +20,28 @@ export default function AddonDomains() {
   async function load() {
     try {
       await Promise.all([
-        api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : [])),
-        fetch('/api/accounts', { headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` } })
-          .then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])),
+        fetchApi('/api/addon-domains/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : [])),
+        fetchApi('/api/accounts').then(r => r.json()).then(d => setAccounts(Array.isArray(d) ? d : [])),
       ]);
     } finally { setPageLoading(false); }
   }
 
   async function add() {
     if (!form.account_id || !form.domain || !form.subdomain) return;
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/addon-domains/', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success(`${form.domain} created`);
     setAdding(false);
     setForm({ account_id: '', domain: '', subdomain: '', document_root: '' });
-    api('/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : []));
+    fetchApi('/api/addon-domains/').then(r => r.json()).then(d => setAddons(Array.isArray(d) ? d : []));
   }
 
   async function del(id: number, domain: string) {
-    if (!confirm(`Remove addon domain ${domain}?`)) return;
+    if (!await confirm(`Remove addon domain ${domain}?`)) return;
     setDeleting(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/addon-domains/${id}`, { method: 'DELETE' });
       setAddons(a => a.filter(x => x.id !== id));
     } finally { setDeleting(null); }
   }

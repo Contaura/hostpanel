@@ -2,10 +2,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, Power, Trash2, Download, Zap, Upload, Search } from 'lucide-react';
 import { useRef } from 'react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/wordpress${p}`, {
-  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o,
-});
+import { fetchApi } from '../lib/api';
 
 export default function WordPressManager() {
   const toast = useToast();
@@ -34,8 +31,8 @@ export default function WordPressManager() {
   async function loadInitial() {
     try {
       await Promise.all([
-        api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : [])),
-        api('/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : [])),
+        fetchApi('/api/wordpress/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : [])),
+        fetchApi('/api/wordpress/auto-updates').then(r => r.json()).then(d => setAutoUpdates(Array.isArray(d) ? d : [])),
       ]);
     } finally { setPageLoading(false); }
   }
@@ -43,16 +40,16 @@ export default function WordPressManager() {
   async function selectSite(domain: string) {
     setSelected(domain); setOutput(''); setInfo(null); setPlugins([]); setThemes([]);
     const [i, pl, th] = await Promise.all([
-      api(`/${domain}/info`).then(r => r.json()),
-      api(`/${domain}/plugins`).then(r => r.json()),
-      api(`/${domain}/themes`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/info`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/plugins`).then(r => r.json()),
+      fetchApi(`/api/wordpress/${domain}/themes`).then(r => r.json()),
     ]);
     setInfo(i); setPlugins(Array.isArray(pl) ? pl : []); setThemes(Array.isArray(th) ? th : []);
   }
 
   async function run(path: string, msg: string) {
     setLoading(true); setOutput('Running…');
-    const r = await api(path, { method: 'POST' });
+    const r = await fetchApi(`/api/wordpress${path}`, { method: 'POST' });
     const d = await r.json();
     setOutput(d.output || d.core || d.error || 'Done');
     if (d.error) toast.error(d.error); else toast.success(msg);
@@ -63,8 +60,8 @@ export default function WordPressManager() {
   async function togglePlugin(slug: string, active: string) {
     setLoading(true);
     try {
-      await api(`/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
-      const r = await api(`/${selected}/plugins`).then(r => r.json());
+      await fetchApi(`/api/wordpress/${selected}/plugins/${slug}/toggle`, { method: 'POST', body: JSON.stringify({ active: active === 'active' }) });
+      const r = await fetchApi(`/api/wordpress/${selected}/plugins`).then(r => r.json());
       setPlugins(Array.isArray(r) ? r : []);
     } finally { setLoading(false); }
   }
@@ -72,8 +69,8 @@ export default function WordPressManager() {
   async function activateTheme(slug: string) {
     setLoading(true);
     try {
-      await api(`/${selected}/themes/${slug}/activate`, { method: 'POST' });
-      const r = await api(`/${selected}/themes`).then(r => r.json());
+      await fetchApi(`/api/wordpress/${selected}/themes/${slug}/activate`, { method: 'POST' });
+      const r = await fetchApi(`/api/wordpress/${selected}/themes`).then(r => r.json());
       setThemes(Array.isArray(r) ? r : []);
       toast.success(`Theme ${slug} activated`);
     } finally { setLoading(false); }
@@ -83,9 +80,8 @@ export default function WordPressManager() {
     setUploading(true); setUploadOutput('Uploading…');
     const fd = new FormData();
     fd.append('zip', file);
-    const r = await fetch(`/api/wordpress/${selected}/${type}/upload`, {
+    const r = await fetchApi(`/api/wordpress/${selected}/${type}/upload`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('hp_token')}` },
       body: fd,
     });
     const d = await r.json();
@@ -98,7 +94,7 @@ export default function WordPressManager() {
   async function searchReplace() {
     if (!srForm.search || !srForm.replace) return;
     setLoading(true); setOutput('Running search-replace…');
-    const r = await api(`/${selected}/search-replace`, { method: 'POST', body: JSON.stringify(srForm) });
+    const r = await fetchApi(`/api/wordpress/${selected}/search-replace`, { method: 'POST', body: JSON.stringify(srForm) });
     const d = await r.json();
     setOutput(d.output || d.error || 'Done');
     setLoading(false);
@@ -120,7 +116,7 @@ export default function WordPressManager() {
           <option value="">Select a WordPress site…</option>
           {sites.map(s => <option key={s.domain} value={s.domain}>{s.domain}</option>)}
         </select>
-        <button className="btn-ghost" onClick={() => api('/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []))}><RefreshCw size={14} /></button>
+        <button className="btn-ghost" onClick={() => fetchApi('/api/wordpress/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []))}><RefreshCw size={14} /></button>
       </div>
 
       {sites.length === 0 && <p className="text-sm text-slate-500">No WordPress installations found. Install one via Script Installer.</p>}
@@ -319,8 +315,8 @@ export default function WordPressManager() {
                   <button className="btn-primary" disabled={autoUpdateSaving} onClick={async () => {
                     setAutoUpdateSaving(true);
                     try {
-                      await api(`/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
-                      const d = await api('/auto-updates').then(r => r.json());
+                      await fetchApi(`/api/wordpress/auto-updates/${selected}`, { method: 'PUT', body: JSON.stringify(autoUpdateForm) });
+                      const d = await fetchApi('/api/wordpress/auto-updates').then(r => r.json());
                       setAutoUpdates(Array.isArray(d) ? d : []);
                       toast.success('Auto-update schedule saved');
                     } finally { setAutoUpdateSaving(false); }
@@ -328,8 +324,8 @@ export default function WordPressManager() {
                   <button className="btn-secondary text-red-500" disabled={autoUpdateSaving} onClick={async () => {
                     setAutoUpdateSaving(true);
                     try {
-                      await api(`/auto-updates/${selected}`, { method: 'DELETE' });
-                      const d = await api('/auto-updates').then(r => r.json());
+                      await fetchApi(`/api/wordpress/auto-updates/${selected}`, { method: 'DELETE' });
+                      const d = await fetchApi('/api/wordpress/auto-updates').then(r => r.json());
                       setAutoUpdates(Array.isArray(d) ? d : []);
                       toast.success('Auto-update removed');
                     } finally { setAutoUpdateSaving(false); }

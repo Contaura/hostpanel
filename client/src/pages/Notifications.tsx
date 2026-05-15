@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Bell, Send, Pencil, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/notifications${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 const blank = { name: '', url: '', type: 'webhook', events: [] as string[], secret: '' };
 
@@ -19,17 +18,17 @@ export default function Notifications() {
   const [testing, setTesting] = useState<number | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
-  useEffect(() => { load(); api('/events').then(r => r.json()).then(setAllEvents); }, []);
+  useEffect(() => { load(); fetchApi('/api/notifications/events').then(r => r.json()).then(setAllEvents); }, []);
 
   async function load() {
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/notifications/');
       setHooks(Array.isArray(await r.json()) ? await r.clone().json() : []);
     } finally { setPageLoading(false); }
   }
 
   async function save() {
-    const r = await api('/', { method: 'POST', body: JSON.stringify(form) });
+    const r = await fetchApi('/api/notifications/', { method: 'POST', body: JSON.stringify(form) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Webhook created');
@@ -40,7 +39,7 @@ export default function Notifications() {
   async function del(id: number) {
     setDeleting(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/notifications/${id}`, { method: 'DELETE' });
       setHooks(h => h.filter(x => x.id !== id));
     } finally { setDeleting(null); }
   }
@@ -48,7 +47,7 @@ export default function Notifications() {
   async function test(id: number) {
     setTesting(id);
     try {
-      const r = await api(`/${id}/test`, { method: 'POST' });
+      const r = await fetchApi(`/api/notifications/${id}/test`, { method: 'POST' });
       const d = await r.json();
       if (d.error) toast.error(d.error);
       else toast.success('Test notification sent');
@@ -56,13 +55,13 @@ export default function Notifications() {
   }
 
   async function toggleEnabled(hook: any) {
-    await api(`/${hook.id}`, { method: 'PUT', body: JSON.stringify({ ...hook, enabled: !hook.enabled }) });
+    await fetchApi(`/api/notifications/${hook.id}`, { method: 'PUT', body: JSON.stringify({ ...hook, enabled: !hook.enabled }) });
     load();
   }
 
   async function updateHook(id: number) {
     const existing = hooks.find(h => h.id === id);
-    const r = await api(`/${id}`, { method: 'PUT', body: JSON.stringify({ ...editHookForm, enabled: existing?.enabled ?? 1 }) });
+    const r = await fetchApi(`/api/notifications/${id}`, { method: 'PUT', body: JSON.stringify({ ...editHookForm, enabled: existing?.enabled ?? 1 }) });
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     toast.success('Webhook updated');

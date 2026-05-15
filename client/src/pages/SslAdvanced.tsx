@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Lock, CheckCircle, XCircle, RefreshCw, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/ssl-advanced${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 export default function SslAdvanced() {
   const toast = useToast();
@@ -38,14 +37,14 @@ export default function SslAdvanced() {
 
   async function loadCiphers() {
     if (ciphersLoaded) return;
-    const r = await api('/ciphers');
+    const r = await fetchApi('/api/ssl-advanced/ciphers');
     const d = await r.json();
     setCiphers(d);
     setCiphersLoaded(true);
   }
 
   async function saveCiphers() {
-    const r = await api('/ciphers', { method: 'PUT', body: JSON.stringify({ preset }) });
+    const r = await fetchApi('/api/ssl-advanced/ciphers', { method: 'PUT', body: JSON.stringify({ preset }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else toast.success('SSL configuration saved');
@@ -53,7 +52,7 @@ export default function SslAdvanced() {
 
   async function issueWildcard() {
     setWildcardOutput('Requesting certificate…');
-    const r = await api('/wildcard', { method: 'POST', body: JSON.stringify(wildcard) });
+    const r = await fetchApi('/api/ssl-advanced/wildcard', { method: 'POST', body: JSON.stringify(wildcard) });
     const d = await r.json();
     setWildcardOutput(d.output || d.error || 'Done');
   }
@@ -61,7 +60,7 @@ export default function SslAdvanced() {
   async function testSsl() {
     if (!testDomain.trim()) return;
     setTestResult(null);
-    const r = await api(`/test/${testDomain.trim()}`);
+    const r = await fetchApi(`/api/ssl-advanced/test/${testDomain.trim()}`);
     const d = await r.json();
     if (d.error) { toast.error(d.error); return; }
     setTestResult(d);
@@ -69,7 +68,7 @@ export default function SslAdvanced() {
 
   async function loadCerts() {
     if (certsLoaded) return;
-    const r = await api('/renew-status');
+    const r = await fetchApi('/api/ssl-advanced/renew-status');
     const d = await r.json();
     setCerts(Array.isArray(d) ? d : []);
     setCertsLoaded(true);
@@ -78,7 +77,7 @@ export default function SslAdvanced() {
   async function renewCert(name: string) {
     setRenewing(name);
     setRenewOutput('Renewing…');
-    const r = await api(`/renew/${encodeURIComponent(name)}`, { method: 'POST' });
+    const r = await fetchApi(`/api/ssl-advanced/renew/${encodeURIComponent(name)}`, { method: 'POST' });
     const d = await r.json();
     setRenewOutput(d.output || d.error || 'Done');
     setRenewing(null);
@@ -88,7 +87,7 @@ export default function SslAdvanced() {
   async function renewAll() {
     setRenewing('all');
     setRenewOutput('Running certbot renew…');
-    const r = await api('/renew-all', { method: 'POST' });
+    const r = await fetchApi('/api/ssl-advanced/renew-all', { method: 'POST' });
     const d = await r.json();
     setRenewOutput(d.output || d.error || 'Done');
     setRenewing(null);
@@ -97,7 +96,7 @@ export default function SslAdvanced() {
 
   async function generateCsr() {
     setCsrLoading(true); setCsrOutput('');
-    const r = await api('/csr', { method: 'POST', body: JSON.stringify(csrForm) });
+    const r = await fetchApi('/api/ssl-advanced/csr', { method: 'POST', body: JSON.stringify(csrForm) });
     const d = await r.json();
     if (d.error) toast.error(d.error); else setCsrOutput(d.csr || d.key || JSON.stringify(d, null, 2));
     setCsrLoading(false);
@@ -105,7 +104,7 @@ export default function SslAdvanced() {
 
   async function generateSelfSigned() {
     setSelfSignedLoading(true); setSelfSignedOutput('');
-    const r = await api('/self-signed', { method: 'POST', body: JSON.stringify(selfSignedForm) });
+    const r = await fetchApi('/api/ssl-advanced/self-signed', { method: 'POST', body: JSON.stringify(selfSignedForm) });
     const d = await r.json();
     if (d.error) toast.error(d.error); else setSelfSignedOutput(d.cert || JSON.stringify(d, null, 2));
     setSelfSignedLoading(false);
@@ -114,7 +113,7 @@ export default function SslAdvanced() {
   async function importCert() {
     if (!importForm.domain || !importForm.cert || !importForm.key) { toast.error('Domain, certificate, and key are required'); return; }
     setImportLoading(true);
-    const r = await api('/import', { method: 'POST', body: JSON.stringify(importForm) });
+    const r = await fetchApi('/api/ssl-advanced/import', { method: 'POST', body: JSON.stringify(importForm) });
     const d = await r.json();
     if (d.error) toast.error(d.error); else { toast.success('Certificate imported'); setImportForm(importBlank); }
     setImportLoading(false);
@@ -123,7 +122,7 @@ export default function SslAdvanced() {
   async function checkAcme() {
     if (!acmeDomain.trim()) return;
     setAcmeChecking(true); setAcmeResult(null);
-    const r = await api(`/acme-check/${encodeURIComponent(acmeDomain.trim())}`);
+    const r = await fetchApi(`/api/ssl-advanced/acme-check/${encodeURIComponent(acmeDomain.trim())}`);
     const d = await r.json();
     if (d.error) toast.error(d.error); else setAcmeResult(d);
     setAcmeChecking(false);

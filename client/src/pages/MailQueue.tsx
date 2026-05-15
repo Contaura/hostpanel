@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Trash2, Send, FileSearch, RotateCcw, PauseCircle, PlayCircle, AlertOctagon, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/mail-queue${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 type Tab = 'queue' | 'delivery-log' | 'bounce-log';
 
 export default function MailQueue() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<Tab>('queue');
   const [messages, setMessages] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({});
@@ -23,7 +24,7 @@ export default function MailQueue() {
   async function load() {
     setLoading(true);
     try {
-      const [q, s] = await Promise.all([api('/').then(r => r.json()), api('/stats').then(r => r.json())]);
+      const [q, s] = await Promise.all([fetchApi('/api/mail-queue/').then(r => r.json()), fetchApi('/api/mail-queue/stats').then(r => r.json())]);
       setMessages(Array.isArray(q) ? q : []);
       setStats(s);
     } finally { setLoading(false); }
@@ -31,7 +32,7 @@ export default function MailQueue() {
 
   async function loadDeliveryLog() {
     setLogLoading(true);
-    const r = await api(`/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
+    const r = await fetchApi(`/api/mail-queue/delivery-log${logSearch ? `?search=${encodeURIComponent(logSearch)}` : ''}`);
     const d = await r.json();
     setDeliveryLog(d.lines || []);
     setLogLoading(false);
@@ -39,7 +40,7 @@ export default function MailQueue() {
 
   async function loadBounceLog() {
     setBounceLoading(true);
-    const r = await api('/bounce-log');
+    const r = await fetchApi('/api/mail-queue/bounce-log');
     const d = await r.json();
     setBounceLog(d.lines || []);
     setBounceLoading(false);
@@ -49,7 +50,7 @@ export default function MailQueue() {
   useEffect(() => { if (tab === 'delivery-log') loadDeliveryLog(); if (tab === 'bounce-log') loadBounceLog(); }, [tab]);
 
   async function flush() {
-    await api('/flush', { method: 'POST' });
+    await fetchApi('/api/mail-queue/flush', { method: 'POST' });
     toast.success('Queue flushed');
     load();
   }
@@ -57,14 +58,14 @@ export default function MailQueue() {
   async function deleteMsg(id: string) {
     setActioning(id);
     try {
-      await api(`/${id}`, { method: 'DELETE' });
+      await fetchApi(`/api/mail-queue/${id}`, { method: 'DELETE' });
       setMessages(m => m.filter(x => x.id !== id));
     } finally { setActioning(null); }
   }
 
   async function deleteAll() {
-    if (!confirm('Delete all deferred messages?')) return;
-    await api('/', { method: 'DELETE' });
+    if (!await confirm('Delete all deferred messages?')) return;
+    await fetchApi('/api/mail-queue/', { method: 'DELETE' });
     toast.success('Deferred queue cleared');
     load();
   }
@@ -72,7 +73,7 @@ export default function MailQueue() {
   async function retryMsg(id: string) {
     setActioning(id);
     try {
-      await api(`/retry/${id}`, { method: 'POST' });
+      await fetchApi(`/api/mail-queue/retry/${id}`, { method: 'POST' });
       toast.success('Retry queued');
       load();
     } finally { setActioning(null); }
@@ -81,7 +82,7 @@ export default function MailQueue() {
   async function holdMsg(id: string) {
     setActioning(id);
     try {
-      await api(`/hold/${id}`, { method: 'POST' });
+      await fetchApi(`/api/mail-queue/hold/${id}`, { method: 'POST' });
       toast.success('Message held');
       load();
     } finally { setActioning(null); }
@@ -90,7 +91,7 @@ export default function MailQueue() {
   async function unholdMsg(id: string) {
     setActioning(id);
     try {
-      await api(`/unhold/${id}`, { method: 'POST' });
+      await fetchApi(`/api/mail-queue/unhold/${id}`, { method: 'POST' });
       toast.success('Message released');
       load();
     } finally { setActioning(null); }

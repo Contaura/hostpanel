@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, BarChart2, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/resource-limits${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { useConfirm } from '../context/ConfirmContext';
+import { fetchApi } from '../lib/api';
 
 export default function ResourceLimits() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState<'cgroups' | 'nginx' | 'quotas' | 'io-stats'>('cgroups');
   const [diskQuotas, setDiskQuotas] = useState<any[]>([]);
   const [quotaForm, setQuotaForm] = useState<Record<string, { soft: string; hard: string }>>({});
@@ -23,36 +24,36 @@ export default function ResourceLimits() {
 
   async function load() {
     try {
-      const r = await api('/');
+      const r = await fetchApi('/api/resource-limits/');
       setAccounts(Array.isArray(await r.clone().json()) ? await r.json() : []);
     } finally { setPageLoading(false); }
   }
 
   async function loadVhosts() {
-    const r = await api('/nginx/vhosts');
+    const r = await fetchApi('/api/resource-limits/nginx/vhosts');
     setVhosts(await r.json());
   }
 
   async function saveLimits(username: string) {
     const l = limits[username] || {};
-    const r = await api(`/${username}`, { method: 'POST', body: JSON.stringify(l) });
+    const r = await fetchApi(`/api/resource-limits/${username}`, { method: 'POST', body: JSON.stringify(l) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else toast.success(`Limits set for ${username}`);
   }
 
   async function createVhost() {
-    const r = await api('/nginx/vhosts', { method: 'POST', body: JSON.stringify(newVhost) });
+    const r = await fetchApi('/api/resource-limits/nginx/vhosts', { method: 'POST', body: JSON.stringify(newVhost) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success('Vhost created'); setAddingVhost(false); setNewVhost({ domain: '', root: '', php_fpm_socket: '' }); loadVhosts(); }
   }
 
   async function deleteVhost(domain: string) {
-    if (!confirm(`Delete vhost for ${domain}?`)) return;
+    if (!await confirm(`Delete vhost for ${domain}?`)) return;
     setDeletingVhost(domain);
     try {
-      await api(`/nginx/vhosts/${domain}`, { method: 'DELETE' });
+      await fetchApi(`/api/resource-limits/nginx/vhosts/${domain}`, { method: 'DELETE' });
       loadVhosts();
     } finally { setDeletingVhost(null); }
   }
@@ -64,7 +65,7 @@ export default function ResourceLimits() {
   async function loadIoStats() {
     if (!ioUser.trim()) return;
     setIoLoading(true);
-    const r = await api(`/${ioUser.trim()}/io-stats`);
+    const r = await fetchApi(`/api/resource-limits/${ioUser.trim()}/io-stats`);
     const d = await r.json();
     setIoStats(d.error ? null : d);
     if (d.error) toast.error(d.error);
@@ -72,14 +73,14 @@ export default function ResourceLimits() {
   }
 
   async function loadDiskQuotas() {
-    const r = await api('/disk-quotas');
+    const r = await fetchApi('/api/resource-limits/disk-quotas');
     const d = await r.json();
     setDiskQuotas(Array.isArray(d) ? d : []);
   }
 
   async function setDiskQuota(username: string) {
     const q = quotaForm[username] || {};
-    const r = await api(`/disk-quotas/${username}`, { method: 'POST', body: JSON.stringify({ block_soft_mb: parseInt(q.soft) || 0, block_hard_mb: parseInt(q.hard) || 0 }) });
+    const r = await fetchApi(`/api/resource-limits/disk-quotas/${username}`, { method: 'POST', body: JSON.stringify({ block_soft_mb: parseInt(q.soft) || 0, block_hard_mb: parseInt(q.hard) || 0 }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`Quota set for ${username}`); loadDiskQuotas(); }

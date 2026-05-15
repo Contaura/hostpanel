@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RefreshCw, Trash2, Play, Square } from 'lucide-react';
 import { useToast } from '../components/Toast';
-
-const api = (p: string, o?: RequestInit) => fetch(`/api/cache${p}`, { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('hp_token')}` }, ...o });
+import { fetchApi } from '../lib/api';
 
 export default function CacheManager() {
   const toast = useToast();
@@ -16,9 +15,9 @@ export default function CacheManager() {
   async function loadAll() {
     try {
       const [o, r, m] = await Promise.all([
-        api('/opcache').then(r => r.json()),
-        api('/redis').then(r => r.json()),
-        api('/memcached').then(r => r.json()),
+        fetchApi('/api/cache/opcache').then(r => r.json()),
+        fetchApi('/api/cache/redis').then(r => r.json()),
+        fetchApi('/api/cache/memcached').then(r => r.json()),
       ]);
       setOpcache(o); setRedis(r); setMemcached(m);
     } finally { setPageLoading(false); }
@@ -29,7 +28,7 @@ export default function CacheManager() {
   async function flush(type: string) {
     setFlushing(type);
     try {
-      const r = await api(`/${type}/flush`, { method: 'POST' });
+      const r = await fetchApi(`/api/cache/${type}/flush`, { method: 'POST' });
       const d = await r.json();
       if (d.error) toast.error(d.error);
       else { toast.success(`${type} flushed`); loadAll(); }
@@ -37,7 +36,7 @@ export default function CacheManager() {
   }
 
   async function redisAction(action: 'start' | 'stop') {
-    const r = await api(`/redis/${action}`, { method: 'POST' });
+    const r = await fetchApi(`/api/cache/redis/${action}`, { method: 'POST' });
     const d = await r.json();
     if (d.error) toast.error(d.error);
     else { toast.success(`Redis ${action}ped`); loadAll(); }
