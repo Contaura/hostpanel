@@ -25,6 +25,15 @@ export function ipWhitelistMiddleware(req: Request, res: Response, next: NextFun
   const raw = req.ip || req.socket.remoteAddress || '';
   const clientIp = normalizeIp(raw);
 
+  // Loopback always passes — the box owner needs an escape hatch when they
+  // accidentally whitelist the wrong IP, so curl from a local SSH session
+  // (e.g. `ssh box -L 3001:localhost:3001`) can still reach the panel and
+  // delete the bad row.
+  if (clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost') {
+    next();
+    return;
+  }
+
   const allowed = entries.some(e => ipInCidr(clientIp, e.ip));
   if (allowed) { next(); return; }
 

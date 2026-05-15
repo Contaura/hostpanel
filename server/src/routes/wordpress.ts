@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import multer from 'multer';
@@ -8,6 +8,7 @@ import db from '../db';
 
 const router = Router();
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
 const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}$/;
@@ -163,8 +164,21 @@ router.post('/:domain/search-replace', async (req: Request, res: Response) => {
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const { search, replace } = req.body;
   if (!search || !replace) return res.status(400).json({ error: 'search and replace required' });
+  if (typeof search !== 'string' || typeof replace !== 'string') {
+    return res.status(400).json({ error: 'search and replace must be strings' });
+  }
   try {
-    const { stdout } = await wp(domain, `search-replace "${search}" "${replace}" --all-tables`);
+    // Use execFile argv form — the previous shell-string interpolation let a
+    // search value like `"; rm -rf / #` break out of the double quotes. wp-cli
+    // accepts the arguments unquoted here.
+    const { stdout } = await execFileAsync('wp', [
+      `--path=${wpPath(domain)}`,
+      '--allow-root',
+      'search-replace',
+      search,
+      replace,
+      '--all-tables',
+    ], { timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

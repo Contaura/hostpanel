@@ -87,6 +87,12 @@ npm install --workspace=client
 
 if [[ ! -f server/.env ]]; then
   cp server/.env.example server/.env
+  # server/.env carries the JWT secret, the bcrypt admin hash, the MariaDB
+  # root password, and (later) Stripe/PayPal/Cloudflare keys. Lock it down
+  # before writing any of those into it so the secrets are never readable to
+  # anyone but root.
+  chmod 600 server/.env
+  chown root:root server/.env 2>/dev/null || true
 
   # Randomise JWT secret
   JWT_SECRET=$(openssl rand -hex 32)
