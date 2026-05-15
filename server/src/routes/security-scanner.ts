@@ -35,6 +35,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS file_hashes (
 router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
   const { target = WEBROOT } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
+  // Reject shell metacharacters before interpolation. The previous form
+  // resolved the path and prefix-checked it against WEBROOT, but the
+  // result still landed inside `"${safePath}"` in a shell command, where
+  // $() and backticks are expanded even inside double quotes — so a
+  // target like "/var/www/$(rm -rf /)" passed the prefix check, kept
+  // its command substitution intact, and ran as root once clamscan was
+  // invoked.
+  if (/[$`"'\\;&|<>\n*?(){}[\]!]/.test(safePath)) {
+    return res.status(400).json({ error: 'Path contains invalid characters' });
+  }
   if (!safePath.startsWith(path.resolve(WEBROOT)) && safePath !== WEBROOT) {
     return res.status(400).json({ error: 'Path outside webroot' });
   }
@@ -73,6 +83,16 @@ router.post('/update-definitions', heavyLimit, async (_req: Request, res: Respon
 router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Response) => {
   const { target = WEBROOT } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
+  // Reject shell metacharacters before interpolation. The previous form
+  // resolved the path and prefix-checked it against WEBROOT, but the
+  // result still landed inside `"${safePath}"` in a shell command, where
+  // $() and backticks are expanded even inside double quotes — so a
+  // target like "/var/www/$(rm -rf /)" passed the prefix check, kept
+  // its command substitution intact, and ran as root once clamscan was
+  // invoked.
+  if (/[$`"'\\;&|<>\n*?(){}[\]!]/.test(safePath)) {
+    return res.status(400).json({ error: 'Path contains invalid characters' });
+  }
   if (!safePath.startsWith(path.resolve(WEBROOT))) {
     return res.status(400).json({ error: 'Path outside webroot' });
   }
@@ -100,6 +120,16 @@ router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Respons
 router.get('/integrity/check', async (req: Request, res: Response) => {
   const target = (req.query.target as string) || WEBROOT;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
+  // Reject shell metacharacters before interpolation. The previous form
+  // resolved the path and prefix-checked it against WEBROOT, but the
+  // result still landed inside `"${safePath}"` in a shell command, where
+  // $() and backticks are expanded even inside double quotes — so a
+  // target like "/var/www/$(rm -rf /)" passed the prefix check, kept
+  // its command substitution intact, and ran as root once clamscan was
+  // invoked.
+  if (/[$`"'\\;&|<>\n*?(){}[\]!]/.test(safePath)) {
+    return res.status(400).json({ error: 'Path contains invalid characters' });
+  }
   if (!safePath.startsWith(path.resolve(WEBROOT))) {
     return res.status(400).json({ error: 'Path outside webroot' });
   }
