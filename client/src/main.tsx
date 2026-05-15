@@ -7,7 +7,9 @@ import './index.css';
 axios.interceptors.response.use(
   res => res,
   err => {
-    if (err.response?.status === 401 && !err.config?.url?.includes('/api/auth/')) {
+    if (err.response?.status === 401
+        && !err.config?.url?.includes('/api/auth/')
+        && !err.config?.url?.includes('/api/portal/')) {
       localStorage.removeItem('hp_token');
       window.location.href = '/login';
     }
