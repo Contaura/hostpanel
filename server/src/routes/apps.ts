@@ -80,7 +80,7 @@ router.post('/:name/start', async (req: Request, res: Response) => {
     const envStr = Object.entries(JSON.parse(app.env_vars || '{}'))
       .map(([k, v]) => `${k}=${v}`).join(',');
     const envFlag = envStr ? `--env-var="${envStr}"` : '';
-    await execAsync(`pm2 start ${app.start_script} --name ${app.name} ${envFlag} --cwd ${app.working_dir} 2>&1`);
+    await execAsync(`pm2 start "${app.start_script}" --name "${app.name}" ${envFlag} --cwd "${app.working_dir}" 2>&1`);
     db.prepare("UPDATE managed_apps SET status='running', pm2_id=? WHERE name=?").run(app.name, app.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

@@ -54,7 +54,7 @@ router.post('/:id/deploy', async (req: Request, res: Response) => {
   const dep = db.prepare('SELECT * FROM git_deployments WHERE id = ?').get(req.params.id) as any;
   if (!dep) return res.status(404).json({ error: 'Deployment not found' });
   try {
-    const { stdout, stderr } = await execAsync(`cd ${dep.deploy_path} && ${dep.deploy_command}`, { timeout: 120000 });
+    const { stdout, stderr } = await execAsync(`cd "${dep.deploy_path}" && ${dep.deploy_command}`, { timeout: 120000 });
     db.prepare("UPDATE git_deployments SET last_deployed=datetime('now'), last_status='success' WHERE id=?").run(dep.id);
     res.json({ success: true, output: stdout + stderr });
   } catch (err: any) {
@@ -83,7 +83,7 @@ router.post('/webhook/:name', async (req: Request, res: Response) => {
   if (ref && !ref.endsWith(dep.branch)) return res.json({ skipped: true, reason: 'Branch mismatch' });
 
   try {
-    await execAsync(`cd ${dep.deploy_path} && ${dep.deploy_command}`, { timeout: 120000 });
+    await execAsync(`cd "${dep.deploy_path}" && ${dep.deploy_command}`, { timeout: 120000 });
     db.prepare("UPDATE git_deployments SET last_deployed=datetime('now'), last_status='success' WHERE id=?").run(dep.id);
     res.json({ success: true });
   } catch (err: any) {

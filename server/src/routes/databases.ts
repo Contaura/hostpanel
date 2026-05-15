@@ -104,13 +104,15 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Invalid username or missing password' });
     return;
   }
+  if (!/^[a-zA-Z0-9._%-]+$/.test(host)) return res.status(400).json({ error: 'Invalid host' });
+  if (database && !/^[a-zA-Z0-9_]+$/.test(database)) return res.status(400).json({ error: 'Invalid database name' });
 
   let conn;
   try {
     conn = await getConn();
-    await conn.query(`CREATE USER '${username}'@'${host}' IDENTIFIED BY ?`, [password]);
+    await conn.query(`CREATE USER ?@? IDENTIFIED BY ?`, [username, host, password]);
     if (database) {
-      await conn.query(`GRANT ALL PRIVILEGES ON \`${database}\`.* TO '${username}'@'${host}'`);
+      await conn.query(`GRANT ALL PRIVILEGES ON \`${database}\`.* TO ?@?`, [username, host]);
     }
     await conn.query('FLUSH PRIVILEGES');
     res.json({ message: `User ${username} created` });
@@ -124,11 +126,13 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
 router.delete('/users/:username', async (req: AuthRequest, res: Response) => {
   const { username } = req.params;
   const host = (req.query.host as string) || 'localhost';
+  if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
+  if (!/^[a-zA-Z0-9._%-]+$/.test(host)) return res.status(400).json({ error: 'Invalid host' });
 
   let conn;
   try {
     conn = await getConn();
-    await conn.query(`DROP USER IF EXISTS '${username}'@'${host}'`);
+    await conn.query(`DROP USER IF EXISTS ?@?`, [username, host]);
     await conn.query('FLUSH PRIVILEGES');
     res.json({ message: `User ${username} deleted` });
   } catch (err: any) {

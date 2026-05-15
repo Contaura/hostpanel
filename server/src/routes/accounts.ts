@@ -230,7 +230,7 @@ router.post('/:id/export', async (req: AuthRequest, res: Response) => {
 
     // Create manifest
     const manifest = { username: account.username, domain: account.domain, exported_at: new Date().toISOString() };
-    await execAsync(`echo '${JSON.stringify(manifest)}' > "${tmpDir}/manifest.json"`);
+    await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
     // Bundle everything
     await execAsync(`tar -czf "${archivePath}" -C "${tmpDir}" . && rm -rf "${tmpDir}"`, { timeout: 300000 });

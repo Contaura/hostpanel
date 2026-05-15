@@ -140,12 +140,17 @@ router.post('/schedules', async (req: AuthRequest, res: Response) => {
   const { type, target, schedule } = req.body;
   if (!type || !schedule) return res.status(400).json({ error: 'type and schedule required' });
   if (!['files', 'database'].includes(type)) return res.status(400).json({ error: 'type must be files or database' });
+  if (target && !/^[a-zA-Z0-9_]+$/.test(target)) return res.status(400).json({ error: 'Invalid target' });
+  if (!/^[\d*/,\- ]+$/.test(schedule) || schedule.trim().split(/\s+/).length !== 5) {
+    return res.status(400).json({ error: 'Invalid cron schedule (must be 5 fields: min hour dom mon dow)' });
+  }
 
   const r = db.prepare('INSERT INTO backup_schedules (type, target, schedule) VALUES (?, ?, ?)').run(type, target || null, schedule);
 
-  // Write a cron entry for root
+  // Use schedule ID in cron line — no user data interpolated into the shell command
   const id = r.lastInsertRowid;
-  const cronCmd = `curl -s -X POST http://localhost:${process.env.PORT || 3001}/api/backup/create -H 'Content-Type: application/json' -d '{"type":"${type}","target":"${target || ''}"}' > /dev/null 2>&1`;
+  const port = process.env.PORT || 3001;
+  const cronCmd = `curl -s -X POST "http://localhost:${port}/api/backup/run-schedule/${id}" > /dev/null 2>&1`;
   const cronLine = `${schedule} ${cronCmd} # hostpanel-backup-${id}`;
   try {
     const { stdout: existing } = await execAsync('crontab -l 2>/dev/null || echo ""');
