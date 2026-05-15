@@ -28,7 +28,7 @@ echo "[2/9] Installing system packages..."
 dnf install -y epel-release 2>/dev/null || true
 dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
                bind bind-utils vsftpd certbot python3-certbot-apache \
-               curl tar gzip openssl make gcc-c++ python3
+               curl tar gzip openssl make gcc-c++ python3 roundcubemail
 
 systemctl enable --now httpd mariadb postfix dovecot named vsftpd
 
@@ -180,6 +180,22 @@ cat >/etc/httpd/conf.d/hostpanel-panel.conf <<VHOST
   ProxyPassReverse / http://127.0.0.1:3001/
 </VirtualHost>
 VHOST
+
+# Roundcube webmail — alias /roundcube to the installed package
+if rpm -q roundcubemail &>/dev/null; then
+  cat >/etc/httpd/conf.d/roundcubemail.conf <<'RCUBE'
+Alias /roundcube /usr/share/roundcubemail
+
+<Directory /usr/share/roundcubemail>
+    Options -Indexes
+    AllowOverride All
+    Require all granted
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+</Directory>
+RCUBE
+  echo "  Roundcube webmail configured at /roundcube"
+fi
 
 # Allow Apache to proxy to local network ports (blocked by SELinux on RHEL/AlmaLinux by default)
 setsebool -P httpd_can_network_connect 1
