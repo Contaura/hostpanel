@@ -30,12 +30,20 @@ function validateDomain(domain: string): boolean {
 
 router.get('/sites', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync(`find ${WEBROOT} -name "wp-config.php" -maxdepth 4 2>/dev/null`);
+    // Detect installs by wp-includes/version.php (always present in any
+    // WordPress codebase) rather than wp-config.php — that way half-installed
+    // sites (files unpacked, config not yet written) still show up so the
+    // user can finish setup instead of seeing an empty list.
+    const { stdout } = await execAsync(`find ${WEBROOT} -maxdepth 5 -path "*/wp-includes/version.php" 2>/dev/null`);
     const paths = stdout.trim().split('\n').filter(Boolean);
+    const { existsSync } = await import('fs');
     const sites = paths.map(p => {
-      const parts = p.split('/');
-      const domain = parts[parts.length - 3] || parts[parts.length - 2];
-      return { domain, path: path.dirname(p) };
+      // p ends in /<install_dir>/wp-includes/version.php; install_dir is two up.
+      const installDir = path.dirname(path.dirname(p));
+      const domainDir = path.dirname(installDir);
+      const domain = path.basename(domainDir);
+      const configured = existsSync(path.join(installDir, 'wp-config.php'));
+      return { domain, path: installDir, configured };
     });
     res.json(sites);
   } catch { res.json([]); }

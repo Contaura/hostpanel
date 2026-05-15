@@ -120,12 +120,29 @@ export default function WordPressManager() {
       <div className="card flex gap-3 items-center">
         <select className="input flex-1" value={selected} onChange={e => selectSite(e.target.value)}>
           <option value="">Select a WordPress site…</option>
-          {sites.map(s => <option key={s.domain} value={s.domain}>{s.domain}</option>)}
+          {sites.map(s => (
+            <option key={s.domain} value={s.domain}>
+              {s.domain}{s.configured === false ? ' — needs configuration' : ''}
+            </option>
+          ))}
         </select>
         <button className="btn-ghost" onClick={() => fetchApi('/api/wordpress/sites').then(r => r.json()).then(d => setSites(Array.isArray(d) ? d : []))}><RefreshCw size={14} /></button>
       </div>
 
       {sites.length === 0 && <p className="text-sm text-slate-500">No WordPress installations found. Install one via Script Installer.</p>}
+
+      {selected && sites.find(s => s.domain === selected)?.configured === false && (
+        <div className="card border-amber-300 bg-amber-50 dark:bg-amber-900/20 text-sm">
+          <p className="font-medium text-amber-900 dark:text-amber-200">This site has WordPress files but no <code className="font-mono">wp-config.php</code>.</p>
+          <p className="text-amber-800 dark:text-amber-300 mt-1">
+            Finish setup by opening{' '}
+            <a className="underline" target="_blank" rel="noopener noreferrer" href={safeHttpUrl(`http://${selected}/wp-admin/install.php`) || '#'}>
+              http://{selected}/wp-admin/install.php
+            </a>
+            {' '}or re-run the Script Installer with database credentials.
+          </p>
+        </div>
+      )}
 
       {selected && info && (
         <>

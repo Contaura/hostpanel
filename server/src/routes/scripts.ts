@@ -112,6 +112,14 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
     res.status(400).json({ error: 'Invalid domain' });
     return;
   }
+  // WordPress without DB creds extracts the codebase but never writes
+  // wp-config.php, leaving a half-installed site that the WP Manager can't
+  // do anything with. Require the DB fields up front so "install succeeded"
+  // implies a working wp-config.php.
+  if (script === 'wordpress' && (!dbName || !dbUser || !dbPass)) {
+    res.status(400).json({ error: 'WordPress install requires dbName, dbUser, and dbPass — these go into wp-config.php' });
+    return;
+  }
 
   const installPath = path.join(WEBROOT, domain, 'public_html');
   const meta = SCRIPTS[script];
