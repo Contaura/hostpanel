@@ -47,8 +47,11 @@ fi
 
 # ── 4/9  Mail directories ────────────────────────────────────────────────────
 echo "[4/9] Configuring mail directories..."
-mkdir -p /etc/postfix/virtual /etc/dovecot /var/mail/vhosts
-touch /etc/postfix/virtual/mailbox /etc/postfix/virtual/aliases
+mkdir -p /etc/dovecot /var/mail/vhosts
+# /etc/postfix/virtual and /etc/postfix/vmailbox are flat files (Postfix maps),
+# not directories — touch them if they don't already exist.
+touch /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport
+postmap /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport 2>/dev/null || true
 touch /etc/dovecot/users
 chmod 640 /etc/dovecot/users
 
