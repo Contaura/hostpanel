@@ -50,6 +50,7 @@ export default function Accounts() {
   const [form, setForm] = useState({
     username: '', domain: '', password: '',
     plan_id: '', client_id: '', notes: '', expires_at: '',
+    new_client_name: '', new_client_email: '',
   });
 
   async function load() {
@@ -74,9 +75,18 @@ export default function Accounts() {
   async function create(e: FormEvent) {
     e.preventDefault(); setLoading(true);
     try {
-      await axios.post('/api/accounts', form);
+      let client_id = form.client_id;
+      // Auto-create a new client if email is provided and no existing client is selected
+      if (!client_id && form.new_client_email) {
+        const { data } = await axios.post('/api/billing/clients', {
+          name: form.new_client_name || form.username,
+          email: form.new_client_email,
+        });
+        client_id = String(data.id);
+      }
+      await axios.post('/api/accounts', { ...form, client_id });
       toast.success(`Account ${form.username} created`);
-      setForm({ username: '', domain: '', password: '', plan_id: '', client_id: '', notes: '', expires_at: '' });
+      setForm({ username: '', domain: '', password: '', plan_id: '', client_id: '', notes: '', expires_at: '', new_client_name: '', new_client_email: '' });
       setShowForm(false); load();
     } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to create account'); }
     finally { setLoading(false); }
@@ -236,13 +246,30 @@ export default function Accounts() {
               </select>
             </div>
             <div>
-              <label className="label">Client</label>
-              <select className="input" value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })}>
-                <option value="">No client</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <label className="label">Existing Client</label>
+              <select className="input" value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value, new_client_name: '', new_client_email: '' })}>
+                <option value="">New client…</option>
+                {clients.map(c => <option key={c.id} value={c.id}>{c.name} ({c.email})</option>)}
               </select>
             </div>
           </div>
+
+          {!form.client_id && (
+            <div className="grid grid-cols-2 gap-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+              <p className="col-span-2 text-xs text-slate-500 font-medium">New client — will be created automatically</p>
+              <div>
+                <label className="label">Client Name</label>
+                <input className="input" placeholder={form.username || 'Full name'}
+                  value={form.new_client_name} onChange={e => setForm({ ...form, new_client_name: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Client Email <span className="text-red-400">*</span></label>
+                <input type="email" className="input" placeholder="client@example.com"
+                  value={form.new_client_email} onChange={e => setForm({ ...form, new_client_email: e.target.value })}
+                  required />
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="label">Expiry Date (optional)</label>
