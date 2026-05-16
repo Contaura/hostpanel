@@ -919,6 +919,19 @@ router.delete('/email/catch-all/:domain', clientAuth, async (req: Request, res: 
   res.json({ success: true });
 });
 
+/* ── Webmail (Roundcube) availability + per-mailbox deep link ── */
+
+router.get('/webmail', clientAuth, async (_req: Request, res: Response) => {
+  const setting = (db.prepare('SELECT value FROM settings WHERE key = ?').get('webmail_url') as any)?.value;
+  const configured = (setting || process.env.WEBMAIL_URL || '').trim();
+  const installed =
+    existsSync('/usr/share/roundcubemail') ||
+    await execAsync('rpm -q roundcubemail >/dev/null 2>&1 && echo y || true').then(r => r.stdout.trim() === 'y').catch(() => false);
+  // Same-origin default — the install.sh Apache alias mounts /roundcube
+  const url = configured || (installed ? '/roundcube' : '');
+  res.json({ installed, url });
+});
+
 /* ── DKIM / SPF / DMARC for owned domain ────────────────────── */
 
 router.get('/mail-auth/:domain', clientAuth, async (req: Request, res: Response) => {

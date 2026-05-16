@@ -94,6 +94,7 @@ export default function ClientPortal() {
   const [sshGroups, setSshGroups]               = useState<SshKeyGroup[]>([]);
   const [sshForm, setSshForm]                   = useState({ user: '', key: '' });
   const [backups, setBackups]                   = useState<PortalBackup[]>([]);
+  const [webmail, setWebmail]                   = useState<{ installed: boolean; url: string } | null>(null);
   const [scriptForm, setScriptForm]             = useState({ dbName: '', dbUser: '', dbPass: '', siteTitle: '', adminUser: '', adminPass: '', adminEmail: '' });
   // Round-5 portal state
   const [htpasswdList, setHtpasswdList]         = useState<HtpasswdEntry[]>([]);
@@ -144,7 +145,7 @@ export default function ClientPortal() {
     setCatchall(null); setMailAuth(null); setCronGroups([]); setSshGroups([]); setBackups([]);
     if (accountSubtab === 'details')    loadUsage(selectedAccount.id);
     if (accountSubtab === 'dns')        loadDns(selectedAccount.domain);
-    if (accountSubtab === 'email')      { loadEmailAccts(selectedAccount.domain); loadForwarders(selectedAccount.domain); loadAutoresp(); loadCatchall(selectedAccount.domain); }
+    if (accountSubtab === 'email')      { loadEmailAccts(selectedAccount.domain); loadForwarders(selectedAccount.domain); loadAutoresp(); loadCatchall(selectedAccount.domain); loadWebmail(); }
     if (accountSubtab === 'mailauth')   loadMailAuth(selectedAccount.domain);
     if (accountSubtab === 'ftp')        loadFtpUsers();
     if (accountSubtab === 'databases')  { loadDbs(); loadDbUsers(); }
@@ -472,6 +473,7 @@ export default function ClientPortal() {
   }
 
   async function loadAutoresp() { try { const r = await api('/api/portal/email/autoresponders'); setAutoresp(r.data); } catch (e: any) { setToast({ type: 'error', msg: e.response?.data?.error || 'Failed' }); } }
+  async function loadWebmail() { try { const r = await api('/api/portal/webmail'); setWebmail(r.data); } catch { setWebmail({ installed: false, url: '' }); } }
   async function addAutoresp() {
     if (!selectedAccount || !autorespForm.user || !autorespForm.subject || !autorespForm.body) return;
     setHostingBusy(true);
@@ -952,6 +954,20 @@ export default function ClientPortal() {
 
                     {accountSubtab === 'email' && (
                       <div className="space-y-4">
+                        {webmail && (
+                          <div className="flex items-center justify-between rounded border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs">
+                            <div className="flex items-center gap-2">
+                              <div className={`w-2 h-2 rounded-full ${webmail.installed ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                              <span className="font-medium">Webmail</span>
+                              <span className="text-slate-500">{webmail.installed ? 'Roundcube available' : 'Not installed on this server'}</span>
+                            </div>
+                            {webmail.installed && safeHttpUrl(webmail.url) && (
+                              <a href={safeHttpUrl(webmail.url) || '#'} target="_blank" rel="noopener noreferrer" className="btn-secondary text-xs inline-flex items-center gap-1">
+                                <ExternalLink size={12} /> Open Webmail
+                              </a>
+                            )}
+                          </div>
+                        )}
                         <div className="grid grid-cols-12 gap-2 items-end">
                           <div className="col-span-4">
                             <label className="label text-xs">Mailbox</label>
@@ -974,12 +990,23 @@ export default function ClientPortal() {
                           </tr></thead>
                           <tbody>
                             {emailAccts.length === 0 && <tr><td colSpan={2} className="py-4 text-center text-slate-400 text-xs">No mailboxes</td></tr>}
-                            {emailAccts.map(e => (
-                              <tr key={e.email} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
-                                <td className="py-2 px-1 font-mono text-xs">{e.email}</td>
-                                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => deleteEmailAcct(e.email)} disabled={hostingBusy}><Trash2 size={12} /></button></td>
-                              </tr>
-                            ))}
+                            {emailAccts.map(e => {
+                              const wmBase = webmail?.installed ? safeHttpUrl(webmail.url) : null;
+                              const wmHref = wmBase ? `${wmBase}${wmBase.includes('?') ? '&' : '?'}_user=${encodeURIComponent(e.email)}` : null;
+                              return (
+                                <tr key={e.email} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
+                                  <td className="py-2 px-1 font-mono text-xs">{e.email}</td>
+                                  <td className="text-right">
+                                    {wmHref && (
+                                      <a href={wmHref} target="_blank" rel="noopener noreferrer" className="btn-icon text-emerald-600 dark:text-emerald-400 mr-1" title="Open in webmail">
+                                        <ExternalLink size={12} />
+                                      </a>
+                                    )}
+                                    <button className="btn-icon text-rose-500" onClick={() => deleteEmailAcct(e.email)} disabled={hostingBusy}><Trash2 size={12} /></button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
 
