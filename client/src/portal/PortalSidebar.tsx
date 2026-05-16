@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { fetchApi } from '../lib/api';
 import { usePortalAuth } from './PortalAuthContext';
 import {
   LayoutDashboard, FolderOpen, Archive,
@@ -113,7 +112,10 @@ export default function PortalSidebar() {
   const sections = buildSections(!!selectedAccount);
 
   useEffect(() => {
-    fetchApi('/api/settings/logo')
+    // Plain fetch (no Authorization header, no auto-redirect on 401) — the
+    // logo/name endpoint is a public branding helper but the admin-flavored
+    // fetchApi() would force-redirect portal users to /login on a 401.
+    fetch('/api/settings/logo')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.url) setLogoUrl(d.url); if (d?.name) setPanelName(d.name); })
       .catch(() => {});
