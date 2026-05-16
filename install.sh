@@ -185,7 +185,37 @@ p.write_text(new)
 PY
 fi
 
+# Expose a Dovecot SASL auth socket inside the Postfix chroot so the Postfix
+# submission service (587) can validate MAIL FROM credentials against the
+# same passwd-file IMAP uses. The upstream config has this listener stubbed
+# out under `service auth`; uncomment it with the right perms.
+if ! grep -q "^  unix_listener /var/spool/postfix/private/auth" /etc/dovecot/conf.d/10-master.conf; then
+  python3 - <<'PY'
+import pathlib
+p = pathlib.Path('/etc/dovecot/conf.d/10-master.conf')
+src = p.read_text()
+old = (
+    "  # Postfix smtp-auth\n"
+    "  #unix_listener /var/spool/postfix/private/auth {\n"
+    "  #  mode = 0666\n"
+    "  #}\n"
+)
+new = (
+    "  # Postfix smtp-auth — HostPanel: lets Postfix submission (587) validate\n"
+    "  # MAIL FROM credentials against the same passwd-file IMAP uses.\n"
+    "  unix_listener /var/spool/postfix/private/auth {\n"
+    "    mode  = 0660\n"
+    "    user  = postfix\n"
+    "    group = postfix\n"
+    "  }\n"
+)
+if old in src:
+    p.write_text(src.replace(old, new))
+PY
+fi
+
 # Postfix: route virtual recipients via Dovecot LMTP and accept the maps.
+# smtpd_sasl_* wires the submission service below to Dovecot for AUTH.
 postconf -e \
   "virtual_mailbox_domains = hash:/etc/postfix/vmail/domains" \
   "virtual_mailbox_maps    = hash:/etc/postfix/vmail/mailbox" \
@@ -195,14 +225,59 @@ postconf -e \
   "virtual_minimum_uid     = 100" \
   "virtual_uid_maps        = static:5000" \
   "virtual_gid_maps        = static:5000" \
-  "inet_interfaces         = all"
+  "inet_interfaces         = all" \
+  "smtpd_sasl_type         = dovecot" \
+  "smtpd_sasl_path         = private/auth" \
+  "smtpd_sasl_local_domain =" \
+  "smtpd_tls_auth_only     = yes"
+
+# Uncomment the submission (587) service in master.cf with SASL + STARTTLS
+# requirements. Done with sed -E so re-runs are idempotent (no-op if already
+# uncommented). mua_* restriction macros are upstream's defaults and aren't
+# set in main.cf, so we replace them with explicit policies.
+if grep -qE '^#submission inet' /etc/postfix/master.cf; then
+  python3 - <<'PY'
+import pathlib
+p = pathlib.Path('/etc/postfix/master.cf')
+src = p.read_text()
+old = (
+    "#submission inet n       -       n       -       -       smtpd\n"
+    "#  -o syslog_name=postfix/submission\n"
+    "#  -o smtpd_tls_security_level=encrypt\n"
+    "#  -o smtpd_sasl_auth_enable=yes\n"
+    "#  -o smtpd_tls_auth_only=yes\n"
+    "#  -o smtpd_reject_unlisted_recipient=no\n"
+    "#  -o smtpd_client_restrictions=$mua_client_restrictions\n"
+    "#  -o smtpd_helo_restrictions=$mua_helo_restrictions\n"
+    "#  -o smtpd_sender_restrictions=$mua_sender_restrictions\n"
+    "#  -o smtpd_recipient_restrictions=\n"
+    "#  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject\n"
+    "#  -o milter_macro_daemon_name=ORIGINATING\n"
+)
+new = (
+    "submission inet n       -       n       -       -       smtpd\n"
+    "  -o syslog_name=postfix/submission\n"
+    "  -o smtpd_tls_security_level=encrypt\n"
+    "  -o smtpd_sasl_auth_enable=yes\n"
+    "  -o smtpd_tls_auth_only=yes\n"
+    "  -o smtpd_reject_unlisted_recipient=no\n"
+    "  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject\n"
+    "  -o smtpd_relay_restrictions=permit_sasl_authenticated,reject\n"
+    "  -o milter_macro_daemon_name=ORIGINATING\n"
+)
+if old in src:
+    p.write_text(src.replace(old, new))
+PY
+fi
 
 systemctl restart dovecot
 systemctl restart postfix
 
-# Open SMTP for inbound mail (submission/465 are separate work).
-firewall-cmd --permanent --add-service=smtp >/dev/null 2>&1 || true
-firewall-cmd --reload >/dev/null 2>&1 || true
+# Open SMTP + submission. firewalld on RHEL 9 doesn't ship a 'submission'
+# service alias, so reference the port directly.
+firewall-cmd --permanent --add-service=smtp     >/dev/null 2>&1 || true
+firewall-cmd --permanent --add-port=587/tcp     >/dev/null 2>&1 || true
+firewall-cmd --reload                            >/dev/null 2>&1 || true
 
 # ── 5/9  vsftpd ──────────────────────────────────────────────────────────────
 echo "[5/9] Configuring FTP..."
@@ -425,9 +500,15 @@ SQL
 \$config = [];
 \$config['db_dsnw']      = 'mysql://${RC_USER}:${RC_PASS}@localhost/${RC_DB}';
 \$config['imap_host']    = 'localhost:143';
-\$config['smtp_host']    = 'localhost:587';
+// tls:// forces STARTTLS; Postfix submission rejects unencrypted AUTH.
+// allow_self_signed lets us use the default Postfix self-signed cert for
+// the loopback hop (a real cert would need extra wiring outside install.sh).
+\$config['smtp_host']    = 'tls://localhost:587';
 \$config['smtp_user']    = '%u';
 \$config['smtp_pass']    = '%p';
+\$config['smtp_conn_options'] = [
+    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true],
+];
 \$config['des_key']      = '${DES_KEY}';
 \$config['support_url']  = '';
 \$config['product_name'] = 'HostPanel Webmail';
