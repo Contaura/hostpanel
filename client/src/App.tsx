@@ -37,8 +37,33 @@ import SystemMonitor from './pages/SystemMonitor';
 import Settings from './pages/Settings';
 import AdminUsers from './pages/AdminUsers';
 import ApiTokens from './pages/ApiTokens';
-import ClientPortal from './pages/ClientPortal';
 import ClientPortalLogin from './pages/ClientPortalLogin';
+import PortalLayout from './portal/PortalLayout';
+import PortalDashboard from './portal/pages/Dashboard';
+import PortalInvoices from './portal/pages/Invoices';
+import PortalProfile from './portal/pages/Profile';
+import PortalFiles from './portal/pages/Files';
+import PortalBackups from './portal/pages/Backups';
+import PortalDns from './portal/pages/Dns';
+import PortalSubdomains from './portal/pages/Subdomains';
+import PortalRedirects from './portal/pages/Redirects';
+import PortalErrorPages from './portal/pages/ErrorPages';
+import PortalHtaccess from './portal/pages/Htaccess';
+import PortalDatabases from './portal/pages/Databases';
+import PortalEmail from './portal/pages/Email';
+import PortalEmailExtras from './portal/pages/EmailExtras';
+import PortalMailAuth from './portal/pages/MailAuth';
+import PortalSpamRules from './portal/pages/SpamRules';
+import PortalWebmail from './portal/pages/Webmail';
+import PortalSsl from './portal/pages/Ssl';
+import PortalHtpasswd from './portal/pages/Htpasswd';
+import PortalHotlink from './portal/pages/Hotlink';
+import PortalSecurityScanner from './portal/pages/SecurityScanner';
+import PortalSshKeys from './portal/pages/SshKeys';
+import PortalCron from './portal/pages/Cron';
+import PortalFtp from './portal/pages/Ftp';
+import PortalStats from './portal/pages/Stats';
+import PortalScripts from './portal/pages/Scripts';
 import DkimManager from './pages/DkimManager';
 import MailQueue from './pages/MailQueue';
 import CloudflareManager from './pages/CloudflareManager';
@@ -75,7 +100,33 @@ function AppRoutes() {
 
       {/* Client Portal — standalone, no admin auth */}
       <Route path="/portal/login" element={<ClientPortalLogin />} />
-      <Route path="/portal" element={<ClientPortal />} />
+      <Route path="/portal" element={<PortalLayout />}>
+        <Route index                      element={<PortalDashboard />} />
+        <Route path="invoices"            element={<PortalInvoices />} />
+        <Route path="profile"             element={<PortalProfile />} />
+        <Route path="files"               element={<PortalFiles />} />
+        <Route path="backups"             element={<PortalBackups />} />
+        <Route path="dns"                 element={<PortalDns />} />
+        <Route path="subdomains"          element={<PortalSubdomains />} />
+        <Route path="redirects"           element={<PortalRedirects />} />
+        <Route path="error-pages"         element={<PortalErrorPages />} />
+        <Route path="htaccess"            element={<PortalHtaccess />} />
+        <Route path="databases"           element={<PortalDatabases />} />
+        <Route path="email"               element={<PortalEmail />} />
+        <Route path="email-extras"        element={<PortalEmailExtras />} />
+        <Route path="mail-auth"           element={<PortalMailAuth />} />
+        <Route path="spam-rules"          element={<PortalSpamRules />} />
+        <Route path="webmail"             element={<PortalWebmail />} />
+        <Route path="ssl"                 element={<PortalSsl />} />
+        <Route path="htpasswd"            element={<PortalHtpasswd />} />
+        <Route path="hotlink"             element={<PortalHotlink />} />
+        <Route path="security-scanner"    element={<PortalSecurityScanner />} />
+        <Route path="ssh-keys"            element={<PortalSshKeys />} />
+        <Route path="cron"                element={<PortalCron />} />
+        <Route path="ftp"                 element={<PortalFtp />} />
+        <Route path="stats"               element={<PortalStats />} />
+        <Route path="scripts"             element={<PortalScripts />} />
+      </Route>
 
       <Route path="/" element={<PrivateRoute><ErrorBoundary><Layout /></ErrorBoundary></PrivateRoute>}>
         <Route index element={<Dashboard />} />
