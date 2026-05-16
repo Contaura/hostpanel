@@ -120,8 +120,33 @@ postmap /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || tru
 chmod 640 /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases
 chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
 
+# Virtual mail user that owns every mailbox tree under /etc/postfix/vmail.
+# UID/GID 5000 must match the value the panel writes into /etc/dovecot/users
+# (server/src/routes/email.ts hard-codes 5000:5000 in the passwd-file entry).
+getent group  vmail >/dev/null || groupadd -g 5000 vmail
+getent passwd vmail >/dev/null || useradd -u 5000 -g 5000 -d /etc/postfix/vmail -s /sbin/nologin -M vmail
+chown -R vmail:vmail /etc/postfix/vmail
+# Keep the postmap files writable by postfix as before — chown above swept them too.
+chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
+
+# /etc/dovecot/users is the Dovecot passwd-file passdb. Dovecot's auth worker
+# runs as the `dovecot` user, so root-only perms here silently break IMAP login
+# with "open(/etc/dovecot/users) failed: Permission denied".
 touch /etc/dovecot/users
+chown root:dovecot /etc/dovecot/users
 chmod 640 /etc/dovecot/users
+
+# Switch Dovecot from default PAM/system auth to the passwd-file the panel
+# manages, and tell it where the virtual maildirs live (the home from the
+# passwd-file entry, i.e. /etc/postfix/vmail/<domain>/<user>).
+if ! grep -qE '^!include auth-passwdfile\.conf\.ext' /etc/dovecot/conf.d/10-auth.conf; then
+  sed -i 's|^!include auth-system\.conf\.ext|#!include auth-system.conf.ext|'       /etc/dovecot/conf.d/10-auth.conf
+  sed -i 's|^#!include auth-passwdfile\.conf\.ext|!include auth-passwdfile.conf.ext|' /etc/dovecot/conf.d/10-auth.conf
+fi
+if ! grep -qE '^mail_location\s*=\s*maildir:~/Maildir' /etc/dovecot/conf.d/10-mail.conf; then
+  sed -i 's|^#mail_location =\s*$|mail_location = maildir:~/Maildir|' /etc/dovecot/conf.d/10-mail.conf
+fi
+systemctl restart dovecot
 
 # ── 5/9  vsftpd ──────────────────────────────────────────────────────────────
 echo "[5/9] Configuring FTP..."
