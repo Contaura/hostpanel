@@ -114,20 +114,29 @@ mkdir -p /etc/dovecot /var/mail/vhosts
 touch /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport
 postmap /etc/postfix/virtual /etc/postfix/vmailbox /etc/postfix/transport 2>/dev/null || true
 
+# Postfix lookup maps the panel writes per-account entries into. These stay
+# under /etc/postfix because that's where Postfix reads config from; they hold
+# `<email>    <domain>/<user>/` (mailbox), forwarder pairs (aliases), and the
+# accepted-domains list (domains).
 mkdir -p /etc/postfix/vmail
-touch /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases
-postmap /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
-chmod 640 /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases
-chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
+touch /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases /etc/postfix/vmail/domains
+postmap /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases /etc/postfix/vmail/domains 2>/dev/null || true
+chmod 640 /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases /etc/postfix/vmail/domains
+chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases /etc/postfix/vmail/domains 2>/dev/null || true
 
-# Virtual mail user that owns every mailbox tree under /etc/postfix/vmail.
+# Virtual mail user that owns every Maildir under /var/mail/vhosts.
 # UID/GID 5000 must match the value the panel writes into /etc/dovecot/users
 # (server/src/routes/email.ts hard-codes 5000:5000 in the passwd-file entry).
+#
+# Storage must live OUTSIDE /etc: Dovecot's SELinux domain (dovecot_t) cannot
+# traverse /etc/postfix (postfix_etc_t), and the upstream dovecot.service sets
+# ProtectSystem=full which makes /etc read-only for the daemon. /var/mail/vhosts
+# is the FHS-correct path and inherits the mail_spool_t label automatically.
 getent group  vmail >/dev/null || groupadd -g 5000 vmail
-getent passwd vmail >/dev/null || useradd -u 5000 -g 5000 -d /etc/postfix/vmail -s /sbin/nologin -M vmail
-chown -R vmail:vmail /etc/postfix/vmail
-# Keep the postmap files writable by postfix as before — chown above swept them too.
-chown root:postfix /etc/postfix/vmail/mailbox /etc/postfix/vmail/aliases 2>/dev/null || true
+getent passwd vmail >/dev/null || useradd -u 5000 -g 5000 -d /var/mail/vhosts -s /sbin/nologin -M vmail
+mkdir -p /var/mail/vhosts
+chown -R vmail:vmail /var/mail/vhosts
+restorecon -R /var/mail/vhosts 2>/dev/null || true
 
 # /etc/dovecot/users is the Dovecot passwd-file passdb. Dovecot's auth worker
 # runs as the `dovecot` user, so root-only perms here silently break IMAP login
@@ -138,7 +147,7 @@ chmod 640 /etc/dovecot/users
 
 # Switch Dovecot from default PAM/system auth to the passwd-file the panel
 # manages, and tell it where the virtual maildirs live (the home from the
-# passwd-file entry, i.e. /etc/postfix/vmail/<domain>/<user>).
+# passwd-file entry, i.e. /var/mail/vhosts/<domain>/<user>).
 if ! grep -qE '^!include auth-passwdfile\.conf\.ext' /etc/dovecot/conf.d/10-auth.conf; then
   sed -i 's|^!include auth-system\.conf\.ext|#!include auth-system.conf.ext|'       /etc/dovecot/conf.d/10-auth.conf
   sed -i 's|^#!include auth-passwdfile\.conf\.ext|!include auth-passwdfile.conf.ext|' /etc/dovecot/conf.d/10-auth.conf
@@ -146,7 +155,54 @@ fi
 if ! grep -qE '^mail_location\s*=\s*maildir:~/Maildir' /etc/dovecot/conf.d/10-mail.conf; then
   sed -i 's|^#mail_location =\s*$|mail_location = maildir:~/Maildir|' /etc/dovecot/conf.d/10-mail.conf
 fi
+
+# Expose Dovecot's LMTP socket inside Postfix's chroot so virtual delivery
+# can reach it via virtual_transport = lmtp:unix:private/dovecot-lmtp. The
+# upstream master.conf only creates the socket at /var/run/dovecot/lmtp,
+# which lives outside the Postfix chroot.
+if ! grep -q "/var/spool/postfix/private/dovecot-lmtp" /etc/dovecot/conf.d/10-master.conf; then
+  python3 - <<'PY'
+import re, pathlib
+p = pathlib.Path('/etc/dovecot/conf.d/10-master.conf')
+src = p.read_text()
+# Append a second unix_listener inside the existing `service lmtp {}` block.
+new = re.sub(
+    r'(service lmtp \{[^}]*?unix_listener lmtp \{[^}]*?\}\n)',
+    r'''\1
+  # HostPanel: drop a second LMTP socket inside the Postfix chroot so the
+  # Postfix lmtp(8) client can hand virtual mail off to Dovecot.
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode  = 0600
+    user  = postfix
+    group = postfix
+  }
+''',
+    src,
+    count=1,
+    flags=re.DOTALL,
+)
+p.write_text(new)
+PY
+fi
+
+# Postfix: route virtual recipients via Dovecot LMTP and accept the maps.
+postconf -e \
+  "virtual_mailbox_domains = hash:/etc/postfix/vmail/domains" \
+  "virtual_mailbox_maps    = hash:/etc/postfix/vmail/mailbox" \
+  "virtual_alias_maps      = hash:/etc/postfix/vmail/aliases" \
+  "virtual_transport       = lmtp:unix:private/dovecot-lmtp" \
+  "virtual_mailbox_base    = /var/mail/vhosts" \
+  "virtual_minimum_uid     = 100" \
+  "virtual_uid_maps        = static:5000" \
+  "virtual_gid_maps        = static:5000" \
+  "inet_interfaces         = all"
+
 systemctl restart dovecot
+systemctl restart postfix
+
+# Open SMTP for inbound mail (submission/465 are separate work).
+firewall-cmd --permanent --add-service=smtp >/dev/null 2>&1 || true
+firewall-cmd --reload >/dev/null 2>&1 || true
 
 # ── 5/9  vsftpd ──────────────────────────────────────────────────────────────
 echo "[5/9] Configuring FTP..."

@@ -8,8 +8,17 @@ import { AuthRequest } from '../middleware/auth';
 const router = Router();
 const execAsync = promisify(exec);
 
-// Reads virtual mailbox map from Postfix + Dovecot userdb
-const VMAIL_DIR = process.env.VMAIL_DIR || '/etc/postfix/virtual';
+// Reads virtual mailbox map from Postfix + Dovecot userdb.
+// VMAIL_DIR — flat-file Postfix maps (mailbox, aliases, domains, *.db).
+//             Stays under /etc/postfix because that's where Postfix looks for
+//             its config-class files.
+// MAIL_HOME — actual Maildir storage. Must live OUTSIDE /etc, because
+//             Dovecot's SELinux domain (dovecot_t) can't traverse
+//             /etc/postfix (postfix_etc_t) and the systemd unit also marks
+//             /etc as read-only via ProtectSystem=full. /var/mail/vhosts is
+//             the FHS-correct path and is already labeled mail_spool_t.
+const VMAIL_DIR = process.env.VMAIL_DIR || '/etc/postfix/vmail';
+const MAIL_HOME = process.env.MAIL_HOME || '/var/mail/vhosts';
 const PASSWD_FILE = process.env.MAIL_PASSWD || '/etc/dovecot/users';
 
 const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -64,13 +73,28 @@ router.post('/accounts', async (req: AuthRequest, res: Response) => {
     // Create system user entry in Dovecot passwd-file
     const quotaRule = quota ? `userdb_quota_rule=*:bytes=${quota}` : '';
     const hash = await doveadmHashStdin(password);
-    const entry = `${email}:${hash}:5000:5000::${VMAIL_DIR}/${domain}/${user}::${quotaRule}`;
+    const entry = `${email}:${hash}:5000:5000::${MAIL_HOME}/${domain}/${user}::${quotaRule}`;
     await fs.appendFile(PASSWD_FILE, entry + '\n');
 
-    // Add to virtual mailbox
+    // Add to virtual mailbox map (Postfix maps live in /etc/postfix/vmail)
     await fs.appendFile(path.join(VMAIL_DIR, 'mailbox'), `${email}    ${domain}/${user}/\n`);
     await execAsync(`postmap ${VMAIL_DIR}/mailbox 2>/dev/null || true`);
-    await fs.mkdir(path.join(VMAIL_DIR, domain, user), { recursive: true });
+    // Ensure the domain is in the virtual_mailbox_domains map so Postfix
+    // accepts mail for it. Right-side value is irrelevant; just needs to exist.
+    const domainsFile = path.join(VMAIL_DIR, 'domains');
+    try {
+      const existing = await fs.readFile(domainsFile, 'utf-8').catch(() => '');
+      if (!new RegExp(`^${domain}\\b`, 'm').test(existing)) {
+        await fs.appendFile(domainsFile, `${domain} OK\n`);
+        await execAsync(`postmap ${domainsFile} 2>/dev/null || true`);
+      }
+    } catch { /* domains map is optional; ignore */ }
+
+    // Create the Maildir under MAIL_HOME, owned by vmail (uid 5000) so
+    // Dovecot's LMTP can write to it.
+    await fs.mkdir(path.join(MAIL_HOME, domain, user), { recursive: true });
+    await execAsync(`chown -R 5000:5000 ${MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
+    await execAsync(`chmod 700 ${MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
 
     res.json({ message: `Mailbox ${email} created` });
   } catch (err: any) {

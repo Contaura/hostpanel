@@ -16,7 +16,14 @@ const execAsync = promisify(exec);
 const PORTAL_DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$/;
 const PORTAL_EMAIL_RE  = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const PORTAL_NAMED_DIR  = process.env.NAMED_DIR  || '/etc/named';
+// PORTAL_VMAIL_DIR — Postfix flat-file maps (mailbox, aliases, domains).
+//                    Lives under /etc/postfix where Postfix reads its config.
+// PORTAL_MAIL_HOME — actual Maildir storage. Must live outside /etc because
+//                    Dovecot's SELinux domain can't traverse /etc/postfix and
+//                    its systemd unit marks /etc read-only. /var/mail/vhosts
+//                    is the FHS-correct location and is labeled mail_spool_t.
 const PORTAL_VMAIL_DIR  = process.env.VMAIL_DIR  || '/etc/postfix/vmail';
+const PORTAL_MAIL_HOME  = process.env.MAIL_HOME  || '/var/mail/vhosts';
 const PORTAL_PASSWD_FILE = process.env.MAIL_PASSWD || '/etc/dovecot/users';
 const PORTAL_WEBROOT     = process.env.WEBROOT    || '/var/www';
 
@@ -363,11 +370,23 @@ router.post('/email/accounts', clientAuth, async (req: Request, res: Response) =
     p.stdin.write(password + '\n'); p.stdin.end();
   }).catch((e: any) => { throw new Error('Failed to hash password: ' + e.message); });
   const quotaRule = quota ? `userdb_quota_rule=*:bytes=${quota}` : '';
-  const entry = `${email}:${hash}:5000:5000::${PORTAL_VMAIL_DIR}/${domain}/${user}::${quotaRule}`;
+  const entry = `${email}:${hash}:5000:5000::${PORTAL_MAIL_HOME}/${domain}/${user}::${quotaRule}`;
   await fs.appendFile(PORTAL_PASSWD_FILE, entry + '\n');
   await fs.appendFile(path.join(PORTAL_VMAIL_DIR, 'mailbox'), `${email}    ${domain}/${user}/\n`);
   await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
-  await fs.mkdir(path.join(PORTAL_VMAIL_DIR, domain, user), { recursive: true });
+  // Keep virtual_mailbox_domains in sync so Postfix accepts mail for this
+  // domain. Right-side value is ignored; just needs the key to exist.
+  const domainsFile = path.join(PORTAL_VMAIL_DIR, 'domains');
+  const existingDomains = await fs.readFile(domainsFile, 'utf-8').catch(() => '');
+  if (!new RegExp(`^${domain.replace(/[.]/g, '\\.')}\\b`, 'm').test(existingDomains)) {
+    await fs.appendFile(domainsFile, `${domain} OK\n`);
+    await execAsync(`postmap ${domainsFile} 2>/dev/null || true`);
+  }
+  // Maildir lives under MAIL_HOME, owned by vmail (uid 5000) so Dovecot LMTP
+  // can write to it.
+  await fs.mkdir(path.join(PORTAL_MAIL_HOME, domain, user), { recursive: true });
+  await execAsync(`chown -R 5000:5000 ${PORTAL_MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
+  await execAsync(`chmod 700 ${PORTAL_MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
   res.json({ message: `Mailbox ${email} created` });
 });
 
