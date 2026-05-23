@@ -62,6 +62,7 @@ const sections: Section[] = [
       { to: '/email-extras', icon: MailPlus,   label: 'Email Extras' },
       { to: '/dkim',         icon: MailSearch, label: 'DKIM / SPF / DMARC' },
       { to: '/mail-queue',   icon: ListOrdered, label: 'Mail Queue' },
+      { to: '/spam-filter',  icon: ShieldAlert, label: 'Spam Filter' },
       { to: '/mail-routing', icon: MailOpen,   label: 'Mail Routing & Lists' },
     ],
   },

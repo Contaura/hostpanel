@@ -66,6 +66,7 @@ import PortalStats from './portal/pages/Stats';
 import PortalScripts from './portal/pages/Scripts';
 import DkimManager from './pages/DkimManager';
 import MailQueue from './pages/MailQueue';
+import SpamFilter from './pages/SpamFilter';
 import CloudflareManager from './pages/CloudflareManager';
 import GitDeploy from './pages/GitDeploy';
 import CacheManager from './pages/CacheManager';
@@ -174,6 +175,7 @@ function AppRoutes() {
         {/* Email / DNS extras */}
         <Route path="dkim"       element={<DkimManager />} />
         <Route path="mail-queue" element={<MailQueue />} />
+        <Route path="spam-filter" element={<SpamFilter />} />
 
         {/* Web / CDN / Deploy */}
         <Route path="cloudflare"   element={<CloudflareManager />} />

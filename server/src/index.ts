@@ -39,6 +39,7 @@ import paypalRoutes          from './routes/paypal';
 import clientPortalRoutes    from './routes/client-portal';
 import dkimRoutes            from './routes/dkim';
 import mailQueueRoutes       from './routes/mail-queue';
+import rspamdRoutes          from './routes/rspamd';
 import mailRoutingRoutes     from './routes/mail-routing';
 import cloudflareRoutes      from './routes/cloudflare';
 import gitDeployRoutes       from './routes/git-deploy';
@@ -192,6 +193,7 @@ app.use('/api/paypal', authenticateToken, paypalRoutes);
 // Email extras
 app.use('/api/dkim',         authenticateToken, dkimRoutes);
 app.use('/api/mail-queue',   authenticateToken, mailQueueRoutes);
+app.use('/api/rspamd',       authenticateToken, rspamdRoutes);
 app.use('/api/mail-routing', authenticateToken, mailRoutingRoutes);
 
 // Web / CDN / Deploy
