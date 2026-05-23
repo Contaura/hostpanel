@@ -21,23 +21,32 @@ router.get('/:domain', async (req: Request, res: Response) => {
   const selector = 'default';
   const pubKeyPath = path.join(DKIM_DIR, domain, `${selector}.txt`);
 
-  let dkimPublicKey = '';
+  // opendkim-genkey writes a BIND-style TXT record split across multiple
+  // quoted segments. Reassemble them into the single concatenated string
+  // that actually goes into DNS — the page renders this verbatim, so
+  // it has to be the publishable TXT value, not the raw file.
+  let dkim: { dns_record: string; host: string } | null = null;
   if (existsSync(pubKeyPath)) {
-    dkimPublicKey = readFileSync(pubKeyPath, 'utf8').replace(/\n/g, '').replace(/\t/g, '');
+    const raw = readFileSync(pubKeyPath, 'utf8');
+    const parts = raw.match(/"([^"]*)"/g) || [];
+    const joined = parts.map(p => p.slice(1, -1)).join('').trim();
+    if (joined) {
+      dkim = { dns_record: joined, host: `${selector}._domainkey.${domain}` };
+    }
   }
 
   // Try to detect SPF/DMARC from zone file
   const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
-  let spfRecord = '', dmarcRecord = '';
+  let spf = '', dmarc = '';
   if (existsSync(zoneFile)) {
     const content = readFileSync(zoneFile, 'utf8');
-    const spfMatch = content.match(/"(v=spf1[^"]+)"/);
+    const spfMatch   = content.match(/"(v=spf1[^"]+)"/);
     const dmarcMatch = content.match(/"(v=DMARC1[^"]+)"/);
-    if (spfMatch)   spfRecord   = spfMatch[1];
-    if (dmarcMatch) dmarcRecord = dmarcMatch[1];
+    if (spfMatch)   spf   = spfMatch[1];
+    if (dmarcMatch) dmarc = dmarcMatch[1];
   }
 
-  res.json({ domain, selector, dkimPublicKey: dkimPublicKey || null, spfRecord, dmarcRecord });
+  res.json({ domain, selector, dkim, spf, dmarc });
 });
 
 router.post('/:domain/generate-dkim', async (req: Request, res: Response) => {
@@ -54,8 +63,11 @@ router.post('/:domain/generate-dkim', async (req: Request, res: Response) => {
     await registerDkimKey(domain, selector);
     const pubKey = readFileSync(path.join(keyDir, `${selector}.txt`), 'utf8');
     const match = pubKey.match(/p=([A-Za-z0-9+/=]+)/);
-    const dnsRecord = match ? `v=DKIM1; k=rsa; p=${match[1]}` : pubKey;
-    res.json({ success: true, selector, dnsRecord, host: `${selector}._domainkey.${domain}` });
+    const dns_record = match ? `v=DKIM1; k=rsa; p=${match[1]}` : pubKey;
+    // Nest under `dkim` and use snake_case `dns_record` so the page's
+    // optimistic `setData(d => ({ ...d, dkim: result }))` lands on the
+    // same shape the GET endpoint returns.
+    res.json({ success: true, selector, dkim: { dns_record, host: `${selector}._domainkey.${domain}` } });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
