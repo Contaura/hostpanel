@@ -17,7 +17,7 @@ export default function MailQueue() {
   const [deliveryLog, setDeliveryLog] = useState<any[]>([]);
   const [logSearch, setLogSearch] = useState('');
   const [logLoading, setLogLoading] = useState(false);
-  const [bounceLog, setBounceLog] = useState<string[]>([]);
+  const [bounceLog, setBounceLog] = useState<{ id: number; raw: string; time: string; queue_id: string; message: string }[]>([]);
   const [bounceLoading, setBounceLoading] = useState(false);
   const [queueSearch, setQueueSearch] = useState('');
   const [actioning, setActioning] = useState<string | null>(null);
@@ -26,7 +26,7 @@ export default function MailQueue() {
     setLoading(true);
     try {
       const [q, s] = await Promise.all([fetchApi('/api/mail-queue/').then(r => r.json()), fetchApi('/api/mail-queue/stats').then(r => r.json())]);
-      setMessages(Array.isArray(q) ? q : []);
+      setMessages(Array.isArray(q?.messages) ? q.messages : []);
       setStats(s);
     } finally { setLoading(false); setPageLoading(false); }
   }
@@ -47,7 +47,7 @@ export default function MailQueue() {
     try {
       const r = await fetchApi('/api/mail-queue/bounce-log');
       const d = await r.json();
-      setBounceLog(d.lines || []);
+      setBounceLog(Array.isArray(d) ? d : []);
     } catch (e: any) {
       toast.error(e.message || 'Failed to load bounce log');
     } finally { setBounceLoading(false); }
@@ -165,8 +165,12 @@ export default function MailQueue() {
           <div className="card bg-slate-950 p-4 max-h-[60vh] overflow-y-auto">
             {bounceLoading && <p className="text-slate-400 text-xs">Loading…</p>}
             {!bounceLoading && bounceLog.length === 0 && <p className="text-slate-400 text-xs">No bounce entries found in mail log.</p>}
-            {bounceLog.map((line, i) => (
-              <div key={i} className="text-xs font-mono text-slate-300 py-0.5 border-b border-slate-800/50 last:border-0">{line}</div>
+            {bounceLog.map((l) => (
+              <div key={l.id} className="border-b border-slate-800/50 last:border-0 py-1">
+                <span className="text-slate-500 text-xs mr-2">{l.time}</span>
+                {l.queue_id && <span className="text-rose-400 text-xs font-mono mr-2">[{l.queue_id}]</span>}
+                <span className="text-slate-300 text-xs">{l.message || l.raw}</span>
+              </div>
             ))}
           </div>
         </div>

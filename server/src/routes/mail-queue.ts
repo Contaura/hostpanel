@@ -14,11 +14,15 @@ router.get('/', async (_req: Request, res: Response) => {
     const messages: any[] = [];
     let current: any = null;
 
+    // mailq decorates the queue ID with a one-char flag: '*' = active,
+    // '!' = held, '#' = unsent, otherwise deferred. Capture both pieces.
     for (const line of lines) {
-      const header = line.match(/^([A-F0-9]+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+)\s+(.+)/);
+      const header = line.match(/^([A-F0-9]+)([\*!#]?)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+[\d:]+)\s+(.+)/);
       if (header) {
         if (current) messages.push(current);
-        current = { id: header[1], size: header[2], date: header[3], sender: header[4], recipients: [], reason: '' };
+        const flag = header[2];
+        const status = flag === '*' ? 'active' : flag === '!' ? 'held' : 'deferred';
+        current = { id: header[1], status, size: header[3], date: header[4], sender: header[5], recipients: [], reason: '' };
       } else if (current && line.trim().startsWith('(')) {
         current.reason = line.trim().replace(/[()]/g, '');
       } else if (current && line.trim() && !line.startsWith('-')) {
@@ -107,7 +111,7 @@ router.get('/bounce-log', async (req: Request, res: Response) => {
   const logPath = LOG_PATHS.find(p => require('fs').existsSync(p));
   if (!logPath) return res.json([]);
   try {
-    const { stdout } = await execAsync(`grep -i "bounce\|status=bounced\|undeliverable\|5\\." "${logPath}" 2>/dev/null | tail -${Math.min(limit, 1000)}`);
+    const { stdout } = await execAsync(`grep -iE 'bounce|status=bounced|undeliverable|status=defer|status=5\\.' "${logPath}" 2>/dev/null | tail -${Math.min(limit, 1000)}`);
     const lines = stdout.trim().split('\n').filter(Boolean).reverse().map((line, i) => {
       const m = line.match(/^(\w+ +\d+ \d+:\d+:\d+).*postfix\S*: (\S+): (.+)/);
       return { id: i, raw: line, time: m?.[1] || '', queue_id: m?.[2] || '', message: m?.[3] || line };
