@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
 import db from '../db';
+import { registerDkimKey } from '../utils/opendkim';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
@@ -974,6 +975,10 @@ router.post('/mail-auth/:domain/dkim', clientAuth, async (req: Request, res: Res
   }
   await fs.mkdir(`/etc/opendkim/keys/${domain}`, { recursive: true });
   await execAsync(`opendkim-genkey -b 2048 -d "${domain}" -s default -D "/etc/opendkim/keys/${domain}"`);
+  // Register the key with OpenDKIM (KeyTable + SigningTable + reload) so
+  // outbound mail from this domain actually gets signed. Without this the
+  // key just sits on disk unused.
+  await registerDkimKey(domain, 'default');
   const txt = await fs.readFile(`/etc/opendkim/keys/${domain}/default.txt`, 'utf-8');
   res.json({ success: true, dnsRecord: txt });
 });

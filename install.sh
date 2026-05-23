@@ -270,6 +270,91 @@ if old in src:
 PY
 fi
 
+# OpenDKIM — wire as a Postfix milter so outbound mail is signed and inbound
+# mail is verified. The RPM ships in single-KeyFile mode pointing at a file
+# that doesn't exist (so the service won't start) and uses a unix socket
+# under /run that Postfix can't reach from its chroot. Switch to KeyTable
+# /SigningTable mode on an inet socket on loopback. Per-domain keys are
+# generated + registered by the panel API (/api/dkim/:domain/generate-dkim).
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+p = Path('/etc/opendkim.conf')
+src = p.read_text()
+
+def upsert(text, key, value):
+    # opendkim.conf ships duplicate keys for some options (e.g. two Socket
+    # lines). Strip every occurrence (active or commented) and append a
+    # single canonical line at the end so the file converges no matter how
+    # many times this runs.
+    pat = re.compile(rf'^\s*#?\s*{key}\b.*\n?', re.M)
+    text = pat.sub('', text)
+    return text.rstrip() + '\n' + f'{key}\t{value}' + '\n'
+
+# Static KeyFile would shadow the per-domain KeyTable — comment it out.
+src = re.sub(r'^\s*KeyFile\b', '#KeyFile', src, flags=re.M)
+src = upsert(src, 'Socket',             'inet:8891@localhost')
+src = upsert(src, 'KeyTable',           'refile:/etc/opendkim/KeyTable')
+src = upsert(src, 'SigningTable',       'refile:/etc/opendkim/SigningTable')
+src = upsert(src, 'ExternalIgnoreList', 'refile:/etc/opendkim/TrustedHosts')
+src = upsert(src, 'InternalHosts',      'refile:/etc/opendkim/TrustedHosts')
+src = upsert(src, 'Mode',               'sv')
+src = upsert(src, 'PidFile',            '/run/opendkim/opendkim.pid')
+
+p.write_text(src)
+PY
+
+# Tables + trusted-hosts file. Touch so opendkim has something to read even
+# before the first domain is signed; ownership matters because keys live
+# alongside.
+touch /etc/opendkim/KeyTable /etc/opendkim/SigningTable /etc/opendkim/TrustedHosts
+grep -qx '127.0.0.1' /etc/opendkim/TrustedHosts || echo '127.0.0.1' >> /etc/opendkim/TrustedHosts
+grep -qx '::1'        /etc/opendkim/TrustedHosts || echo '::1'        >> /etc/opendkim/TrustedHosts
+chown -R opendkim:opendkim /etc/opendkim
+chmod 640 /etc/opendkim/KeyTable /etc/opendkim/SigningTable /etc/opendkim/TrustedHosts
+[ -d /etc/opendkim/keys ] && chmod 750 /etc/opendkim/keys
+
+# Rspamd — content/spam filter, attached to Postfix as a second milter after
+# OpenDKIM. Not in EPEL on EL9, so pull from the upstream stable repo.
+if ! rpm -q rspamd >/dev/null 2>&1; then
+  if [ ! -f /etc/yum.repos.d/rspamd.repo ]; then
+    curl -fsSL https://rspamd.com/rpm-stable/centos-9/rspamd.repo \
+      -o /etc/yum.repos.d/rspamd.repo
+  fi
+  dnf -y install rspamd redis >/dev/null 2>&1 || true
+fi
+
+# Always inject scan-result headers so admins and recipients can see why
+# a message did or didn't get flagged. Rspamd defaults strip these for
+# authenticated and local-network senders; opt back in explicitly.
+mkdir -p /etc/rspamd/local.d
+cat > /etc/rspamd/local.d/milter_headers.conf <<'RSPAMD_HDR'
+use = ["authentication-results", "x-spamd-bar", "x-spam-status"];
+authenticated_headers = ["authentication-results", "x-spamd-bar", "x-spam-status"];
+local_headers         = ["authentication-results", "x-spamd-bar", "x-spam-status"];
+extended_spam_headers = true;
+RSPAMD_HDR
+
+systemctl enable --now redis  >/dev/null 2>&1 || true
+systemctl enable --now rspamd >/dev/null 2>&1 || true
+
+# Wire Postfix to both milters. OpenDKIM signs first (port 8891), Rspamd
+# scans second (port 11332). milter_default_action=accept means a transient
+# milter outage delivers unsigned/unscanned rather than bouncing.
+MILTERS="inet:127.0.0.1:8891"
+if command -v rspamd >/dev/null 2>&1; then
+  MILTERS="${MILTERS} inet:127.0.0.1:11332"
+fi
+postconf -e \
+  "smtpd_milters         = ${MILTERS}" \
+  "non_smtpd_milters     = ${MILTERS}" \
+  "milter_default_action = accept" \
+  "milter_protocol       = 6"
+
+systemctl enable opendkim >/dev/null 2>&1 || true
+systemctl restart opendkim || true
+
 systemctl restart dovecot
 systemctl restart postfix
 

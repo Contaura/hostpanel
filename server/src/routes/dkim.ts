@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
+import { registerDkimKey } from '../utils/opendkim';
 
 const router = Router();
 const execAsync = promisify(exec);
@@ -48,12 +49,12 @@ router.post('/:domain/generate-dkim', async (req: Request, res: Response) => {
   try {
     await execAsync(`mkdir -p "${keyDir}"`);
     await execAsync(`opendkim-genkey -b 2048 -d "${domain}" -s "${selector}" -D "${keyDir}"`);
-    await execAsync(`chown opendkim:opendkim "${keyDir}/${selector}.private"`);
+    // registerDkimKey chowns the private key, adds entries to KeyTable +
+    // SigningTable, and reloads opendkim so signing starts immediately.
+    await registerDkimKey(domain, selector);
     const pubKey = readFileSync(path.join(keyDir, `${selector}.txt`), 'utf8');
-    // Extract the p= value for DNS TXT record
     const match = pubKey.match(/p=([A-Za-z0-9+/=]+)/);
     const dnsRecord = match ? `v=DKIM1; k=rsa; p=${match[1]}` : pubKey;
-    await execAsync('systemctl restart opendkim').catch(() => {});
     res.json({ success: true, selector, dnsRecord, host: `${selector}._domainkey.${domain}` });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
