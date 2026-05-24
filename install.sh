@@ -33,7 +33,7 @@ dnf config-manager --set-enabled crb 2>/dev/null || true
 # WordPress/Joomla/Drupal flows: roundcubemail pulls in php-fpm + a few
 # extensions, but not the CLI binary or the MySQL driver, so WordPress
 # would extract fine and then explode on first hit. Install them up front.
-dnf install -y httpd mod_ssl mariadb-server postfix dovecot \
+dnf install -y httpd mod_ssl mariadb-server postfix dovecot dovecot-pigeonhole \
                bind bind-utils vsftpd certbot python3-certbot-apache \
                curl tar gzip zip unzip openssl make gcc-c++ python3 roundcubemail \
                php-cli php-mysqlnd php-curl php-gd \
@@ -354,6 +354,57 @@ postconf -e \
 
 systemctl enable opendkim >/dev/null 2>&1 || true
 systemctl restart opendkim || true
+
+# Sieve — Dovecot pre-script that auto-files rspamd-flagged spam into Junk.
+# Anything with score >= reject_threshold (15) is already 554'd at SMTP-time
+# by rspamd; this catches the "add header" / "rewrite subject" band so it
+# stays out of INBOX. sieve_before runs before any per-user .dovecot.sieve.
+mkdir -p /etc/dovecot/sieve-before.d
+cat > /etc/dovecot/sieve-before.d/10-spam-to-junk.sieve <<'SIEVE'
+require ["fileinto", "mailbox"];
+
+if anyof (
+  header :is        "X-Spam"        "Yes",
+  header :is        "X-Spam-Flag"   "YES",
+  header :contains  "X-Spam-Status" "Yes,"
+) {
+  fileinto :create "Junk";
+  stop;
+}
+SIEVE
+sievec /etc/dovecot/sieve-before.d/10-spam-to-junk.sieve 2>/dev/null || true
+
+# Enable sieve plugin on LMTP and point sieve_before at the global dir.
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+# 1. protocol lmtp { mail_plugins = $mail_plugins sieve }
+lmtp = Path('/etc/dovecot/conf.d/20-lmtp.conf')
+src = lmtp.read_text()
+def patch_lmtp(text):
+    pat = re.compile(r'(protocol\s+lmtp\s*\{)(.*?)(\n\})', re.S)
+    def repl(m):
+        head, body, tail = m.group(1), m.group(2), m.group(3)
+        body = re.sub(r'^\s*#?\s*mail_plugins\s*=.*\n', '', body, flags=re.M)
+        if not body.endswith('\n'): body += '\n'
+        body += '  mail_plugins = $mail_plugins sieve\n'
+        return head + body + tail
+    return pat.sub(repl, text, count=1)
+new = patch_lmtp(src)
+if new != src: lmtp.write_text(new)
+
+# 2. plugin { sieve_before = /etc/dovecot/sieve-before.d }
+sf = Path('/etc/dovecot/conf.d/90-sieve.conf')
+src = sf.read_text()
+src = re.sub(r'^\s*#?\s*sieve_before\d*\s*=.*\n', '', src, flags=re.M)
+pat = re.compile(r'(plugin\s*\{)(.*?)(\n\})', re.S)
+def repl(m):
+    head, body, tail = m.group(1), m.group(2), m.group(3)
+    return head + body + '\n  sieve_before = /etc/dovecot/sieve-before.d\n' + tail.lstrip('\n')
+new = pat.sub(repl, src, count=1)
+if new != src: sf.write_text(new)
+PY
 
 systemctl restart dovecot
 systemctl restart postfix
