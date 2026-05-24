@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Cpu, HardDrive, MemoryStick, Activity, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Cpu, HardDrive, MemoryStick, Activity, CheckCircle2, XCircle, Clock, ShieldCheck } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useTheme } from '../context/ThemeContext';
 
@@ -13,6 +13,14 @@ interface Stats {
   uptime: number;
 }
 interface Service { name: string; status: 'running' | 'stopped' | 'unknown' }
+interface MailStats {
+  installed: boolean;
+  running:   boolean;
+  version?:  string | null;
+  uptime?:   number | null;
+  scanned?:  number | null;
+  actions?:  Record<string, number> | null;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -25,6 +33,42 @@ function formatUptime(s: number): string {
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
   return d > 0 ? `${d}d ${h}h ${m}m` : `${h}h ${m}m`;
+}
+
+function MailActivityBar({ scanned, actions }: { scanned: number; actions: Record<string, number> }) {
+  const buckets = [
+    { key: 'no action',       label: 'Clean',    color: 'bg-emerald-500', text: 'text-emerald-600' },
+    { key: 'greylist',        label: 'Greylist', color: 'bg-blue-500',    text: 'text-blue-600'    },
+    { key: 'add header',      label: 'Tagged',   color: 'bg-amber-500',   text: 'text-amber-600'   },
+    { key: 'rewrite subject', label: 'Rewrite',  color: 'bg-amber-500',   text: 'text-amber-600'   },
+    { key: 'soft reject',     label: 'Deferred', color: 'bg-orange-500',  text: 'text-orange-600'  },
+    { key: 'reject',          label: 'Rejected', color: 'bg-rose-500',    text: 'text-rose-600'    },
+  ];
+  const total = scanned || buckets.reduce((s, b) => s + (actions[b.key] || 0), 0);
+  if (total === 0) {
+    return <p className="text-xs text-slate-500">No mail scanned yet — verdicts will appear as mail flows through.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex h-2 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+        {buckets.map(b => {
+          const v = actions[b.key] || 0;
+          if (!v) return null;
+          return <div key={b.key} className={b.color} style={{ width: `${(v / total) * 100}%` }} title={`${b.label}: ${v}`} />;
+        })}
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 text-xs">
+        {buckets.map(b => (
+          <div key={b.key} className="flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${b.color}`} />
+            <span className="text-slate-500">{b.label}</span>
+            <span className={`font-semibold ${b.text}`}>{(actions[b.key] || 0).toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] text-slate-400">Total scanned: {total.toLocaleString()}</p>
+    </div>
+  );
 }
 
 function StatCard({ label, value, sub, percent, gradient, icon: Icon }: {
@@ -76,6 +120,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [history, setHistory] = useState<{ t: string; cpu: number; mem: number }[]>([]);
+  const [mail, setMail] = useState<MailStats | null>(null);
 
   useEffect(() => {
     document.title = 'Dashboard — HostPanel';
@@ -111,9 +156,14 @@ export default function Dashboard() {
         ]);
       } catch {}
     }
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
+    // Mail stats refresh on a slower cadence — rspamd updates aren't sub-second.
+    async function loadMail() {
+      try { setMail((await axios.get<MailStats>('/api/rspamd/status')).data); } catch {}
+    }
+    load(); loadMail();
+    const id     = setInterval(load,     5000);
+    const mailId = setInterval(loadMail, 15000);
+    return () => { clearInterval(id); clearInterval(mailId); };
   }, []);
 
   if (!stats) {
@@ -217,6 +267,21 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {mail?.installed && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={14} className="text-emerald-500" />
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Mail Activity</h2>
+            </div>
+            <span className={`badge ${mail.running ? 'badge-green' : 'badge-red'}`}>
+              {mail.running ? `Rspamd ${mail.version || ''}` : 'Rspamd stopped'}
+            </span>
+          </div>
+          <MailActivityBar scanned={mail.scanned || 0} actions={mail.actions || {}} />
+        </div>
+      )}
 
       <div className="card p-5">
         <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4">System Information</h2>
