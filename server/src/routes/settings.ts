@@ -100,6 +100,19 @@ router.get('/logo', (_req: Request, res: Response) => {
   res.sendFile(logoPath);
 });
 
+// Branding metadata for the sidebar — JSON, not the binary. Returns nulls
+// instead of 404'ing so unbranded installs don't fill the console with
+// noise on every page load.
+router.get('/branding', (_req: Request, res: Response) => {
+  const row = db.prepare("SELECT key, value FROM settings WHERE key IN ('company_name','company_logo')").all() as { key: string; value: string }[];
+  const map = Object.fromEntries(row.map(r => [r.key, r.value]));
+  const logoPath = path.join(DATA_DIR, 'uploads', 'logo.png');
+  res.json({
+    name: map.company_name || null,
+    url:  existsSync(logoPath) ? `/api/settings/logo?t=${Date.now()}` : (map.company_logo || null),
+  });
+});
+
 router.delete('/logo', (req: Request, res: Response) => {
   const logoPath = path.join(DATA_DIR, 'uploads', 'logo.png');
   try {

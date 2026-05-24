@@ -115,7 +115,7 @@ export default function PortalSidebar() {
     // Plain fetch (no Authorization header, no auto-redirect on 401) — the
     // logo/name endpoint is a public branding helper but the admin-flavored
     // fetchApi() would force-redirect portal users to /login on a 401.
-    fetch('/api/settings/logo')
+    fetch('/api/settings/branding')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.url) setLogoUrl(d.url); if (d?.name) setPanelName(d.name); })
       .catch(() => {});

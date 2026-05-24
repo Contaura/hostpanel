@@ -134,7 +134,7 @@ export default function Sidebar() {
   const [panelName, setPanelName] = useState('HostPanel');
 
   useEffect(() => {
-    fetchApi('/api/settings/logo')
+    fetchApi('/api/settings/branding')
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.url) setLogoUrl(d.url); if (d?.name) setPanelName(d.name); })
       .catch(() => {});

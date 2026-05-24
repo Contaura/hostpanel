@@ -80,6 +80,26 @@ if (process.env.NODE_ENV === 'production') {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Inline public-branding handler — same logic as the authenticated
+// /api/settings/branding route, mounted unauthenticated so the portal
+// sidebar can fetch the panel logo/name without an admin token.
+function publicBranding(_req: express.Request, res: express.Response) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const dbMod = require('./db').default;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { existsSync } = require('fs');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pathMod = require('path');
+  const DATA_DIR = process.env.DATA_DIR || pathMod.join(__dirname, '../../data');
+  const rows = dbMod.prepare("SELECT key, value FROM settings WHERE key IN ('company_name','company_logo')").all() as { key: string; value: string }[];
+  const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  const logoPath = pathMod.join(DATA_DIR, 'uploads', 'logo.png');
+  res.json({
+    name: map.company_name || null,
+    url:  existsSync(logoPath) ? `/api/settings/logo?t=${Date.now()}` : (map.company_logo || null),
+  });
+}
+
 // The Node process sits behind Apache on the loopback interface (see install.sh).
 // Trust X-Forwarded-* only from loopback so express-rate-limit keys on the real client IP.
 app.set('trust proxy', 'loopback');
@@ -169,7 +189,11 @@ app.use('/api/scripts',   authenticateToken, scriptRoutes);
 app.use('/api/apps',      authenticateToken, appsRoutes);
 app.use('/api/alerts',    authenticateToken, alertsRoutes);
 
-// Admin config
+// Admin config — settings/branding is public so the unauth'd portal sidebar
+// can fetch the panel name + logo without prompting login. Tiny inline
+// handler instead of the mounted settings router so it isn't shadowed by
+// authenticateToken below.
+app.get('/api/settings/branding', publicBranding);
 app.use('/api/settings',     authenticateToken, settingsRoutes);
 app.use('/api/admin-users',  authenticateToken, adminUsersRoutes);
 app.use('/api/api-tokens',   authenticateToken, apiTokensRoutes);
