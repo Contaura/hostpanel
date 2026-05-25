@@ -3,28 +3,48 @@ import fs from 'fs/promises';
 import path from 'path';
 import multer from 'multer';
 import { AuthRequest } from '../middleware/auth';
+import { assertSafeFileTarget, resolveInsideBase } from '../utils/file-path';
+import { assertArchiveListingHasNoLinks, assertSafeArchiveEntryListing } from '../utils/archive-path';
 
 const router = Router();
 
 const BASE_DIR = process.env.FILES_BASE_DIR || '/var/www';
 
 function safePath(userPath: string): string {
-  // Reject undefined / empty up front so the caller gets a clear 400 instead
-  // of "Cannot read properties of undefined" (which is what happened when
-  // DELETE /api/files/delete was hit without a JSON body).
-  if (typeof userPath !== 'string' || userPath.length === 0) {
-    throw new Error('Path is required');
+  return resolveInsideBase(userPath, BASE_DIR);
+}
+
+async function assertSafePath(resolvedPath: string): Promise<void> {
+  await assertSafeFileTarget(resolvedPath, BASE_DIR);
+}
+
+
+async function assertArchiveSafeToExtract(src: string, archivePath: string, execA: (command: string) => Promise<{ stdout: string }>): Promise<void> {
+  const lower = archivePath.toLowerCase();
+  let namesCommand = '';
+  let verboseCommand = '';
+
+  if (lower.endsWith('.zip')) {
+    namesCommand = `unzip -Z1 "${src}"`;
+    verboseCommand = `zipinfo -l "${src}"`;
+  } else if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    namesCommand = `tar -tzf "${src}"`;
+    verboseCommand = `tar -tzvf "${src}"`;
+  } else if (lower.endsWith('.tar.bz2')) {
+    namesCommand = `tar -tjf "${src}"`;
+    verboseCommand = `tar -tjvf "${src}"`;
+  } else if (lower.endsWith('.tar')) {
+    namesCommand = `tar -tf "${src}"`;
+    verboseCommand = `tar -tvf "${src}"`;
   }
-  const base = path.resolve(BASE_DIR);
-  const resolved = path.resolve(base, userPath.replace(/^\/+/, ''));
-  // Anchor the prefix check on a path separator so /var/wwwx doesn't pass /var/www.
-  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
-    throw new Error('Path traversal not allowed');
-  }
-  if (/[$`"\\!]/.test(resolved)) {
-    throw new Error('Path contains invalid characters');
-  }
-  return resolved;
+
+  if (!namesCommand || !verboseCommand) throw new Error('Unsupported archive format');
+
+  const names = await execA(namesCommand);
+  assertSafeArchiveEntryListing(names.stdout);
+
+  const verbose = await execA(verboseCommand);
+  assertArchiveListingHasNoLinks(verbose.stdout);
 }
 
 const upload = multer({
@@ -32,6 +52,7 @@ const upload = multer({
     destination: async (req, _file, cb) => {
       try {
         const dest = safePath((req.query.path as string) || '');
+        await assertSafePath(dest);
         cb(null, dest);
       } catch (e: any) {
         cb(e, '');
@@ -48,6 +69,7 @@ const upload = multer({
 router.get('/list', async (req: AuthRequest, res: Response) => {
   try {
     const dir = safePath((req.query.path as string) || '');
+    await assertSafePath(dir);
     const entries = await fs.readdir(dir, { withFileTypes: true });
 
     const items = await Promise.all(
@@ -81,6 +103,7 @@ router.get('/list', async (req: AuthRequest, res: Response) => {
 router.get('/read', async (req: AuthRequest, res: Response) => {
   try {
     const filePath = safePath((req.query.path as string) || '');
+    await assertSafePath(filePath);
     const stat = await fs.stat(filePath);
 
     if (stat.size > 2 * 1024 * 1024) {
@@ -99,6 +122,7 @@ router.post('/write', async (req: AuthRequest, res: Response) => {
   try {
     const { path: filePath, content } = req.body;
     const resolved = safePath(filePath);
+    await assertSafePath(resolved);
     await fs.writeFile(resolved, content, 'utf-8');
     res.json({ message: 'File saved' });
   } catch (err: any) {
@@ -110,6 +134,7 @@ router.post('/mkdir', async (req: AuthRequest, res: Response) => {
   try {
     const { path: dirPath } = req.body;
     const resolved = safePath(dirPath);
+    await assertSafePath(resolved);
     await fs.mkdir(resolved, { recursive: true });
     res.json({ message: 'Directory created' });
   } catch (err: any) {
@@ -121,6 +146,7 @@ router.delete('/delete', async (req: AuthRequest, res: Response) => {
   try {
     const { path: targetPath } = req.body;
     const resolved = safePath(targetPath);
+    await assertSafePath(resolved);
     await fs.rm(resolved, { recursive: true, force: true });
     res.json({ message: 'Deleted' });
   } catch (err: any) {
@@ -133,6 +159,8 @@ router.post('/rename', async (req: AuthRequest, res: Response) => {
     const { from, to } = req.body;
     const resolvedFrom = safePath(from);
     const resolvedTo = safePath(to);
+    await assertSafePath(resolvedFrom);
+    await assertSafePath(resolvedTo);
     await fs.rename(resolvedFrom, resolvedTo);
     res.json({ message: 'Renamed' });
   } catch (err: any) {
@@ -148,6 +176,7 @@ router.post('/upload', upload.array('files'), (req: AuthRequest, res: Response) 
 router.get('/download', async (req: AuthRequest, res: Response) => {
   try {
     const filePath = safePath((req.query.path as string) || '');
+    await assertSafePath(filePath);
     res.download(filePath);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
@@ -162,7 +191,13 @@ router.post('/compress', async (req: AuthRequest, res: Response) => {
   const execA = promisify(exec);
   try {
     const dest = safePath(destination);
-    const srcList = (paths as string[]).map(p => `"${safePath(p)}"`).join(' ');
+    await assertSafePath(dest);
+    const safeSources = await Promise.all((paths as string[]).map(async p => {
+      const src = safePath(p);
+      await assertSafePath(src);
+      return src;
+    }));
+    const srcList = safeSources.map(p => `"${p}"`).join(' ');
     if (format === 'zip') {
       await execA(`zip -r "${dest}" ${srcList}`);
     } else {
@@ -181,12 +216,15 @@ router.post('/extract', async (req: AuthRequest, res: Response) => {
   try {
     const src = safePath(archivePath);
     const dest = destination ? safePath(destination) : path.dirname(src);
+    await assertSafePath(src);
+    await assertSafePath(dest);
     const ext = archivePath.toLowerCase();
+    await assertArchiveSafeToExtract(src, archivePath, execA);
     let cmd = '';
     if (ext.endsWith('.zip'))    cmd = `unzip -o "${src}" -d "${dest}"`;
-    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) cmd = `tar -xzf "${src}" -C "${dest}"`;
-    else if (ext.endsWith('.tar.bz2')) cmd = `tar -xjf "${src}" -C "${dest}"`;
-    else if (ext.endsWith('.tar'))     cmd = `tar -xf "${src}" -C "${dest}"`;
+    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) cmd = `tar --no-same-owner --no-same-permissions -xzf "${src}" -C "${dest}"`;
+    else if (ext.endsWith('.tar.bz2')) cmd = `tar --no-same-owner --no-same-permissions -xjf "${src}" -C "${dest}"`;
+    else if (ext.endsWith('.tar'))     cmd = `tar --no-same-owner --no-same-permissions -xf "${src}" -C "${dest}"`;
     else return res.status(400).json({ error: 'Unsupported archive format' });
     await execA(cmd);
     res.json({ message: 'Extracted successfully' });
@@ -199,6 +237,8 @@ router.post('/move', async (req: AuthRequest, res: Response) => {
     if (!from || !to) return res.status(400).json({ error: 'from and to required' });
     const resolvedFrom = safePath(from);
     const resolvedTo = safePath(to);
+    await assertSafePath(resolvedFrom);
+    await assertSafePath(resolvedTo);
     await fs.rename(resolvedFrom, resolvedTo);
     res.json({ message: 'Moved' });
   } catch (err: any) {
@@ -211,7 +251,7 @@ router.post('/bulk-delete', async (req: AuthRequest, res: Response) => {
   if (!Array.isArray(paths) || !paths.length) return res.status(400).json({ error: 'paths array required' });
   const errors: string[] = [];
   for (const p of paths) {
-    try { await fs.rm(safePath(p), { recursive: true, force: true }); }
+    try { const target = safePath(p); await assertSafePath(target); await fs.rm(target, { recursive: true, force: true }); }
     catch (e: any) { errors.push(`${p}: ${e.message}`); }
   }
   res.json({ message: `Deleted ${paths.length - errors.length} item(s)`, errors });
@@ -223,6 +263,7 @@ router.post('/chmod', async (req: AuthRequest, res: Response) => {
   if (!/^[0-7]{3,4}$/.test(mode)) return res.status(400).json({ error: 'Invalid mode (e.g. 755)' });
   try {
     const target = safePath(p);
+    await assertSafePath(target);
     const flag = recursive ? '-R ' : '';
     await fs.chmod(target, parseInt(mode, 8));
     if (recursive) {

@@ -68,3 +68,40 @@ All audit, test, and build checks passed with zero reported npm vulnerabilities.
 - Consider adding branch protection once GitHub Actions is confirmed green on GitHub.
 - Add linting once an ESLint/Prettier policy is selected.
 - Add targeted integration tests for authenticated routes and dangerous root-level operations.
+
+## 2026-05-25 — File manager symlink escape hardening
+
+### Risk addressed
+
+The file manager already normalized paths under `FILES_BASE_DIR`, but filesystem operations can still escape a base directory through symlinks that live inside the base. For example, a symlink under `/var/www` could point to `/etc/passwd` or another sensitive location. Because HostPanel runs as root, file-manager reads, writes, downloads, archive operations, deletes, and chmod operations must validate the real filesystem target, not just the lexical path string.
+
+### Changes made
+
+- Added `server/src/utils/file-path.ts` with shared file-manager path helpers:
+  - `resolveInsideBase()` for lexical base-directory containment and shell-metacharacter rejection.
+  - `assertSafeFileTarget()` for realpath validation of existing targets and nearest existing parents for new files.
+- Added `server/src/utils/file-path.test.ts` regression coverage for:
+  - `../` traversal rejection.
+  - Normal in-base paths.
+  - Existing symlinks that resolve outside the base.
+  - New files under a symlinked parent outside the base.
+  - New files under a real in-base directory.
+- Added `server/src/utils/archive-path.ts` and tests to reject unsafe archive entry names before extraction, including absolute paths, parent-directory traversal, Windows drive paths, empty names, and NUL-containing names.
+- Updated `server/src/routes/files.ts` so file-manager operations validate real targets before list, read, write, mkdir, delete, rename, upload, download, compress, extract, move, bulk-delete, and chmod operations.
+- Hardened archive extraction by listing archive entries before extraction, rejecting symlink/hardlink entries from verbose listings, and adding `tar --no-same-owner --no-same-permissions` for tar extraction.
+
+### Validation performed
+
+```bash
+npm run test --workspace=server -- archive-path file-path
+npm run build --workspace=server
+```
+
+Both checks passed during the TDD cycle. Full audit, full server test run, and full build were run before commit.
+
+### Follow-up
+
+- Replace remaining archive/chmod shell commands with argv-based `spawn()` helpers.
+- Use `lstat()` in directory listings so listing a directory does not follow symlinks for metadata.
+- Add authenticated route integration tests for `/api/files/*` endpoints.
+- For the strongest race resistance, move high-risk file operations toward descriptor-based/openat-style primitives where Node support allows it.
