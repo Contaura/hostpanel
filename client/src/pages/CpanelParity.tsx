@@ -34,6 +34,7 @@ export default function CpanelParity() {
   const [plugins, setPlugins] = useState<AnyObj[]>([]);
   const [updates, setUpdates] = useState<AnyObj>({});
   const [imports, setImports] = useState<AnyObj[]>([]);
+  const [backupPlan, setBackupPlan] = useState<AnyObj | null>(null);
   const [form, setForm] = useState<AnyObj>({ teamPerms: ['files','email-accounts'], featurePerms: ['file-manager','email-accounts','databases'], mailQuery: '', backupType: 'files', backupTarget: '', nsDomain: '', archivePath: '', webdavHome: '/var/www/', webdavUser: '', dnsName: '', dnsHost: '' });
 
   async function load() {
@@ -57,6 +58,8 @@ export default function CpanelParity() {
   async function assignPlan() { await post('/api/feature-lists/assign-plan', { planId: Number(form.planId), featureListId: Number(form.featureListId) }); toast.success('Plan feature list assigned'); load(); }
   async function searchMail() { const data = await json(`/api/mail-trace/search?limit=100&recipient=${encodeURIComponent(form.mailQuery || '')}&sender=${encodeURIComponent(form.mailQuery || '')}`); setMailEvents(data.events || []); }
   async function runBackup() { await post('/api/backup/create', { type: form.backupType, target: form.backupTarget || undefined }); toast.success('Backup job completed'); load(); }
+  async function planRestore() { if (!form.restoreBackup) throw new Error('Select a backup first'); const data = await json(`/api/backup/restore/${encodeURIComponent(form.restoreBackup)}/plan`); setBackupPlan(data); toast.success('Restore dry-run loaded'); }
+  async function runRestore(dryRun = false) { if (!form.restoreBackup) throw new Error('Select a backup first'); const entries = String(form.restoreEntries || '').split('\n').map(s=>s.trim()).filter(Boolean); const data = await post(`/api/backup/restore/${encodeURIComponent(form.restoreBackup)}`, { dryRun, target: form.restoreTarget || undefined, entries: entries.length ? entries : undefined }); setBackupPlan(data); toast.success(dryRun ? 'Restore dry-run completed' : 'Restore completed'); load(); }
   async function saveWebdav() { await post('/api/webdav', { username: form.webdavUser, home: form.webdavHome, domain: form.webdavDomain || '', permissions: form.webdavPerm || 'rw', password: form.webdavPassword || undefined }); toast.success('WebDAV account saved'); set('webdavPassword',''); load(); }
   async function provisionWebdav() { await post('/api/webdav/provision', {}); toast.success('WebDAV packages/config provisioned'); load(); }
   async function saveDnsNode() { await post('/api/dns-cluster/nodes', { name: form.dnsName, host: form.dnsHost, role: 'secondary', tsig_name: form.dnsTsigName || '', tsig_secret: form.dnsTsigSecret || '' }); toast.success('DNS cluster node saved'); set('dnsTsigSecret',''); load(); }
@@ -93,7 +96,10 @@ export default function CpanelParity() {
 
     <Panel title="4. Guided Backup Wizard">
       <div className="grid md:grid-cols-4 gap-3"><select className="input" value={form.backupType} onChange={e=>set('backupType',e.target.value)}><option value="files">Home/files backup</option><option value="database">Database backup</option></select><Text value={form.backupTarget || ''} onChange={v=>set('backupTarget',v)} placeholder="target path under webroot or db name"/><button className="btn-primary" onClick={runBackup}>Run Wizard Backup</button></div>
+      <div className="grid md:grid-cols-5 gap-3"><select className="input" value={form.restoreBackup || ''} onChange={e=>set('restoreBackup',e.target.value)}><option value="">Select backup to restore</option>{backups.map(b=><option key={b.name} value={b.name}>{b.name}</option>)}</select><Text value={form.restoreTarget || ''} onChange={v=>set('restoreTarget',v)} placeholder="restore target under webroot"/><Text value={form.restoreEntries || ''} onChange={v=>set('restoreEntries',v)} placeholder="entries, newline separated"/><button className="btn-secondary" onClick={planRestore}>Plan Restore</button><button className="btn-primary" onClick={()=>runRestore(false)}>Execute Restore</button></div>
+      <button className="btn-secondary" onClick={()=>runRestore(true)}>Run Restore Dry-Run</button>
       <div className="text-sm text-slate-500">Recent backups: {backups.slice(0,5).map(b=>b.name).join(' • ') || 'None'}</div>
+      {backupPlan && <div className="rounded bg-slate-50 dark:bg-slate-900 p-3 text-xs font-mono max-h-44 overflow-auto">{JSON.stringify(backupPlan, null, 2)}</div>}
     </Panel>
 
     <Panel title="5. phpMyAdmin / Database GUI Integration">

@@ -207,6 +207,17 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## Backup
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/backup/list` | List local backups |
+| `POST` | `/api/backup/create` | Create file or database backup |
+| `GET` | `/api/backup/restore/:name/plan` | Inspect restore plan/dry-run metadata |
+| `POST` | `/api/backup/restore/:name` | Run dry-run or execute full/selective restore |
+
+---
+
 ## WebDAV
 
 | Method | Path | Description |

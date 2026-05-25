@@ -25,6 +25,7 @@ All notable changes to HostPanel are documented in this file.
 - Added guarded cPanel transfer/import execution with inspect reports, progress tracking, homedir restore rollback points, account record upserts, and MySQL SQL import support.
 - Added plugin package installation, enable/disable operations, sha256 verification, manifest sanitization, and rollback snapshots to the extension ecosystem.
 - Added WebDAV prerequisite provisioning plus UI password handling so new Web Disk accounts create/update htpasswd entries and managed Apache DAV config from the parity hub.
+- Added guided backup restore controls in the parity hub for restore planning, dry-run execution, selective entries, and actual restore execution.
 
 ### Fixed
 

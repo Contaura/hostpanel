@@ -45,9 +45,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - API: `/api/transfer-import`, `/api/transfer-import/inspect`, `/api/transfer-import/:id`, `/api/transfer-import/:id/execute`
   - Adds cPanel archive inspection plus guarded execution that extracts to staging, restores `homedir/public_html` with rollback points, upserts HostPanel account records, imports MySQL SQL dumps, and tracks progress in the import report.
 
-- **Guided backup wizard foundation**
+- **Guided backup wizard**
   - UI: `/cpanel-parity`
-  - Calls existing `/api/backup/create` using guided presets for file/home and database backups.
+  - Calls existing `/api/backup/create`, `/api/backup/restore/:name/plan`, and `/api/backup/restore/:name` using guided presets for file/home and database backups, restore dry-runs, selective entry restores, and execution.
 
 - **phpMyAdmin integration**
   - UI: `/cpanel-parity`, admin Database Manager, and client portal Databases page.
@@ -60,7 +60,6 @@ These areas need deeper production hardening beyond the new API/UI foundations:
 
 - Remaining team subaccount hardening: account-level domain/resource narrowing for every portal route and audit log attribution with team user IDs.
 - Feature-list enforcement middleware on existing account, reseller, portal, and navigation actions.
-- Backup wizard restore dry-run UI and selective restore execution.
 - phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
 
 ## Verification
