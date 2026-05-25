@@ -36,9 +36,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - API: `/api/webdav`, `/api/webdav/config-preview`, `/api/webdav/reload`
   - Stores WebDAV account metadata, validates paths under `/var/www`, and previews Apache DAV config before reload.
 
-- **DNS clustering and nameserver automation foundation**
-  - API: `/api/dns-cluster/nodes`, `/api/dns-cluster/health-check`, `/api/dns-cluster/sync-preview`, `/api/dns-cluster/nameserver-plan`
-  - Adds node registry, health checks, zone sync dry-runs, and nameserver record planning.
+- **DNS clustering and nameserver automation**
+  - API: `/api/dns-cluster/nodes`, `/api/dns-cluster/health-check`, `/api/dns-cluster/sync-preview`, `/api/dns-cluster/sync`, `/api/dns-cluster/nameserver-plan`
+  - Adds node registry, health checks, zone sync dry-runs, authenticated `rndc retransfer` execution with temporary key files, and nameserver record planning.
 
 - **Full account transfer/import foundation**
   - API: `/api/transfer-import`, `/api/transfer-import/inspect`
@@ -63,7 +63,6 @@ These areas need deeper production hardening beyond the new API/UI foundations:
 - Backup wizard restore dry-run UI and selective restore execution.
 - phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
 - Transfer/import execution remains intentionally gated after dry-run inspection.
-- DNS clustering needs signed authenticated remote sync execution after node trust is established.
 - Plugin install/enable/disable still needs package signature verification and rollback support.
 
 ## Verification

@@ -44,8 +44,29 @@ describe('cPanel parity control-plane routes', () => {
     expect(conf).toContain('<LimitExcept GET OPTIONS PROPFIND>');
     const passwd = await fs.readFile(process.env.WEBDAV_PASSWD_FILE!, 'utf8');
     expect(passwd).toMatch(/^diskuser:/);
-    const node = await fetch(`${server.url}/dns/nodes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'ns2', host: '192.0.2.2' }) });
-    expect(node.status).toBe(200); expect((await node.json()).host).toBe('192.0.2.2');
+    const node = await fetch(`${server.url}/dns/nodes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'ns2', host: '192.0.2.2', tsig_name: 'cluster-key', tsig_secret: 'ZmFrZS1jbHVzdGVyLXNlY3JldA==' }) });
+    expect(node.status).toBe(200);
+    const nodeBody = await node.json();
+    expect(nodeBody.host).toBe('192.0.2.2');
+    expect(nodeBody.authenticated).toBe(true);
+    expect(nodeBody.tsig_secret).toBeUndefined();
+    const preview = await fetch(`${server.url}/dns/sync-preview`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ domain: 'example.com' }) });
+    expect(preview.status).toBe(200);
+    const previewBody = await preview.json();
+    expect(previewBody.actions[0].command).toContain('<managed-key-file>');
+    expect(previewBody.actions[0].command).not.toContain('ZmFrZS1jbHVzdGVy');
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'rndc') {
+        const keyFile = args[args.indexOf('-k') + 1];
+        expect(await fs.readFile(keyFile, 'utf8')).toContain('cluster-key');
+        expect(await fs.readFile(keyFile, 'utf8')).toContain('ZmFrZS1jbHVzdGVyLXNlY3JldA==');
+      }
+      return { stdout: 'queued', stderr: '' };
+    });
+    const sync = await fetch(`${server.url}/dns/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ domain: 'example.com' }) });
+    expect(sync.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('rndc', expect.arrayContaining(['-s', '192.0.2.2', '-k', expect.any(String), 'retransfer', 'example.com']), expect.objectContaining({ timeout: 120000 }));
+    expect(JSON.stringify(await sync.json())).not.toContain('ZmFrZS1jbHVzdGVy');
     const inspect = await fetch(`${server.url}/transfer/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archivePath: archive }) });
     expect(inspect.status).toBe(400); // tmp archives are intentionally outside approved import roots
   });

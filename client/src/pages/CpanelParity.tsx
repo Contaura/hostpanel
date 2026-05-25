@@ -30,6 +30,7 @@ export default function CpanelParity() {
   const [phpmyadmin, setPhpmyadmin] = useState<AnyObj>({});
   const [webdav, setWebdav] = useState<AnyObj[]>([]);
   const [dnsNodes, setDnsNodes] = useState<AnyObj[]>([]);
+  const [dnsSync, setDnsSync] = useState<AnyObj | null>(null);
   const [plugins, setPlugins] = useState<AnyObj[]>([]);
   const [updates, setUpdates] = useState<AnyObj>({});
   const [imports, setImports] = useState<AnyObj[]>([]);
@@ -57,7 +58,9 @@ export default function CpanelParity() {
   async function searchMail() { const data = await json(`/api/mail-trace/search?limit=100&recipient=${encodeURIComponent(form.mailQuery || '')}&sender=${encodeURIComponent(form.mailQuery || '')}`); setMailEvents(data.events || []); }
   async function runBackup() { await post('/api/backup/create', { type: form.backupType, target: form.backupTarget || undefined }); toast.success('Backup job completed'); load(); }
   async function saveWebdav() { await post('/api/webdav', { username: form.webdavUser, home: form.webdavHome, domain: form.webdavDomain || '', permissions: form.webdavPerm || 'rw' }); toast.success('WebDAV account saved'); load(); }
-  async function saveDnsNode() { await post('/api/dns-cluster/nodes', { name: form.dnsName, host: form.dnsHost, role: 'secondary' }); toast.success('DNS cluster node saved'); load(); }
+  async function saveDnsNode() { await post('/api/dns-cluster/nodes', { name: form.dnsName, host: form.dnsHost, role: 'secondary', tsig_name: form.dnsTsigName || '', tsig_secret: form.dnsTsigSecret || '' }); toast.success('DNS cluster node saved'); set('dnsTsigSecret',''); load(); }
+  async function previewDnsSync() { const data = await post('/api/dns-cluster/sync-preview', { domain: form.nsDomain }); setDnsSync(data); }
+  async function runDnsSync() { const data = await post('/api/dns-cluster/sync', { domain: form.nsDomain }); setDnsSync(data); toast.success('DNS sync requested'); load(); }
   async function inspectImport() { await post('/api/transfer-import/inspect', { archivePath: form.archivePath }); toast.success('Transfer archive inspected'); load(); }
 
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
@@ -98,8 +101,10 @@ export default function CpanelParity() {
     </Panel>
 
     <Panel title="7. DNS Clustering + Nameserver Automation">
-      <div className="grid md:grid-cols-4 gap-3"><Text value={form.dnsName || ''} onChange={v=>set('dnsName',v)} placeholder="node name"/><Text value={form.dnsHost || ''} onChange={v=>set('dnsHost',v)} placeholder="node IP/host"/><Text value={form.nsDomain || ''} onChange={v=>set('nsDomain',v)} placeholder="domain for NS plan"/><button className="btn-primary" onClick={saveDnsNode}>Save DNS Node</button></div>
-      <div className="text-sm text-slate-500">Nodes: {dnsNodes.map(n=>`${n.name}@${n.host}`).join(' • ') || 'None'}</div>
+      <div className="grid md:grid-cols-5 gap-3"><Text value={form.dnsName || ''} onChange={v=>set('dnsName',v)} placeholder="node name"/><Text value={form.dnsHost || ''} onChange={v=>set('dnsHost',v)} placeholder="node IP/host"/><Text value={form.dnsTsigName || ''} onChange={v=>set('dnsTsigName',v)} placeholder="rndc key name"/><Text value={form.dnsTsigSecret || ''} onChange={v=>set('dnsTsigSecret',v)} placeholder="rndc key secret" type="password"/><button className="btn-primary" onClick={saveDnsNode}>Save DNS Node</button></div>
+      <div className="grid md:grid-cols-3 gap-3"><Text value={form.nsDomain || ''} onChange={v=>set('nsDomain',v)} placeholder="domain to sync / plan"/><button className="btn-secondary" onClick={previewDnsSync}>Preview Sync</button><button className="btn-primary" onClick={runDnsSync}>Run Auth Sync</button></div>
+      <div className="text-sm text-slate-500">Nodes: {dnsNodes.map(n=>`${n.name}@${n.host}${n.authenticated ? ' (auth)' : ''}`).join(' • ') || 'None'}</div>
+      {dnsSync && <div className="rounded bg-slate-50 dark:bg-slate-900 p-3 text-xs font-mono max-h-44 overflow-auto">{JSON.stringify(dnsSync, null, 2)}</div>}
     </Panel>
 
     <Panel title="8. Full Transfer / Import Tool">

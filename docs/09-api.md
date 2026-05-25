@@ -117,6 +117,20 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## DNS Cluster
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/dns-cluster/nodes` | List cluster nodes without exposing stored TSIG secrets |
+| `POST` | `/api/dns-cluster/nodes` | Create/update node with optional `tsig_name` and `tsig_secret` |
+| `DELETE` | `/api/dns-cluster/nodes/:id` | Remove node |
+| `POST` | `/api/dns-cluster/health-check` | Probe enabled nodes with `dig` |
+| `POST` | `/api/dns-cluster/sync-preview` | Preview `rndc retransfer` actions without secrets |
+| `POST` | `/api/dns-cluster/sync` | Execute authenticated `rndc retransfer` against enabled/selected nodes |
+| `POST` | `/api/dns-cluster/nameserver-plan` | Generate NS/A record and registrar glue plan |
+
+---
+
 ## Databases
 
 | Method | Path | Description |
