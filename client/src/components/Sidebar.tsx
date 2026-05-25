@@ -106,6 +106,7 @@ const sections: Section[] = [
       { to: '/node-apps',       icon: ServerCog,      label: 'Node.js / Python' },
       { to: '/server-info',     icon: Info,           label: 'Server Info' },
       { to: '/mail-tools',      icon: MailSearch,     label: 'Mail Tools' },
+      { to: '/cpanel-parity',   icon: ServerCog,      label: 'cPanel / WHM Parity' },
     ],
   },
   {

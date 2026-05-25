@@ -13,6 +13,13 @@ All notable changes to HostPanel are documented in this file.
 - Added Track Delivery-style mail trace APIs for Postfix log search by sender, recipient, queue ID, and status.
 - Added visitor, error, bandwidth, raw-access, and Awstats/Webalizer-style analytics APIs backed by local web logs.
 - Added server update and plugin registry foundation APIs for git/audit status and controlled plugin manifest discovery.
+- Added a cPanel/WHM parity hub UI at `/cpanel-parity` covering the requested next implementation order.
+- Added cPanel-style team subaccount APIs with scoped permissions and hashed credentials.
+- Added feature-list assignment APIs for plans and reseller privilege feature sets.
+- Added Web Disk/WebDAV account registry, Apache config preview, and reload endpoint.
+- Added DNS clustering/nameserver automation foundations for node registry, health checks, sync dry-runs, and nameserver record planning.
+- Added cPanel transfer/import dry-run inspection with guarded execution.
+- Wired guided backup wizard, phpMyAdmin detection, mail trace, analytics, raw logs, update status, and plugin registry into the new parity UI.
 
 ### Fixed
 

@@ -62,6 +62,10 @@ import featureListsRoutes    from './routes/feature-lists';
 import mailTraceRoutes       from './routes/mail-trace';
 import analyticsRoutes       from './routes/analytics';
 import extensionsRoutes      from './routes/extensions';
+import teamUsersRoutes       from './routes/team-users';
+import webdavRoutes          from './routes/webdav';
+import dnsClusterRoutes      from './routes/dns-cluster';
+import transferImportRoutes  from './routes/transfer-import';
 import { authenticateToken, readonlyGuard } from './middleware/auth';
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
@@ -258,6 +262,10 @@ app.use('/api/feature-lists', authenticateToken, featureListsRoutes);
 app.use('/api/mail-trace',    authenticateToken, mailTraceRoutes);
 app.use('/api/analytics',     authenticateToken, analyticsRoutes);
 app.use('/api/extensions',    authenticateToken, extensionsRoutes);
+app.use('/api/team-users',    authenticateToken, teamUsersRoutes);
+app.use('/api/webdav',        authenticateToken, webdavRoutes);
+app.use('/api/dns-cluster',   authenticateToken, dnsClusterRoutes);
+app.use('/api/transfer-import', authenticateToken, transferImportRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.
