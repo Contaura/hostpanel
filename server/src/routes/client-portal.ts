@@ -117,6 +117,12 @@ function clientAuth(req: Request, res: Response, next: NextFunction) {
     const payload = jwt.verify(auth.slice(7), jwtSecret(), { algorithms: ['HS256'] }) as any;
     if (payload.role !== 'client' && payload.role !== 'client_team') return res.status(403).json({ error: 'Forbidden' });
     (req as any).clientId = payload.clientId;
+    if (payload.role === 'client') {
+      (req as any).auditActor = {
+        username: payload.email || `client:${payload.clientId}`,
+        details: { role: 'client', client_id: payload.clientId }
+      };
+    }
     if (payload.role === 'client_team') {
       const team = db.prepare('SELECT id, status, permissions, account_id FROM team_users WHERE id = ?').get(payload.teamUserId) as any;
       if (!team || team.status !== 'active') return res.status(403).json({ error: 'Team subaccount disabled' });
@@ -126,6 +132,10 @@ function clientAuth(req: Request, res: Response, next: NextFunction) {
       (req as any).teamUserId = team.id;
       (req as any).teamPermissions = permissions;
       (req as any).teamAccountId = team.account_id || null;
+      (req as any).auditActor = {
+        username: payload.email || `team:${team.id}`,
+        details: { role: 'client_team', team_user_id: team.id, client_id: payload.clientId, account_id: team.account_id || null }
+      };
     }
     next();
   } catch {

@@ -3,6 +3,14 @@ import db from '../db';
 
 const router = Router();
 
+function resourceFromPath(fullPath: string): string {
+  const clean = fullPath.split('?')[0];
+  const portalDomain = clean.match(/^\/api\/portal\/domains\/([^/]+)/) || clean.match(/^\/api\/portal\/(?:files|htpasswd|hotlink|spam-rules|stats|security-scan|htaccess)\/([^/]+)/);
+  if (portalDomain) return decodeURIComponent(portalDomain[1]);
+  const last = clean.split('/').filter(Boolean).pop();
+  return last || '';
+}
+
 /* ── Middleware to log actions — attach to index.ts ─────── */
 
 export function auditMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -20,10 +28,12 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
     if (res.statusCode < 400) {
       try {
         const user = (req as any).user;
-        const username = user?.username || 'anonymous';
+        const actor = (req as any).auditActor || {};
+        const username = actor.username || user?.username || 'anonymous';
         const action   = `${method} ${fullPath}`;
-        const resource = req.params?.id || req.params?.name || req.params?.domain || '';
-        db.prepare("INSERT INTO audit_logs (username, action, resource, ip) VALUES (?, ?, ?, ?)").run(username, action, resource, ip);
+        const resource = (req as any).auditResource || req.params?.id || req.params?.name || req.params?.domain || resourceFromPath(fullPath);
+        const details = JSON.stringify(actor.details || {});
+        db.prepare("INSERT INTO audit_logs (username, action, resource, details, ip) VALUES (?, ?, ?, ?, ?)").run(username, action, resource, details, ip);
       } catch (_) {}
     }
     return origJson(body);

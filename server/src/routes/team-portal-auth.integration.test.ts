@@ -24,6 +24,7 @@ describe('client portal team subaccount authentication', () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-team-portal-'));
     process.env.DATA_DIR = tmp;
     process.env.JWT_SECRET = 'test-team-secret';
+    process.env.NAMED_DIR = tmp;
     vi.resetModules();
   });
 
@@ -33,6 +34,7 @@ describe('client portal team subaccount authentication', () => {
     await fs.rm(tmp, { recursive: true, force: true });
     delete process.env.DATA_DIR;
     delete process.env.JWT_SECRET;
+    delete process.env.NAMED_DIR;
     vi.resetModules();
   });
 
@@ -40,6 +42,7 @@ describe('client portal team subaccount authentication', () => {
     const db = (await import('../db')).default;
     await import('./team-users'); // creates the team_users table used by portal team login
     const portal = (await import('./client-portal')).default;
+    const { auditMiddleware } = await import('./audit-log');
     const passwordHash = await bcrypt.hash('password123', 4);
     const clientId = Number(db.prepare("INSERT INTO clients (name,email,portal_enabled,password_hash) VALUES ('Acme','owner@example.com',1,?)").run(passwordHash).lastInsertRowid);
     const accountId = Number(db.prepare("INSERT INTO accounts (username,domain,client_id,status) VALUES ('acme','example.com',?,'active')").run(clientId).lastInsertRowid);
@@ -49,7 +52,8 @@ describe('client portal team subaccount authentication', () => {
     const teamHash = await bcrypt.hash('team-password', 4);
     db.prepare('INSERT INTO team_users (client_id,account_id,username,email,password_hash,permissions,status) VALUES (?,?,?,?,?,?,\'active\')')
       .run(clientId, accountId, 'helper', 'helper@example.com', teamHash, JSON.stringify(permissions));
-    const app = express(); app.use(express.json()); app.use('/api/portal', portal);
+    await fs.writeFile(path.join(tmp, 'example.com.zone'), '; test zone\n');
+    const app = express(); app.use(express.json()); app.use('/api', auditMiddleware); app.use('/api/portal', portal);
     return listen(app);
   }
 
@@ -106,5 +110,29 @@ describe('client portal team subaccount authentication', () => {
 
     const otherDomain = await fetch(`${server.url}/api/portal/domains/other.com/dns`, { headers: { authorization: `Bearer ${token}` } });
     expect(otherDomain.status).toBe(403);
+  });
+
+  it('attributes audited portal mutations to the team subaccount id', async () => {
+    const server = await appWithSeed(['dns']); closeServer = server.close;
+    const db = (await import('../db')).default;
+    const login = await fetch(`${server.url}/api/portal/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'helper@example.com', password: 'team-password' }) });
+    const { token } = await login.json();
+
+    const addRecord = await fetch(`${server.url}/api/portal/domains/example.com/dns`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'www', type: 'A', value: '192.0.2.10' }),
+    });
+    expect(addRecord.status).toBe(200);
+
+    const row: any = db.prepare('SELECT username, action, resource, details FROM audit_logs ORDER BY id DESC LIMIT 1').get();
+    expect(row.username).toBe('helper@example.com');
+    expect(row.action).toBe('POST /api/portal/domains/example.com/dns');
+    expect(row.resource).toBe('example.com');
+    const details = JSON.parse(row.details);
+    expect(details.role).toBe('client_team');
+    expect(details.team_user_id).toBe(1);
+    expect(details.client_id).toBe(1);
+    expect(details.account_id).toBe(1);
   });
 });
