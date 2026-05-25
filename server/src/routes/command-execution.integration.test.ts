@@ -492,6 +492,7 @@ describe('high-risk route command execution integration', () => {
     expect(runFileMock).toHaveBeenCalledWith('dnf', ['install', '-y', 'phpMyAdmin'], expect.objectContaining({ timeout: 300000 }));
     expect(runFileMock).toHaveBeenCalledWith('apachectl', ['graceful'], expect.objectContaining({ timeout: 120000 }));
     await expect(fs.readFile(process.env.PHPMYADMIN_CONF_FILE, 'utf8')).resolves.toContain(`Alias /phpMyAdmin ${pmaDir}`);
+    await expect(fs.readFile(path.join(pmaDir, 'hostpanel-signon.php'), 'utf8')).resolves.toContain('PMA_single_signon_user');
   });
 
   it('removes promisify(exec) from reseller route source', async () => {

@@ -144,6 +144,7 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | `GET` | `/api/databases/phpmyadmin` | Detect phpMyAdmin install and managed launch URL |
 | `POST` | `/api/databases/phpmyadmin/install` | Install phpMyAdmin via `dnf`, write Apache alias config, reload Apache |
 | `GET` | `/api/databases/phpmyadmin/account-scope` | Return account/database-scoped phpMyAdmin URL plus owned database/user lists |
+| `POST` | `/api/databases/phpmyadmin/sso` | Verify supplied DB credentials and mint a short-lived one-time phpMyAdmin Signon bridge URL |
 | `GET` | `/api/portal/phpmyadmin` | Client portal phpMyAdmin status and account-scoped launch URL |
 
 ---

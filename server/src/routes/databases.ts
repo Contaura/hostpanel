@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
 import { spawn } from 'child_process';
 import { createReadStream } from 'fs';
+import fs from 'fs/promises';
+import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import multer from 'multer';
 import { existsSync, unlinkSync, mkdirSync, writeFileSync } from 'fs';
@@ -32,6 +34,8 @@ const DB_ROOT_PASS = process.env.DB_ROOT_PASS || '';
 const PMA_ALIAS = process.env.PHPMYADMIN_ALIAS || '/phpMyAdmin';
 const PMA_CONF_FILE = process.env.PHPMYADMIN_CONF_FILE || '/etc/httpd/conf.d/hostpanel-phpmyadmin.conf';
 const PMA_CANDIDATES = (process.env.PHPMYADMIN_PATHS || '/usr/share/phpMyAdmin:/usr/share/phpmyadmin:/var/www/html/phpMyAdmin:/var/www/html/phpmyadmin').split(':').filter(Boolean);
+const PMA_SSO_TOKEN_DIR = process.env.PHPMYADMIN_SSO_TOKEN_DIR || '/var/lib/hostpanel/phpmyadmin-sso';
+const PMA_SSO_TTL_MS = 2 * 60 * 1000;
 
 async function getConn() {
   return mysql.createConnection({
@@ -211,16 +215,49 @@ router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), asy
 /* ── phpMyAdmin detection / installation ────────────────────── */
 
 function pmaPath() { return PMA_CANDIDATES.find(p => existsSync(p)); }
+function pmaBaseUrl() { return PMA_ALIAS.replace(/\/$/, ''); }
 function pmaUrl(database?: string, user?: string) {
   const q = new URLSearchParams();
   if (database) q.set('db', database);
   if (user) q.set('pma_username', user);
   const suffix = q.toString();
-  return `${PMA_ALIAS.replace(/\/$/, '')}/${suffix ? `?${suffix}` : ''}`;
+  return `${pmaBaseUrl()}/${suffix ? `?${suffix}` : ''}`;
+}
+function pmaBridgePhp() {
+  return `<?php
+// Managed by HostPanel. One-time phpMyAdmin Signon bridge.
+$tokenDir = getenv('HOSTPANEL_PMA_SSO_TOKEN_DIR') ?: '${PMA_SSO_TOKEN_DIR.replace(/'/g, "'\\''")}';
+$token = preg_replace('/[^a-f0-9]/', '', $_GET['token'] ?? $_POST['token'] ?? '');
+if (!$token) { http_response_code(400); exit('Missing token'); }
+$file = rtrim($tokenDir, '/').'/'.$token.'.json';
+if (!is_readable($file)) { http_response_code(403); exit('Invalid or expired token'); }
+$data = json_decode(file_get_contents($file), true);
+@unlink($file);
+if (!$data || empty($data['expires']) || $data['expires'] < time()) { http_response_code(403); exit('Expired token'); }
+session_name('HOSTPANEL_PMA');
+session_start();
+$_SESSION['PMA_single_signon_user'] = $data['username'];
+$_SESSION['PMA_single_signon_password'] = $data['password'];
+$_SESSION['PMA_single_signon_host'] = $data['host'] ?? '127.0.0.1';
+$_SESSION['PMA_single_signon_port'] = strval($data['port'] ?? 3306);
+$target = 'index.php';
+if (!empty($data['database'])) $target .= '?db='.rawurlencode($data['database']);
+header('Location: '.$target);
+exit;
+?>`;
 }
 function writePmaApacheConfig(foundPath: string) {
   mkdirSync(path.dirname(PMA_CONF_FILE), { recursive: true });
-  writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nAlias ${PMA_ALIAS} ${foundPath}\nAlias ${PMA_ALIAS}/ ${foundPath}/\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
+  mkdirSync(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });
+  writeFileSync(path.join(foundPath, 'hostpanel-signon.php'), pmaBridgePhp(), { mode: 0o640 });
+  writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nSetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR ${PMA_SSO_TOKEN_DIR}\nAlias ${PMA_ALIAS} ${foundPath}\nAlias ${PMA_ALIAS}/ ${foundPath}/\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
+}
+async function createPmaSsoToken(username: string, password: string, database?: string) {
+  await fs.mkdir(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });
+  const token = crypto.randomBytes(24).toString('hex');
+  const payload = { username, password, database: database || '', host: DB_HOST, port: DB_PORT, expires: Math.floor((Date.now() + PMA_SSO_TTL_MS) / 1000) };
+  await fs.writeFile(path.join(PMA_SSO_TOKEN_DIR, `${token}.json`), JSON.stringify(payload), { mode: 0o640 });
+  return token;
 }
 
 router.get('/phpmyadmin', enforceResellerPrivilege('phpmyadmin'), async (_req: AuthRequest, res: Response) => {
@@ -269,6 +306,23 @@ router.get('/phpmyadmin/account-scope', enforceResellerPrivilege('phpmyadmin'), 
     res.json({ installed: !!pmaPath(), url: pmaUrl(selected, users[0]?.user), account, selectedDatabase: selected || null, databases, users });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
   finally { await conn?.end(); }
+});
+
+router.post('/phpmyadmin/sso', enforceResellerPrivilege('phpmyadmin'), async (req: AuthRequest, res: Response) => {
+  const { username, password, database = '' } = req.body || {};
+  if (!username || !/^[a-zA-Z0-9_]+$/.test(String(username))) return res.status(400).json({ error: 'Valid database username is required' });
+  if (!password || typeof password !== 'string') return res.status(400).json({ error: 'Database password is required for SSO handoff' });
+  if (database && !/^[a-zA-Z0-9_]+$/.test(String(database))) return res.status(400).json({ error: 'Invalid database name' });
+  const found = pmaPath();
+  if (!found) return res.status(404).json({ error: 'phpMyAdmin is not installed' });
+  try {
+    writePmaApacheConfig(found);
+    const userConn = await mysql.createConnection({ host: DB_HOST, port: DB_PORT, user: username, password, database: database || undefined });
+    await userConn.ping();
+    await userConn.end();
+    const token = await createPmaSsoToken(username, password, database || undefined);
+    res.json({ url: `${pmaBaseUrl()}/hostpanel-signon.php?token=${token}`, expiresInSeconds: PMA_SSO_TTL_MS / 1000, authType: 'signon', note: 'One-time token consumed by HostPanel phpMyAdmin signon bridge' });
+  } catch (err: any) { res.status(401).json({ error: `phpMyAdmin SSO credential verification failed: ${err.message}` }); }
 });
 
 /* ── User privilege management ─────────────────────────────── */

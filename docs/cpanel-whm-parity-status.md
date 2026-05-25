@@ -51,15 +51,14 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 
 - **phpMyAdmin integration**
   - UI: `/cpanel-parity`, admin Database Manager, and client portal Databases page.
-  - API: `/api/databases/phpmyadmin`, `/api/databases/phpmyadmin/install`, `/api/databases/phpmyadmin/account-scope`, `/api/portal/phpmyadmin`.
-  - Detects installed phpMyAdmin, can install the package via `dnf`, writes a managed Apache alias, reloads Apache, and generates account/database-scoped launch links while enforcing reseller/client feature permissions.
+  - API: `/api/databases/phpmyadmin`, `/api/databases/phpmyadmin/install`, `/api/databases/phpmyadmin/account-scope`, `/api/databases/phpmyadmin/sso`, `/api/portal/phpmyadmin`.
+  - Detects installed phpMyAdmin, can install the package via `dnf`, writes a managed Apache alias and one-time Signon bridge, reloads Apache, generates account/database-scoped launch links, and can mint short-lived credential-verified SSO handoff URLs while enforcing reseller/client feature permissions.
 
 ## Remaining build-out after this foundation
 
 These areas need deeper production hardening beyond the new API/UI foundations:
 
-- Remaining team subaccount hardening: account-level domain/resource narrowing for every portal route and audit log attribution with team user IDs.
-- phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
+- Operational hardening still recommended after field use: add more destructive-operation confirmations, expand account-specific team-scope regression coverage for newly added portal modules, and validate phpMyAdmin Signon behavior against the exact distro package config on production.
 
 ## Verification
 
