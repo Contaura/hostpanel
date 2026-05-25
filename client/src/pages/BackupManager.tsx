@@ -11,6 +11,15 @@ interface Backup {
   created: string;
 }
 
+interface RestorePlan {
+  type: 'files' | 'database';
+  name: string;
+  database?: string;
+  entries?: string[];
+  count?: number;
+  selectable: boolean;
+}
+
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
@@ -41,6 +50,11 @@ export default function BackupManager() {
   const [scheduleSearch, setScheduleSearch] = useState('');
   const [deletingBackup, setDeletingBackup] = useState<string | null>(null);
   const [restoringBackup, setRestoringBackup] = useState<string | null>(null);
+  const [restorePlan, setRestorePlan] = useState<RestorePlan | null>(null);
+  const [restoreEntries, setRestoreEntries] = useState<string[]>([]);
+  const [restoreTarget, setRestoreTarget] = useState('');
+  const [restoreDryRun, setRestoreDryRun] = useState<any | null>(null);
+  const [restoreLoading, setRestoreLoading] = useState(false);
   const [deletingSchedule, setDeletingSchedule] = useState<number | null>(null);
 
   async function load() {
@@ -135,13 +149,42 @@ export default function BackupManager() {
   }
 
   async function restoreBackup(name: string) {
-    if (!await confirm(`Restore "${name}"?\n\nThis will overwrite existing files or database contents. Proceed?`)) return;
+    setRestoreLoading(true);
     setRestoringBackup(name);
+    setRestoreDryRun(null);
     try {
-      await axios.post(`/api/backup/restore/${encodeURIComponent(name)}`);
-      toast.success(`"${name}" restored successfully`);
+      const { data } = await axios.get<RestorePlan>(`/api/backup/restore/${encodeURIComponent(name)}/plan`);
+      setRestorePlan(data);
+      setRestoreEntries([]);
+      setRestoreTarget('');
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to load restore plan'); }
+    finally { setRestoreLoading(false); setRestoringBackup(null); }
+  }
+
+  async function runRestore(dryRun: boolean) {
+    if (!restorePlan) return;
+    const body = restorePlan.type === 'files'
+      ? { dryRun, entries: restoreEntries.length ? restoreEntries : undefined, target: restoreTarget || undefined }
+      : { dryRun };
+    if (!dryRun && !await confirm(`Restore "${restorePlan.name}" now?\n\nThis can overwrite existing ${restorePlan.type === 'database' ? 'database contents' : 'files'}. Run a dry-run first if you have not already reviewed the plan.`)) return;
+    setRestoreLoading(true);
+    setRestoringBackup(restorePlan.name);
+    try {
+      const { data } = await axios.post(`/api/backup/restore/${encodeURIComponent(restorePlan.name)}`, body);
+      if (dryRun) {
+        setRestoreDryRun(data);
+        toast.success('Restore dry-run completed');
+      } else {
+        toast.success(data.message || `"${restorePlan.name}" restored successfully`);
+        setRestorePlan(null);
+        setRestoreDryRun(null);
+      }
     } catch (err: any) { toast.error(err.response?.data?.error || 'Restore failed'); }
-    finally { setRestoringBackup(null); }
+    finally { setRestoreLoading(false); setRestoringBackup(null); }
+  }
+
+  function toggleRestoreEntry(entry: string) {
+    setRestoreEntries(prev => prev.includes(entry) ? prev.filter(e => e !== entry) : [...prev, entry]);
   }
 
   const isDB = form.type === 'database';
@@ -328,6 +371,59 @@ export default function BackupManager() {
             </div>
           </div>
           <button className="btn-primary" onClick={saveRemoteConfig}>Save Remote Config</button>
+        </div>
+      )}
+
+      {tab === 'backups' && restorePlan && (
+        <div className="card p-5 space-y-4 border-amber-200 dark:border-amber-900/60">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">Restore Wizard</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">{restorePlan.name}</p>
+            </div>
+            <button className="btn-secondary" onClick={() => { setRestorePlan(null); setRestoreDryRun(null); }}>Close</button>
+          </div>
+          {restorePlan.type === 'database' ? (
+            <div className="rounded-xl bg-purple-50 dark:bg-purple-900/20 p-4 text-sm text-purple-800 dark:text-purple-200">
+              Database restore target: <strong>{restorePlan.database}</strong>. Use Dry Run to verify the database inferred from the backup filename before restoring.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="label">Restore target under webroot (optional)</label>
+                <input className="input font-mono" placeholder="blank = webroot" value={restoreTarget} onChange={e => setRestoreTarget(e.target.value)} />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="label mb-0">Selective restore entries</label>
+                  <div className="flex gap-2">
+                    <button className="btn-secondary text-xs" onClick={() => setRestoreEntries(restorePlan.entries || [])}>Select all</button>
+                    <button className="btn-secondary text-xs" onClick={() => setRestoreEntries([])}>Restore all</button>
+                  </div>
+                </div>
+                <div className="max-h-52 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-900">
+                  {(restorePlan.entries || []).slice(0, 500).map(entry => (
+                    <label key={entry} className="flex items-center gap-2 px-3 py-2 text-xs font-mono text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                      <input type="checkbox" checked={restoreEntries.includes(entry)} onChange={() => toggleRestoreEntry(entry)} />
+                      <span className="truncate">{entry}</span>
+                    </label>
+                  ))}
+                  {(!restorePlan.entries || restorePlan.entries.length === 0) && <div className="px-3 py-6 text-center text-xs text-slate-400">No listable entries were returned.</div>}
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Leave every checkbox clear to restore the full backup. Select entries to perform a partial restore.</p>
+              </div>
+            </div>
+          )}
+          {restoreDryRun && (
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+              <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Dry-run result ({restoreDryRun.count || restoreDryRun.actions?.length || 1} action(s))</div>
+              <pre className="text-xs whitespace-pre-wrap max-h-40 overflow-auto text-slate-700 dark:text-slate-200">{(restoreDryRun.actions || []).join('\n') || JSON.stringify(restoreDryRun, null, 2)}</pre>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-secondary" disabled={restoreLoading} onClick={() => runRestore(true)}><Search size={14} /> Dry Run</button>
+            <button className="btn-primary bg-amber-600 hover:bg-amber-700" disabled={restoreLoading} onClick={() => runRestore(false)}><RotateCcw size={14} /> Restore Selected</button>
+          </div>
         </div>
       )}
 

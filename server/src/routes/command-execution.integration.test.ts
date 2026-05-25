@@ -352,6 +352,33 @@ describe('high-risk route command execution integration', () => {
     expect(runFileMock).toHaveBeenCalledWith('tar', ['-xzf', backupFile, '-C', process.env.WEBROOT], { timeout: 300000 });
   });
 
+  it('dry-runs selective backup restores before extracting files', async () => {
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.BACKUP_DIR, { recursive: true });
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const backupFile = path.join(process.env.BACKUP_DIR, 'files_all_2024-01-01T00-00-00.tar.gz');
+    await fs.writeFile(backupFile, 'fake');
+    const server = await appFor('/api/backup', './backup');
+    closeServer = server.close;
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tzf') return { stdout: 'public_html/index.html\nmail/config.json\n', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const plan = await fetch(`${server.url}/api/backup/restore/files_all_2024-01-01T00-00-00.tar.gz/plan`);
+    expect(plan.status).toBe(200);
+    expect((await plan.json()).entries).toContain('public_html/index.html');
+    const res = await fetch(`${server.url}/api/backup/restore/files_all_2024-01-01T00-00-00.tar.gz`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dryRun: true, entries: ['public_html'] }),
+    });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.dryRun).toBe(true);
+    expect(body.selected).toEqual(['public_html/index.html']);
+    expect(runFileMock).not.toHaveBeenCalledWith('tar', expect.arrayContaining(['-xzf']), expect.anything());
+  });
+
   it('installs composer-based scripts via runFile argv', async () => {
     process.env.WEBROOT = path.join(tmp, 'www');
     await fs.mkdir(process.env.WEBROOT, { recursive: true });
