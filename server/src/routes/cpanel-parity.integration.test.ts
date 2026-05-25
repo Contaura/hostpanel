@@ -19,8 +19,8 @@ function listen(app: express.Express): Promise<{ url: string; close: () => Promi
 
 describe('cPanel parity control-plane routes', () => {
   let tmp = ''; let closeServer: (() => Promise<void>) | undefined;
-  beforeEach(async () => { tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-parity-')); process.env.DATA_DIR = tmp; runFileMock.mockReset(); vi.resetModules(); });
-  afterEach(async () => { if (closeServer) await closeServer(); closeServer = undefined; await fs.rm(tmp, { recursive: true, force: true }); delete process.env.DATA_DIR; vi.resetModules(); });
+  beforeEach(async () => { tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-parity-')); process.env.DATA_DIR = tmp; process.env.WEBDAV_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-webdav.conf'); process.env.WEBDAV_PASSWD_FILE = path.join(tmp, 'httpd', '.hostpanel-webdav-passwd'); process.env.WEBDAV_ALLOWED_ROOT = path.join(tmp, 'www') + path.sep; runFileMock.mockReset(); vi.resetModules(); });
+  afterEach(async () => { if (closeServer) await closeServer(); closeServer = undefined; await fs.rm(tmp, { recursive: true, force: true }); delete process.env.DATA_DIR; delete process.env.WEBDAV_CONF_FILE; delete process.env.WEBDAV_PASSWD_FILE; delete process.env.WEBDAV_ALLOWED_ROOT; vi.resetModules(); });
   async function appForRoutes() {
     const team = (await import('./team-users')).default;
     const webdav = (await import('./webdav')).default;
@@ -35,8 +35,15 @@ describe('cPanel parity control-plane routes', () => {
     const server = await appForRoutes(); closeServer = server.close;
     const team = await fetch(`${server.url}/team`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'helper1', email: 'helper@example.com', password: 'password123', permissions: ['files','webdav','invalid'] }) });
     expect(team.status).toBe(200); expect((await team.json()).permissions).toEqual(['files','webdav']);
-    const wd = await fetch(`${server.url}/webdav`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'diskuser', home: '/var/www/example.com/public_html' }) });
-    expect(wd.status).toBe(200); expect((await wd.json()).home).toContain('/var/www/');
+    const webdavHome = path.join(tmp, 'www', 'example.com', 'public_html');
+    const wd = await fetch(`${server.url}/webdav`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'diskuser', password: 'password123', home: webdavHome, permissions: 'ro' }) });
+    expect(wd.status).toBe(200); expect((await wd.json()).home).toContain('/www/');
+    const conf = await fs.readFile(process.env.WEBDAV_CONF_FILE!, 'utf8');
+    expect(conf).toContain('DAV On');
+    expect(conf).toContain('Require user diskuser');
+    expect(conf).toContain('<LimitExcept GET OPTIONS PROPFIND>');
+    const passwd = await fs.readFile(process.env.WEBDAV_PASSWD_FILE!, 'utf8');
+    expect(passwd).toMatch(/^diskuser:/);
     const node = await fetch(`${server.url}/dns/nodes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'ns2', host: '192.0.2.2' }) });
     expect(node.status).toBe(200); expect((await node.json()).host).toBe('192.0.2.2');
     const inspect = await fetch(`${server.url}/transfer/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archivePath: archive }) });
