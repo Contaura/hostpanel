@@ -17,7 +17,7 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 
 - **WHM-style feature catalog / feature lists**
   - API: `/api/feature-lists/catalog`, `/api/feature-lists`, `/api/feature-lists/effective/:planId`, `/api/feature-lists/assign-plan`, `/api/feature-lists/reseller/:id`
-  - Purpose: package/feature-list enforcement foundation for plans, reseller privileges, and client portal visibility.
+  - Purpose: package/feature-list enforcement for plans, reseller privileges, client portal visibility, and reseller API access across protected HostPanel modules.
 
 - **Track Delivery / deep mail delivery reporting foundation**
   - API: `/api/mail-trace/search`
@@ -59,7 +59,6 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 These areas need deeper production hardening beyond the new API/UI foundations:
 
 - Remaining team subaccount hardening: account-level domain/resource narrowing for every portal route and audit log attribution with team user IDs.
-- Feature-list enforcement middleware on existing account, reseller, portal, and navigation actions.
 - phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
 
 ## Verification
