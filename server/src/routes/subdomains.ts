@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 const WEBROOT   = process.env.WEBROOT   || '/var/www';
@@ -68,7 +66,7 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
       path.join(docRoot, 'index.html'),
       `<html><body><h1>${fqdn}</h1><p>Hosted by HostPanel</p></body></html>`
     );
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ fqdn, docRoot });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -80,7 +78,7 @@ router.delete('/:fqdn', async (req: AuthRequest, res: Response) => {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9.-]+$/.test(fqdn)) return res.status(400).json({ error: 'Invalid FQDN' });
   try {
     await fs.unlink(path.join(VHOST_DIR, `sub_${fqdn}.conf`)).catch(() => {});
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

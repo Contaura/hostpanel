@@ -3,11 +3,9 @@ import nodemailer from 'nodemailer';
 import multer from 'multer';
 import path from 'path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import db from '../db';
 
-const execAsync = promisify(exec);
 const MAIN_CF = process.env.POSTFIX_MAIN_CF || '/etc/postfix/main.cf';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../../../data');
@@ -163,13 +161,13 @@ router.put('/relay', async (req: Request, res: Response) => {
       // post-mapped into /etc/postfix/sasl_passwd.db. Default umask (typically
       // 0644) would leave the plaintext file world-readable.
       writeFileSync('/etc/postfix/sasl_passwd', `${relayhost} ${sasl_user}:${sasl_pass}\n`, { mode: 0o600 });
-      await execAsync('postmap /etc/postfix/sasl_passwd 2>/dev/null').catch(() => {});
+      await runFile('postmap', ['/etc/postfix/sasl_passwd']).catch(() => ({ stdout: '', stderr: '' }));
     } else {
       setParam('smtp_sasl_auth_enable', 'no');
     }
 
     writeFileSync(MAIN_CF, conf);
-    await execAsync('systemctl reload postfix 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'postfix']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

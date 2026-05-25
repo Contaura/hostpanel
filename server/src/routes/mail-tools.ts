@@ -1,10 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { createConnection } from 'net';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 /* ── MX record lookup + SMTP probe ─────────────────────────── */
 
@@ -13,10 +11,10 @@ router.get('/mx-check/:domain', async (req: Request, res: Response) => {
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const [mxOut, aOut, spfOut, dmarcOut] = await Promise.all([
-      execAsync(`dig +short MX ${domain} 2>/dev/null`).then(r => r.stdout.trim()),
-      execAsync(`dig +short A ${domain} 2>/dev/null`).then(r => r.stdout.trim()),
-      execAsync(`dig +short TXT ${domain} 2>/dev/null | grep -i spf`).then(r => r.stdout.trim()).catch(() => ''),
-      execAsync(`dig +short TXT _dmarc.${domain} 2>/dev/null`).then(r => r.stdout.trim()).catch(() => ''),
+      runFile('dig', ['+short', 'MX', domain]).then(r => r.stdout.trim()),
+      runFile('dig', ['+short', 'A', domain]).then(r => r.stdout.trim()),
+      runFile('dig', ['+short', 'TXT', domain]).then(r => r.stdout.split('\n').filter(l => l.toLowerCase().includes('spf')).join('\n').trim()).catch(() => ''),
+      runFile('dig', ['+short', 'TXT', `_dmarc.${domain}`]).then(r => r.stdout.trim()).catch(() => ''),
     ]);
 
     const mxRecords = mxOut.split('\n').filter(Boolean).map(l => {
@@ -68,7 +66,7 @@ router.get('/dnsbl/:ip', async (req: Request, res: Response) => {
 
   const results = await Promise.all(DNSBLS.map(async list => {
     try {
-      const { stdout } = await execAsync(`dig +short A ${reversed}.${list} 2>/dev/null`, { timeout: 5000 });
+      const { stdout } = await runFile('dig', ['+short', 'A', `${reversed}.${list}`], { timeout: 5000 });
       const listed = stdout.trim().length > 0 && !stdout.includes('NXDOMAIN');
       const reason = listed ? stdout.trim().split('\n')[0] : null;
       return { list, listed, reason };
@@ -94,13 +92,13 @@ router.get('/smtp-auth-log', async (req: Request, res: Response) => {
     }
     if (!logPath) return res.json({ lines: [], note: 'No mail log found' });
 
-    // Strip everything except a strict ASCII allowlist *before* interpolating
-    // into the shell command. Keep the allowlist narrow (alphanumerics plus
-    // @._-) so a future regex tweak can't widen it to shell metacharacters.
-    const cleanedSearch = String(search).replace(/[^a-zA-Z0-9@._-]/g, '');
-    const grepPart = cleanedSearch ? `| grep -i "${cleanedSearch}"` : '';
-    const { stdout } = await execAsync(`grep -i "sasl\\|authentication\\|AUTH" "${logPath}" ${grepPart} | tail -300 2>/dev/null`, { timeout: 10000 });
-    const lines = stdout.split('\n').filter(Boolean).map((l, i) => ({ id: i, line: l }));
+    const cleanedSearch = String(search).toLowerCase();
+    const raw = (await import('fs')).readFileSync(logPath, 'utf8');
+    const lines = raw.split('\n')
+      .filter(l => /sasl|authentication|AUTH/i.test(l))
+      .filter(l => !cleanedSearch || l.toLowerCase().includes(cleanedSearch))
+      .slice(-300)
+      .map((l, i) => ({ id: i, line: l }));
     res.json({ lines, log_file: logPath });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

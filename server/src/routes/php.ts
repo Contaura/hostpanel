@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const EDITABLE_SETTINGS = [
   'memory_limit',
@@ -24,9 +22,9 @@ const EDITABLE_SETTINGS = [
 router.get('/info', async (_req: AuthRequest, res: Response) => {
   try {
     const [versionRes, iniRes, extRes] = await Promise.all([
-      execAsync('php -v 2>/dev/null | head -1').catch(() => ({ stdout: 'PHP not found' })),
-      execAsync('php -i 2>/dev/null | grep "Loaded Configuration File" | cut -d">" -f2').catch(() => ({ stdout: '' })),
-      execAsync('php -m 2>/dev/null').catch(() => ({ stdout: '' })),
+      runFile('php', ['-v']).then(r => ({ stdout: r.stdout.split('\n')[0] || r.stdout, stderr: r.stderr })).catch(() => ({ stdout: 'PHP not found', stderr: '' })),
+      runFile('php', ['-i']).then(r => { const line = r.stdout.split('\n').find(l => l.includes('Loaded Configuration File')) || ''; return { stdout: line.split('=>')[1] || '', stderr: r.stderr }; }).catch(() => ({ stdout: '', stderr: '' })),
+      runFile('php', ['-m']).catch(() => ({ stdout: '', stderr: '' })),
     ]);
 
     const extensions = versionRes.stdout.includes('not found')
@@ -49,7 +47,7 @@ router.get('/settings', async (_req: AuthRequest, res: Response) => {
     await Promise.all(
       EDITABLE_SETTINGS.map(async key => {
         try {
-          const { stdout } = await execAsync(`php -r "echo ini_get('${key}');"`);
+          const { stdout } = await runFile('php', ['-r', `echo ini_get('${key}');`]);
           results[key] = stdout.trim();
         } catch {
           results[key] = '';
@@ -85,7 +83,7 @@ router.post('/settings', async (req: AuthRequest, res: Response) => {
       }
     }
     writeFileSync(iniPath, content);
-    await execAsync('systemctl reload php-fpm 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'php-fpm']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -136,7 +134,7 @@ router.put('/fpm-pool/:domain', async (req: AuthRequest, res: Response) => {
       if (settings[k]) lines.push(`${k} = ${String(settings[k]).replace(/[^a-zA-Z0-9 _.]/g, '')}`);
     }
     wf(p, lines.join('\n') + '\n');
-    await execAsync('systemctl reload php-fpm 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'php-fpm']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -146,7 +144,7 @@ router.delete('/fpm-pool/:domain', async (req: AuthRequest, res: Response) => {
   try {
     const { unlinkSync, existsSync } = require('fs');
     if (existsSync(p)) unlinkSync(p);
-    await execAsync('systemctl reload php-fpm 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'php-fpm']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

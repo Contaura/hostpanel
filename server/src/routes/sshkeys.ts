@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { AuthRequest } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
 
@@ -97,10 +98,7 @@ async function writeAccountKeys(username: string, keys: SSHKey[]): Promise<void>
   const authKeysPath = path.join(sshDir, 'authorized_keys');
   const content = keys.map(k => k.raw).join('\n') + (keys.length ? '\n' : '');
   await fs.writeFile(authKeysPath, content, { mode: 0o600 });
-  await import('child_process').then(({ exec }) => {
-    const { promisify } = require('util');
-    return promisify(exec)(`chown -R ${username}:${username} ${sshDir} 2>/dev/null || true`);
-  }).catch(() => {});
+  await runFile('chown', ['-R', `${username}:${username}`, sshDir]).catch(() => ({ stdout: '', stderr: '' }));
 }
 
 // Resolve a username to its uid via `id -u`; rejects unknown users. Same
@@ -109,9 +107,7 @@ async function writeAccountKeys(username: string, keys: SSHKey[]): Promise<void>
 // (the chown -R falls back silently when the user doesn't exist), which
 // would then leak any keys back to a future OS user with that name.
 async function osUserExists(username: string): Promise<boolean> {
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  try { await promisify(exec)(`id -u "${username}"`); return true; }
+  try { await runFile('id', ['-u', username]); return true; }
   catch { return false; }
 }
 

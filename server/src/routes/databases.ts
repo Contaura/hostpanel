@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import { createReadStream } from 'fs';
 import mysql from 'mysql2/promise';
 import multer from 'multer';
 import { existsSync, unlinkSync } from 'fs';
@@ -9,7 +9,6 @@ import rateLimit from 'express-rate-limit';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 const sqlUpload = multer({ dest: '/tmp/', limits: { fileSize: 512 * 1024 * 1024 } });
 
 // Export streams a full mysqldump; import pipes a 512 MB SQL file through
@@ -189,7 +188,13 @@ router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), asy
     // -h127.0.0.1 forces TCP so the dedicated hostpanel@127.0.0.1 user the
     // installer creates matches the host in MariaDB's ACL. Without it,
     // mysql picks the unix socket and presents @localhost → access denied.
-    await execAsync(`mysql -u${user} -h${DB_HOST} ${name} < "${tmpPath}"`, { timeout: 300000, env: dbEnv });
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('mysql', [`-u${user}`, `-h${DB_HOST}`, name], { env: dbEnv, shell: false });
+      const timer = setTimeout(() => { child.kill('SIGTERM'); reject(new Error('mysql import timed out')); }, 300000);
+      createReadStream(tmpPath).pipe(child.stdin);
+      child.on('error', err => { clearTimeout(timer); reject(err); });
+      child.on('close', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(`mysql exited with code ${code}`)); });
+    });
     res.json({ success: true, message: `Imported into ${name}` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -207,8 +212,8 @@ router.get('/phpmyadmin', async (_req: AuthRequest, res: Response) => {
   if (found) return res.json({ installed: true, path: found, url: '/phpMyAdmin' });
   // Check if accessible via URL
   try {
-    const { stdout } = await execAsync('curl -s -o /dev/null -w "%{http_code}" http://localhost/phpMyAdmin/ 2>/dev/null');
-    if (stdout.trim() === '200') return res.json({ installed: true, url: '/phpMyAdmin' });
+    const response = await fetch('http://localhost/phpMyAdmin/');
+    if (response.status === 200) return res.json({ installed: true, url: '/phpMyAdmin' });
   } catch {}
   res.json({ installed: false });
 });
@@ -331,8 +336,8 @@ router.get('/slow-query-log', async (_req: AuthRequest, res: Response) => {
     let lines: string[] = [];
     if (logPath) {
       try {
-        const { stdout } = await execAsync(`tail -200 "${logPath}" 2>/dev/null`);
-        lines = stdout.split('\n').filter(Boolean);
+        const raw = (await import('fs')).readFileSync(logPath, 'utf8');
+        lines = raw.split('\n').filter(Boolean).slice(-200);
       } catch {}
     }
 

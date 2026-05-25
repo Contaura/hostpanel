@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 const WEBROOT = process.env.WEBROOT || '/var/www';
@@ -58,7 +56,7 @@ router.post('/domains', async (req: AuthRequest, res: Response) => {
       path.join(docRoot, 'index.html'),
       `<html><body><h1>Welcome to ${domain}</h1><p>Hosted by HostPanel</p></body></html>`
     );
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ message: `Domain ${domain} added` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -75,7 +73,7 @@ router.delete('/domains/:domain', async (req: AuthRequest, res: Response) => {
   try {
     await fs.unlink(path.join(VHOST_DIR, `${domain}.conf`)).catch(() => {});
     await fs.unlink(path.join(VHOST_DIR, `ssl_${domain}.conf`)).catch(() => {});
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ message: `Domain ${domain} removed` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -94,10 +92,10 @@ router.post('/ssl/:domain', async (req: AuthRequest, res: Response) => {
     if (email && !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email)) {
       return res.status(400).json({ error: 'Invalid email address' });
     }
-    const emailArg = email ? `--email "${email}"` : '--register-unsafely-without-email';
-    const { stdout } = await execAsync(
-      `certbot --apache -d ${domain} -d www.${domain} ${emailArg} --agree-tos --non-interactive 2>&1`
-    );
+    const args = ['--apache', '-d', domain, '-d', `www.${domain}`, '--agree-tos', '--non-interactive'];
+    if (email) args.push('--email', email);
+    else args.push('--register-unsafely-without-email');
+    const { stdout } = await runFile('certbot', args);
     res.json({ message: 'SSL certificate issued', output: stdout });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -162,7 +160,7 @@ router.post('/dns/:domain', async (req: AuthRequest, res: Response) => {
     const zoneFile = path.join(NAMED_DIR, `${domain}.zone`);
     const record = `${name}\t${ttl}\tIN\t${type}\t${value}\n`;
     await fs.appendFile(zoneFile, record);
-    await execAsync('rndc reload 2>/dev/null || true');
+    await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ message: 'DNS record added' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -184,7 +182,7 @@ router.delete('/dns/:domain/:index', async (req: AuthRequest, res: Response) => 
     if (idx < 0 || idx >= recordLines.length) return res.status(404).json({ error: 'Record index out of range' });
     lines.splice(recordLines[idx], 1);
     await fs.writeFile(zoneFile, lines.join('\n'));
-    await execAsync('rndc reload 2>/dev/null || true');
+    await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -207,7 +205,7 @@ router.put('/dns/:domain/:index', async (req: AuthRequest, res: Response) => {
     if (idx < 0 || idx >= recordLines.length) return res.status(404).json({ error: 'Record index out of range' });
     lines[recordLines[idx]] = `${name}\t${ttl}\tIN\t${type}\t${value}`;
     await fs.writeFile(zoneFile, lines.join('\n'));
-    await execAsync('rndc reload 2>/dev/null || true');
+    await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -231,15 +229,12 @@ router.post('/dnssec/:domain/sign', async (req: AuthRequest, res: Response) => {
     // Generate ZSK and KSK if not present
     const keys = require('fs').readdirSync(NAMED_DIR).filter((f: string) => f.startsWith(`K${domain}.`) && f.endsWith('.key'));
     if (keys.length < 2) {
-      await execAsync(`dnssec-keygen -a NSEC3RSASHA1 -b 2048 -n ZONE ${domain}`, { cwd: NAMED_DIR, timeout: 60000 });
-      await execAsync(`dnssec-keygen -a NSEC3RSASHA1 -b 1024 -n ZONE -f KSK ${domain}`, { cwd: NAMED_DIR, timeout: 60000 });
+      await runFile('dnssec-keygen', ['-a', 'NSEC3RSASHA1', '-b', '2048', '-n', 'ZONE', domain], { cwd: NAMED_DIR, timeout: 60000 });
+      await runFile('dnssec-keygen', ['-a', 'NSEC3RSASHA1', '-b', '1024', '-n', 'ZONE', '-f', 'KSK', domain], { cwd: NAMED_DIR, timeout: 60000 });
     }
     const salt = require('crypto').randomBytes(8).toString('hex');
-    const { stdout } = await execAsync(
-      `dnssec-signzone -A -3 ${salt} -N increment -o ${domain} -t "${NAMED_DIR}/${domain}.zone"`,
-      { cwd: NAMED_DIR, timeout: 120000 }
-    );
-    await execAsync('rndc reload 2>/dev/null || true');
+    const { stdout } = await runFile('dnssec-signzone', ['-A', '-3', salt, '-N', 'increment', '-o', domain, '-t', `${NAMED_DIR}/${domain}.zone`], { cwd: NAMED_DIR, timeout: 120000 });
+    await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true, output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -248,8 +243,11 @@ router.post('/dnssec/:domain/unsign', async (req: AuthRequest, res: Response) =>
   const { domain } = req.params;
   if (!sanitizeDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    await execAsync(`rm -f "${NAMED_DIR}/${domain}.zone.signed" "${NAMED_DIR}"/K${domain}.*.key "${NAMED_DIR}"/K${domain}.*.private 2>/dev/null || true`);
-    await execAsync('rndc reload 2>/dev/null || true');
+    const fsSync = require('fs');
+    for (const f of fsSync.readdirSync(NAMED_DIR).filter((name: string) => name === `${domain}.zone.signed` || (name.startsWith(`K${domain}.`) && (name.endsWith('.key') || name.endsWith('.private'))))) {
+      fsSync.rmSync(path.join(NAMED_DIR, f), { force: true });
+    }
+    await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

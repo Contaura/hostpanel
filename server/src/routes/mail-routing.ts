@@ -1,11 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
 const TRANSPORT_FILE = process.env.TRANSPORT_FILE || '/etc/postfix/transport';
 
 /* ── Email routing / transport rules ────────────────────── */
@@ -35,8 +33,8 @@ router.post('/', async (req: Request, res: Response) => {
     if (rules.find(r => r.domain === domain)) return res.status(409).json({ error: 'Rule already exists' });
     rules.push({ domain, route });
     writeTransport(rules);
-    await execAsync(`postmap ${TRANSPORT_FILE}`).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [TRANSPORT_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -45,8 +43,8 @@ router.delete('/:domain', async (req: Request, res: Response) => {
   try {
     const rules = readTransport().filter(r => r.domain !== req.params.domain);
     writeTransport(rules);
-    await execAsync(`postmap ${TRANSPORT_FILE}`).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [TRANSPORT_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -65,7 +63,7 @@ router.post('/lists', async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(admin_email)) return res.status(400).json({ error: 'Invalid admin email' });
   const safePass = (admin_password || 'changeme').replace(/[^a-zA-Z0-9!@#%^&*_+=.,-]/g, '');
   try {
-    await execAsync(`newlist -q "${name}@${domain}" "${admin_email}" "${safePass}" 2>/dev/null`).catch(() => {});
+    await runFile('newlist', ['-q', `${name}@${domain}`, admin_email, safePass]).catch(() => ({ stdout: '', stderr: '' }));
     const r = db.prepare('INSERT INTO mailing_lists (name, domain, description, admin_email) VALUES (?, ?, ?, ?)').run(name, domain, description || '', admin_email);
     res.json(db.prepare('SELECT * FROM mailing_lists WHERE id = ?').get(r.lastInsertRowid));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -75,7 +73,7 @@ router.delete('/lists/:id', async (req: Request, res: Response) => {
   const list = db.prepare('SELECT * FROM mailing_lists WHERE id = ?').get(req.params.id) as any;
   if (!list) return res.status(404).json({ error: 'Not found' });
   try {
-    await execAsync(`rmlist -a "${list.name}@${list.domain}" 2>/dev/null`).catch(() => {});
+    await runFile('rmlist', ['-a', `${list.name}@${list.domain}`]).catch(() => ({ stdout: '', stderr: '' }));
     db.prepare('DELETE FROM mailing_lists WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -123,10 +121,9 @@ router.get('/webmail', async (_req: Request, res: Response) => {
   const webmailUrl = process.env.WEBMAIL_URL || '';
   const installed: string[] = [];
   try {
-    const { stdout } = await execAsync(
-      '(rpm -q roundcubemail >/dev/null 2>&1 || test -d /usr/share/roundcubemail) && echo found || true'
-    ).catch(() => ({ stdout: '' }));
-    if (stdout.trim() === 'found') installed.push('Roundcube');
+    const rpm = await runFile('rpm', ['-q', 'roundcubemail']).then(() => true).catch(() => false);
+    const dir = (await import('fs')).existsSync('/usr/share/roundcubemail');
+    if (rpm || dir) installed.push('Roundcube');
   } catch (_) {}
   res.json({ webmailUrl, installed });
 });

@@ -1,10 +1,8 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const IP_RE   = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
 const IPV6_RE = /^[0-9a-fA-F:]+(:\/\d{1,3})?$/;
@@ -13,10 +11,10 @@ const PORT_RE = /^\d{1,5}$/;
 router.get('/status', async (_req: AuthRequest, res: Response) => {
   try {
     const [svcOut, portOut, richOut, stateOut] = await Promise.all([
-      execAsync('firewall-cmd --list-services 2>/dev/null || echo ""').then(r => r.stdout),
-      execAsync('firewall-cmd --list-ports 2>/dev/null || echo ""').then(r => r.stdout),
-      execAsync('firewall-cmd --list-rich-rules 2>/dev/null || echo ""').then(r => r.stdout),
-      execAsync('systemctl is-active firewalld 2>/dev/null || echo "inactive"').then(r => r.stdout),
+      runFile('firewall-cmd', ['--list-services']).then(r => r.stdout).catch(() => ''),
+      runFile('firewall-cmd', ['--list-ports']).then(r => r.stdout).catch(() => ''),
+      runFile('firewall-cmd', ['--list-rich-rules']).then(r => r.stdout).catch(() => ''),
+      runFile('systemctl', ['is-active', 'firewalld']).then(r => r.stdout).catch(() => 'inactive'),
     ]);
 
     const blockedIPs = richOut.split('\n')
@@ -42,8 +40,8 @@ router.post('/ports', async (req: AuthRequest, res: Response) => {
   }
   if (!['tcp', 'udp'].includes(protocol)) return res.status(400).json({ error: 'Invalid protocol' });
   try {
-    await execAsync(`firewall-cmd --add-port=${port}/${protocol} --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', [`--add-port=${port}/${protocol}`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -55,8 +53,8 @@ router.delete('/ports/:port/:protocol', async (req: AuthRequest, res: Response) 
   if (!PORT_RE.test(port)) return res.status(400).json({ error: 'Invalid port' });
   if (!['tcp', 'udp'].includes(protocol)) return res.status(400).json({ error: 'Invalid protocol' });
   try {
-    await execAsync(`firewall-cmd --remove-port=${port}/${protocol} --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', [`--remove-port=${port}/${protocol}`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -67,8 +65,8 @@ router.post('/block-ip', async (req: AuthRequest, res: Response) => {
   const { ip } = req.body;
   if (!ip || !IP_RE.test(ip)) return res.status(400).json({ error: 'Invalid IP address' });
   try {
-    await execAsync(`firewall-cmd --add-rich-rule='rule family="ipv4" source address="${ip}" reject' --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', ['--add-rich-rule', `rule family="ipv4" source address="${ip}" reject`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -79,8 +77,8 @@ router.delete('/block-ip/:ip', async (req: AuthRequest, res: Response) => {
   const ip = decodeURIComponent(req.params.ip);
   if (!IP_RE.test(ip)) return res.status(400).json({ error: 'Invalid IP address' });
   try {
-    await execAsync(`firewall-cmd --remove-rich-rule='rule family="ipv4" source address="${ip}" reject' --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', ['--remove-rich-rule', `rule family="ipv4" source address="${ip}" reject`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -91,7 +89,7 @@ router.delete('/block-ip/:ip', async (req: AuthRequest, res: Response) => {
 
 router.get('/ipv6-blocks', async (_req: AuthRequest, res: Response) => {
   try {
-    const { stdout } = await execAsync('firewall-cmd --list-rich-rules 2>/dev/null || echo ""');
+    const { stdout } = await runFile('firewall-cmd', ['--list-rich-rules']).catch(() => ({ stdout: '', stderr: '' }));
     const blocks = stdout.split('\n')
       .filter(l => l.includes('family="ipv6"') && l.includes('reject'))
       .map(l => { const m = l.match(/source address="([^"]+)"/); return m?.[1] || null; })
@@ -104,8 +102,8 @@ router.post('/ipv6-blocks', async (req: AuthRequest, res: Response) => {
   const { ip } = req.body;
   if (!ip || !IPV6_RE.test(ip)) return res.status(400).json({ error: 'Invalid IPv6 address' });
   try {
-    await execAsync(`firewall-cmd --add-rich-rule='rule family="ipv6" source address="${ip}" reject' --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', ['--add-rich-rule', `rule family="ipv6" source address="${ip}" reject`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -114,8 +112,8 @@ router.delete('/ipv6-blocks/:ip', async (req: AuthRequest, res: Response) => {
   const ip = decodeURIComponent(req.params.ip);
   if (!IPV6_RE.test(ip)) return res.status(400).json({ error: 'Invalid IPv6 address' });
   try {
-    await execAsync(`firewall-cmd --remove-rich-rule='rule family="ipv6" source address="${ip}" reject' --permanent`);
-    await execAsync('firewall-cmd --reload');
+    await runFile('firewall-cmd', ['--remove-rich-rule', `rule family="ipv6" source address="${ip}" reject`, '--permanent']);
+    await runFile('firewall-cmd', ['--reload']);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -126,14 +124,14 @@ const COUNTRY_SET = 'hp-geo-block';
 
 router.get('/geo-blocks', async (_req: AuthRequest, res: Response) => {
   try {
-    const { stdout } = await execAsync(`ipset list ${COUNTRY_SET} 2>/dev/null || echo ""`);
+    const { stdout } = await runFile('ipset', ['list', COUNTRY_SET]).catch(() => ({ stdout: '', stderr: '' }));
     const comments: string[] = [];
     for (const line of stdout.split('\n')) {
       const m = line.match(/comment\s+"([A-Z]{2})"/);
       if (m) comments.push(m[1]);
     }
     // Also try to read from a simple text file if ipset isn't available
-    const { stdout: richOut } = await execAsync('firewall-cmd --list-rich-rules 2>/dev/null || echo ""');
+    const { stdout: richOut } = await runFile('firewall-cmd', ['--list-rich-rules']).catch(() => ({ stdout: '', stderr: '' }));
     const geoRules = richOut.split('\n')
       .filter(l => l.includes('hp-geo-'))
       .map(l => { const m = l.match(/hp-geo-([A-Z]{2})/); return m?.[1] || null; })
@@ -152,16 +150,16 @@ router.post('/geo-blocks', async (req: AuthRequest, res: Response) => {
   }
   try {
     // Use ipset if available, fallback to a firewalld ipset zone
-    await execAsync(`ipset create ${COUNTRY_SET} hash:net 2>/dev/null || true`);
-    // Download country IP ranges from ipdeny.com
-    await execAsync(
-      `curl -sL "https://www.ipdeny.com/ipblocks/data/countries/${country_code.toLowerCase()}.zone" | while read cidr; do ipset add ${COUNTRY_SET} "$cidr" 2>/dev/null || true; done`,
-      { timeout: 60000 }
-    );
-    await execAsync(
-      `firewall-cmd --add-rich-rule='rule source ipset="${COUNTRY_SET}" comment="hp-geo-${country_code}" reject' --permanent 2>/dev/null || true`
-    );
-    await execAsync('firewall-cmd --reload 2>/dev/null || true');
+    await runFile('ipset', ['create', COUNTRY_SET, 'hash:net']).catch(() => ({ stdout: '', stderr: '' }));
+    // Download country IP ranges from ipdeny.com without a shell pipeline.
+    const response = await fetch(`https://www.ipdeny.com/ipblocks/data/countries/${country_code.toLowerCase()}.zone`);
+    if (!response.ok) throw new Error(`Failed to fetch country block list: ${response.status}`);
+    const cidrs = (await response.text()).split('\n').map(l => l.trim()).filter(Boolean);
+    for (const cidr of cidrs) {
+      await runFile('ipset', ['add', COUNTRY_SET, cidr]).catch(() => ({ stdout: '', stderr: '' }));
+    }
+    await runFile('firewall-cmd', ['--add-rich-rule', `rule source ipset="${COUNTRY_SET}" comment="hp-geo-${country_code}" reject`, '--permanent']).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('firewall-cmd', ['--reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true, country_code });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -172,10 +170,8 @@ router.delete('/geo-blocks/:code', async (req: AuthRequest, res: Response) => {
   const code = req.params.code.toUpperCase();
   if (!/^[A-Z]{2}$/.test(code)) return res.status(400).json({ error: 'Invalid country code' });
   try {
-    await execAsync(
-      `firewall-cmd --remove-rich-rule='rule source ipset="${COUNTRY_SET}" comment="hp-geo-${code}" reject' --permanent 2>/dev/null || true`
-    );
-    await execAsync('firewall-cmd --reload 2>/dev/null || true');
+    await runFile('firewall-cmd', ['--remove-rich-rule', `rule source ipset="${COUNTRY_SET}" comment="hp-geo-${code}" reject`, '--permanent']).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('firewall-cmd', ['--reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -188,7 +184,7 @@ router.post('/service', async (req: AuthRequest, res: Response) => {
   const allowed = ['httpd', 'mariadb', 'postfix', 'dovecot', 'named', 'vsftpd', 'sshd', 'firewalld'];
   if (!allowed.includes(service)) return res.status(400).json({ error: 'Unknown service' });
   try {
-    await execAsync(`systemctl ${action} ${service}`);
+    await runFile('systemctl', [action, service]);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

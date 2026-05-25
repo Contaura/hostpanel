@@ -139,3 +139,52 @@ All tests, full build, and both audit checks passed with zero reported vulnerabi
 - Continue replacing legacy `execAsync()` shell-string call sites across the older service/config routes.
 - Add endpoint-level integration tests around individual root-level service/config routes before each shell replacement.
 - Add GitHub branch protection after the pushed CI run is confirmed green on GitHub.
+
+
+## 2026-05-25 — High-risk service/config route execAsync reduction
+
+### Risk addressed
+
+The older root-level service/config routes still contained many `execAsync()` shell-string calls. Several accepted values that were already validated, but interpolating operational commands into a shell keeps command injection risk higher than necessary and makes future validation regressions more dangerous.
+
+### Changes made
+
+- Converted the prioritized high-risk route modules away from `execAsync()` shell strings:
+  - `sshkeys.ts`
+  - `settings.ts`
+  - `databases.ts`
+  - `domains.ts`
+  - `subdomains.ts`
+  - `php.ts`
+  - `firewall.ts`
+  - `mail-queue.ts`
+  - `mail-routing.ts`
+  - `mail-tools.ts`
+- Reused `runFile()`/`execFile`-style command execution so OS commands receive explicit argv arrays and run with `shell: false`.
+- Replaced shell pipelines and redirection with safer primitives where practical:
+  - PHP info/settings now use direct `php` argv calls and in-process parsing.
+  - Database import streams the uploaded SQL file into `mysql` via `spawn()` stdin instead of shell `<` redirection.
+  - phpMyAdmin probing uses `fetch()` instead of `curl` shelling.
+  - Slow-query and mail log views read/filter/tail files in Node instead of `tail`, `grep`, and pipeline strings.
+  - Firewall geo-block range loading uses `fetch()` plus per-CIDR `ipset add` argv calls instead of a `curl | while read` shell pipeline.
+  - DNSSEC unsign removes matched files through filesystem APIs instead of `rm -f` wildcard shell expansion.
+- Added `server/src/routes/command-execution.integration.test.ts` covering high-risk route command behavior with mocked process execution, including firewall, domains/certbot, subdomains/httpd reload, PHP-FPM reload, and mail queue actions.
+
+### Validation performed
+
+```bash
+# Confirm prioritized files no longer use execAsync/promisify(exec)
+grep -R "execAsync\|promisify(exec)" -n   server/src/routes/{sshkeys,settings,databases,domains,subdomains,php,firewall}.ts   server/src/routes/mail-*.ts
+
+npm run test --workspace=server
+npm run build
+npm audit --omit=dev --audit-level=moderate
+npm audit --audit-level=moderate
+```
+
+The grep returned no matches for the prioritized route set. Server tests passed with 9 files / 30 tests, the full server+client build passed, and both npm audit checks reported zero vulnerabilities.
+
+### Follow-up
+
+- Continue the same route-by-route pattern for remaining lower-priority legacy `execAsync()` call sites outside the prioritized list, especially large modules such as `client-portal.ts`, `accounts.ts`, `ftp.ts`, and installer/script-management routes.
+- Expand mocked command-execution integration coverage to more individual endpoints as those lower-priority routes are converted.
