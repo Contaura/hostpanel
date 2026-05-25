@@ -1,10 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 
 const router = Router();
-const execAsync = promisify(exec);
 const MODSEC_CONF = process.env.MODSEC_CONF || '/etc/httpd/conf.d/mod_security.conf';
 const MODSEC_RULES_DIR = process.env.MODSEC_RULES_DIR || '/etc/httpd/modsecurity.d';
 
@@ -12,7 +10,8 @@ const MODSEC_RULES_DIR = process.env.MODSEC_RULES_DIR || '/etc/httpd/modsecurity
 
 router.get('/modsec', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('httpd -M 2>/dev/null | grep security2').catch(() => ({ stdout: '' }));
+    const { stdout: modsecRaw } = await runFile('httpd', ['-M']).catch(() => ({ stdout: '', stderr: '' }));
+    const stdout = modsecRaw.split('\n').filter(l => l.includes('security2')).join('\n');
     const enabled = stdout.includes('security2_module');
     let mode = 'DetectionOnly';
     if (existsSync(MODSEC_CONF)) {
@@ -36,15 +35,18 @@ router.put('/modsec', async (req: Request, res: Response) => {
     } else {
       writeFileSync(MODSEC_CONF, `<IfModule security2_module>\n  SecRuleEngine ${mode}\n</IfModule>\n`);
     }
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.get('/modsec/rules', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync(`ls ${MODSEC_RULES_DIR}/*.conf 2>/dev/null || echo ""`);
-    const files = stdout.trim().split('\n').filter(Boolean).map(f => ({ file: f, name: f.split('/').pop() }));
+    let files: { file: string; name: string|undefined }[] = [];
+    try {
+      const { readdirSync } = require('fs');
+      files = readdirSync(MODSEC_RULES_DIR).filter((f: string) => f.endsWith('.conf')).map((f: string) => ({ file: `${MODSEC_RULES_DIR}/${f}`, name: f }));
+    } catch {}
     res.json(files);
   } catch { res.json([]); }
 });
@@ -53,13 +55,13 @@ router.get('/modsec/rules', async (_req: Request, res: Response) => {
 
 router.get('/fail2ban', async (_req: Request, res: Response) => {
   try {
-    const { stdout: status } = await execAsync('fail2ban-client status 2>/dev/null');
+    const { stdout: status } = await runFile('fail2ban-client', ['status']);
     const jailMatch = status.match(/Jail list:\s+(.+)/);
     const jailNames = jailMatch ? jailMatch[1].split(',').map(j => j.trim()).filter(Boolean) : [];
 
     const jails = await Promise.all(jailNames.map(async name => {
       try {
-        const { stdout: info } = await execAsync(`fail2ban-client status ${name} 2>/dev/null`);
+        const { stdout: info } = await runFile('fail2ban-client', ['status', name]);
         const banned  = info.match(/Banned IP list:\s+(.+)/)?.[1]?.trim().split(/\s+/).filter(Boolean) || [];
         const total   = info.match(/Total banned:\s+(\d+)/)?.[1] || '0';
         const current = info.match(/Currently banned:\s+(\d+)/)?.[1] || '0';
@@ -94,7 +96,7 @@ router.post('/fail2ban/unban', async (req: Request, res: Response) => {
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
   if (fail2banNotInstalled(res)) return;
   try {
-    await execAsync(`fail2ban-client set ${jail} unbanip ${ip}`);
+    await runFile('fail2ban-client', ['set', jail, 'unbanip', ip]);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -106,7 +108,7 @@ router.post('/fail2ban/ban', async (req: Request, res: Response) => {
   if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'Invalid IP' });
   if (fail2banNotInstalled(res)) return;
   try {
-    await execAsync(`fail2ban-client set ${jail} banip ${ip}`);
+    await runFile('fail2ban-client', ['set', jail, 'banip', ip]);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -116,7 +118,7 @@ router.post('/fail2ban/:jail/toggle', async (req: Request, res: Response) => {
   if (fail2banNotInstalled(res)) return;
   const { action } = req.body; // 'start' | 'stop'
   try {
-    await execAsync(`fail2ban-client ${action === 'stop' ? 'stop' : 'start'} ${req.params.jail}`);
+    await runFile('fail2ban-client', [action === 'stop' ? 'stop' : 'start', req.params.jail]);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

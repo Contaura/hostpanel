@@ -1,11 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import path from 'path';
 
 const router = Router();
-const execAsync = promisify(exec);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 const WEBROOT   = process.env.WEBROOT   || '/var/www';
 const CERT_DIR  = '/etc/letsencrypt/live';
@@ -45,7 +43,7 @@ router.put('/hotlink', async (req: Request, res: Response) => {
 </IfModule>
 `.trim() + '\n');
     }
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -73,7 +71,7 @@ router.post('/mime', async (req: Request, res: Response) => {
   try {
     const existing = existsSync(MIME_CONF) ? readFileSync(MIME_CONF, 'utf8') : '# Managed by HostPanel\n';
     writeFileSync(MIME_CONF, existing.trimEnd() + `\nAddType ${mime} ${extensions}\n`);
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -84,7 +82,7 @@ router.delete('/mime', async (req: Request, res: Response) => {
   try {
     const lines = readFileSync(MIME_CONF, 'utf8').split('\n').filter(l => !l.includes(`AddType ${mime} `));
     writeFileSync(MIME_CONF, lines.join('\n'));
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -103,12 +101,15 @@ router.get('/diskusage', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Path contains invalid characters' });
   }
   try {
-    const { stdout } = await execAsync(`du -sh "${resolved}"/* 2>/dev/null | sort -hr | head -50`);
+    const duResult = await runFile('du', ['-sh', '--', resolved]).catch(() => ({ stdout: '', stderr: '' }));
+    const stdout = duResult.stdout;
     const items = stdout.trim().split('\n').filter(Boolean).map(l => {
       const [size, ...rest] = l.split('\t');
       return { path: rest.join('\t'), size };
     });
-    const { stdout: total } = await execAsync(`df -h "${resolved}" | tail -1`);
+    const dfResult = await runFile('df', ['-h', '--', resolved]).catch(() => ({ stdout: '', stderr: '' }));
+    const totalLines = dfResult.stdout.trim().split('\n');
+    const total = totalLines[totalLines.length - 1] || '';
     const parts = total.trim().split(/\s+/);
     res.json({ items, disk: { total: parts[1], used: parts[2], available: parts[3], percent: parts[4] } });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -119,7 +120,7 @@ router.get('/diskusage', async (req: Request, res: Response) => {
 router.get('/bandwidth', async (req: Request, res: Response) => {
   try {
     // Try vnstat first
-    const { stdout: vnstat } = await execAsync('vnstat --json 2>/dev/null').catch(() => ({ stdout: '' }));
+    const { stdout: vnstat } = await runFile('vnstat', ['--json']).catch(() => ({ stdout: '', stderr: '' }));
     if (vnstat) {
       const data = JSON.parse(vnstat);
       const iface = data.interfaces?.[0];
@@ -138,8 +139,15 @@ router.get('/bandwidth', async (req: Request, res: Response) => {
     // Fall back to Apache access log
     const LOG = '/var/log/httpd/access_log';
     if (!existsSync(LOG)) return res.json({ source: 'none', monthly: [] });
-    const { stdout } = await execAsync(`awk '{print $7, $10}' ${LOG} | awk 'NF==2 && $2~/^[0-9]+$/' | awk '{sum[$1]+=$2} END{for(k in sum) print k, sum[k]}' | sort | head -100`);
-    res.json({ source: 'apache', raw: stdout.trim().split('\n').slice(0, 20) });
+    const log = readFileSync(LOG, 'utf8').split('\n').slice(-20000);
+    const sums: Record<string, number> = {};
+    for (const line of log) {
+      const parts = line.trim().split(/\s+/);
+      const route = parts[6]; const bytes = parts[9];
+      if (route && /^[0-9]+$/.test(bytes)) sums[route] = (sums[route] || 0) + parseInt(bytes);
+    }
+    const raw = Object.entries(sums).sort((a,b)=>b[1]-a[1]).slice(0, 20).map(([k,v]) => `${k} ${v}`);
+    res.json({ source: 'apache', raw });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -155,7 +163,7 @@ router.get('/ssl', async (_req: Request, res: Response) => {
       const certPath = path.join(CERT_DIR, domain, 'fullchain.pem');
       if (!existsSync(certPath)) continue;
       try {
-        const { stdout } = await execAsync(`openssl x509 -in ${certPath} -noout -subject -dates -issuer 2>/dev/null`);
+        const { stdout } = await runFile('openssl', ['x509', '-in', certPath, '-noout', '-subject', '-dates', '-issuer']);
         const notAfter  = stdout.match(/notAfter=(.+)/)?.[1]?.trim() ?? '';
         const notBefore = stdout.match(/notBefore=(.+)/)?.[1]?.trim() ?? '';
         const issuer    = stdout.match(/issuer=(.+)/)?.[1]?.trim() ?? '';
@@ -168,13 +176,14 @@ router.get('/ssl', async (_req: Request, res: Response) => {
 
   // Vhost-referenced certs
   try {
-    const { stdout } = await execAsync(`grep -r SSLCertificateFile ${VHOST_DIR} 2>/dev/null`);
+    const grepRes = await runFile('grep', ['-r', 'SSLCertificateFile', VHOST_DIR]).catch(() => ({ stdout: '', stderr: '' }));
+    const stdout = grepRes.stdout;
     for (const line of stdout.split('\n').filter(Boolean)) {
       const m = line.match(/SSLCertificateFile\s+(\S+)/);
       if (!m) continue;
       const certPath = m[1];
       if (!existsSync(certPath) || certs.find(c => c.certPath === certPath)) continue;
-      const { stdout: info } = await execAsync(`openssl x509 -in ${certPath} -noout -subject -dates -issuer 2>/dev/null`).catch(() => ({ stdout: '' }));
+      const { stdout: info } = await runFile('openssl', ['x509', '-in', certPath, '-noout', '-subject', '-dates', '-issuer']).catch(() => ({ stdout: '', stderr: '' }));
       const notAfter  = info.match(/notAfter=(.+)/)?.[1]?.trim() ?? '';
       const issuer    = info.match(/issuer=(.+)/)?.[1]?.trim() ?? '';
       const expires   = notAfter ? new Date(notAfter) : null;

@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const WEBROOT = process.env.WEBROOT || '/var/www';
 const ERROR_CODES = [400, 401, 403, 404, 500, 502, 503];
@@ -48,7 +46,7 @@ router.post('/save', async (req: AuthRequest, res: Response) => {
     if (vhost && !vhost.includes(`ErrorDocument ${num}`)) {
       vhost = vhost.replace('</VirtualHost>', `    ErrorDocument ${num} /error${num}.html\n</VirtualHost>`);
       await fs.writeFile(vhostFile, vhost);
-      await execAsync('systemctl reload httpd 2>/dev/null || true');
+      await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     }
     res.json({ success: true });
   } catch (err: any) {

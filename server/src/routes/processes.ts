@@ -1,16 +1,14 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 router.get('/list', async (req: AuthRequest, res: Response) => {
   try {
     const page  = Math.max(1, parseInt(String(req.query.page  || '1'), 10));
     const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '50'), 10)));
-    const { stdout } = await execAsync('ps aux --no-headers --sort=-%cpu');
+    const { stdout } = await runFile('ps', ['aux', '--no-headers', '--sort=-%cpu']);
     const all = stdout
       .split('\n')
       .filter(Boolean)
@@ -46,7 +44,7 @@ router.delete('/:pid', async (req: AuthRequest, res: Response) => {
   if (!Number.isFinite(pid) || pid < 100) return res.status(400).json({ error: 'Invalid PID (must be ≥ 100)' });
   if (pid === process.pid) return res.status(400).json({ error: 'Refusing to kill the HostPanel server process' });
   try {
-    await execAsync(`kill -15 ${pid} 2>/dev/null || kill -9 ${pid}`);
+    await runFile('kill', ['-15', String(pid)]).catch(() => runFile('kill', ['-9', String(pid)]));
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

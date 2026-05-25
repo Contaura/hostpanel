@@ -1,19 +1,19 @@
 import { Router, Response } from 'express';
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const FTP_USER_DIR = process.env.FTP_USER_DIR || '/etc/vsftpd/users';
+const VSFTPD_USER_LIST = process.env.VSFTPD_USER_LIST || '/etc/vsftpd/user_list';
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
 function chpasswdStdin(username: string, password: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('chpasswd', []);
+    const proc = spawn('chpasswd', [], { shell: false });
     proc.stdin.write(`${username}:${password}\n`);
     proc.stdin.end();
     proc.on('close', code => (code === 0 ? resolve() : reject(new Error(`chpasswd exited ${code}`))));
@@ -23,7 +23,7 @@ function chpasswdStdin(username: string, password: string): Promise<void> {
 
 router.get('/users', async (_req: AuthRequest, res: Response) => {
   try {
-    const content = await fs.readFile('/etc/vsftpd/user_list', 'utf-8').catch(() => '');
+    const content = await fs.readFile(VSFTPD_USER_LIST, 'utf-8').catch(() => '');
     const users = content
       .split('\n')
       .filter(l => l.trim() && !l.startsWith('#'))
@@ -50,13 +50,13 @@ router.post('/users', async (req: AuthRequest, res: Response) => {
 
   try {
     // Create system user locked to FTP only
-    await execAsync(`useradd -m -d "${homeDir}" -s /sbin/nologin ${username} 2>/dev/null || true`);
+    await runFile('useradd', ['-m', '-d', homeDir, '-s', '/sbin/nologin', username]).catch(() => ({ stdout: '', stderr: '' }));
     await chpasswdStdin(username, password);
-    await execAsync(`mkdir -p "${homeDir}"`);
-    await execAsync(`chown ${username}:${username} "${homeDir}"`);
+    await fs.mkdir(homeDir, { recursive: true });
+    await runFile('chown', [`${username}:${username}`, homeDir]);
 
     // Add to vsftpd user list
-    await fs.appendFile('/etc/vsftpd/user_list', `${username}\n`);
+    await fs.appendFile(VSFTPD_USER_LIST, `${username}\n`);
 
     // Write per-user vsftpd config
     await fs.mkdir(FTP_USER_DIR, { recursive: true });
@@ -111,8 +111,10 @@ router.delete('/users/:username', async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    await execAsync(`userdel -r ${username} 2>/dev/null || true`);
-    await execAsync(`sed -i '/^${username}$/d' /etc/vsftpd/user_list 2>/dev/null || true`);
+    await runFile('userdel', ['-r', username]).catch(() => ({ stdout: '', stderr: '' }));
+    const list = await fs.readFile(VSFTPD_USER_LIST, 'utf8').catch(() => '');
+    const filtered = list.split('\n').filter(line => line.trim() && line.trim() !== username).join('\n');
+    await fs.writeFile(VSFTPD_USER_LIST, filtered ? `${filtered}\n` : '');
     await fs.unlink(path.join(FTP_USER_DIR, username)).catch(() => {});
     res.json({ message: `FTP user ${username} deleted` });
   } catch (err: any) {

@@ -1,14 +1,42 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import crypto from 'crypto';
+import { runFile } from '../utils/process-runner';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
 const WEBROOT = process.env.WEBROOT || '/var/www';
+
+
+function listFilesForIntegrity(root: string, limit = 5000): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    if (out.length >= limit) return;
+    let entries: string[] = [];
+    try { entries = readdirSync(dir); } catch { return; }
+    for (const entry of entries) {
+      if (entry === 'node_modules' || entry === '.git') continue;
+      const full = path.join(dir, entry);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (st.isDirectory()) walk(full);
+      else if (st.isFile()) out.push(full);
+      if (out.length >= limit) return;
+    }
+  };
+  walk(root);
+  return out;
+}
+
+function hashFiles(root: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const file of listFilesForIntegrity(root)) {
+    try { result[file] = crypto.createHash('sha256').update(readFileSync(file)).digest('hex'); } catch {}
+  }
+  return result;
+}
 
 // Malware scans and integrity rebuilds each fan out across the whole webroot
 // — letting a single JWT call these every second under the global 300/min
@@ -51,15 +79,12 @@ router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
 
   try {
     // Check if clamav is available
-    const which = await execAsync('which clamscan 2>/dev/null').catch(() => ({ stdout: '' }));
+    const which = await runFile('which', ['clamscan']).catch(() => ({ stdout: '', stderr: '' }));
     if (!which.stdout.trim()) {
       return res.status(503).json({ error: 'ClamAV not installed. Install with: yum install clamav clamav-update' });
     }
 
-    const { stdout, stderr } = await execAsync(
-      `clamscan -r --infected --no-summary "${safePath}" 2>&1`,
-      { timeout: 300000 }
-    ).catch((e: any) => ({ stdout: e.stdout || '', stderr: e.stderr || '' }));
+    const { stdout, stderr } = await runFile('clamscan', ['-r', '--infected', '--no-summary', safePath], { timeout: 300000 }).catch((e: any) => ({ stdout: e.stdout || '', stderr: e.stderr || '' }));
 
     const infected: string[] = [];
     const lines = (stdout + stderr).split('\n').filter(Boolean);
@@ -73,8 +98,8 @@ router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
 
 router.post('/update-definitions', heavyLimit, async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('freshclam 2>&1', { timeout: 120000 });
-    res.json({ output: stdout });
+    const { stdout, stderr } = await runFile('freshclam', [], { timeout: 120000 });
+    res.json({ output: stdout + stderr });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -97,19 +122,13 @@ router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Respons
     return res.status(400).json({ error: 'Path outside webroot' });
   }
   try {
-    const { stdout } = await execAsync(
-      `find "${safePath}" -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -5000 | xargs sha256sum 2>/dev/null`,
-      { timeout: 300000 }
-    );
+    const hashes = hashFiles(safePath);
     // datetime("now") with double quotes is interpreted as an identifier
     // ("now" treated as a column name) — SQLite returns "no such column:
     // now" instead of the current timestamp. Use single quotes.
     const upsert = db.prepare("INSERT INTO file_hashes (file_path, sha256, last_checked) VALUES (?, ?, datetime('now')) ON CONFLICT(file_path) DO UPDATE SET sha256=excluded.sha256, last_checked=excluded.last_checked");
     const tx = db.transaction(() => {
-      for (const line of stdout.split('\n').filter(Boolean)) {
-        const parts = line.trim().split(/\s{2,}/);
-        if (parts.length === 2) upsert.run(parts[1], parts[0]);
-      }
+      for (const [file, sha] of Object.entries(hashes)) upsert.run(file, sha);
     });
     tx();
     const count = (db.prepare('SELECT COUNT(*) as n FROM file_hashes WHERE file_path LIKE ?').get(`${safePath}%`) as any).n;
@@ -138,16 +157,7 @@ router.get('/integrity/check', async (req: Request, res: Response) => {
     const baseline = db.prepare('SELECT file_path, sha256 FROM file_hashes WHERE file_path LIKE ?').all(`${safePath}%`) as { file_path: string; sha256: string }[];
     if (baseline.length === 0) return res.json({ note: 'No baseline set for this path. Run /baseline first.', changed: [], missing: [], new_files: [] });
 
-    const { stdout } = await execAsync(
-      `find "${safePath}" -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -5000 | xargs sha256sum 2>/dev/null`,
-      { timeout: 300000 }
-    );
-
-    const current: Record<string, string> = {};
-    for (const line of stdout.split('\n').filter(Boolean)) {
-      const parts = line.trim().split(/\s{2,}/);
-      if (parts.length === 2) current[parts[1]] = parts[0];
-    }
+    const current = hashFiles(safePath);
 
     const baselineMap: Record<string, string> = {};
     for (const b of baseline) baselineMap[b.file_path] = b.sha256;

@@ -1,13 +1,11 @@
 import { Router, Response } from 'express';
 import { existsSync, writeFileSync, unlinkSync } from 'fs';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import path from 'path';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 
 db.prepare(`CREATE TABLE IF NOT EXISTS parked_domains (
@@ -36,7 +34,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     Redirect permanent / http://${primary_domain}/
 </VirtualHost>
 `);
-  try { await execAsync('apachectl graceful'); } catch {}
+  await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
 
   const r = db.prepare('INSERT INTO parked_domains (domain, primary_domain) VALUES (?, ?)').run(domain, primary_domain);
   res.json(db.prepare('SELECT * FROM parked_domains WHERE id = ?').get(r.lastInsertRowid));
@@ -48,7 +46,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
 
   const conf = path.join(VHOST_DIR, `parked-${row.domain}.conf`);
   if (existsSync(conf)) unlinkSync(conf);
-  try { await execAsync('apachectl graceful'); } catch {}
+  await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
 
   db.prepare('DELETE FROM parked_domains WHERE id = ?').run(req.params.id);
   res.json({ success: true });

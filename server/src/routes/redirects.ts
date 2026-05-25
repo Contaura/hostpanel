@@ -1,12 +1,10 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const REDIRECT_CONF = process.env.REDIRECT_CONF || '/etc/httpd/conf.d/hostpanel_redirects.conf';
 
@@ -44,7 +42,7 @@ async function writeRedirects(redirects: Redirect[]): Promise<void> {
     lines.push(`</VirtualHost>\n`);
   }
   await fs.writeFile(REDIRECT_CONF, lines.join('\n'));
-  await execAsync('systemctl reload httpd 2>/dev/null || true');
+  await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
 }
 
 router.get('/list', async (_req: AuthRequest, res: Response) => {

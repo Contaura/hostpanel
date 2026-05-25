@@ -1,23 +1,29 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 
 /* ── Detect installed PHP versions ──────────────────────── */
 
 router.get('/versions', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('ls /etc/php-fpm.d/ 2>/dev/null | grep -oP "^\\d+\\.\\d+" | sort -V | uniq || ls /usr/bin/php* 2>/dev/null | grep -oP "php\\K[0-9.]+"').catch(() => ({ stdout: '' }));
-    const versions = stdout.trim().split('\n').filter(v => v && /^\d+\.\d+$/.test(v.trim()));
+    let versions: string[] = [];
+    try {
+      const { readdirSync } = require('fs');
+      const fpm = readdirSync('/etc/php-fpm.d').map((f: string) => (f.match(/^(\d+\.\d+)/) || [])[1]).filter(Boolean) as string[];
+      versions = Array.from(new Set(fpm)).sort();
+    } catch {}
     // Also detect via php-fpm sockets
-    const { stdout: sockets } = await execAsync('ls /var/run/php-fpm/ 2>/dev/null || ls /run/php/ 2>/dev/null || echo ""').catch(() => ({ stdout: '' }));
-    const fromSockets = sockets.trim().split('\n').filter(Boolean).map(s => s.match(/(\d+\.\d+)/)?.[1]).filter(Boolean) as string[];
+    let fromSockets: string[] = [];
+    try {
+      const { readdirSync } = require('fs');
+      const dirs = ['/var/run/php-fpm', '/run/php'];
+      for (const d of dirs) { try { fromSockets.push(...readdirSync(d).map((f: string) => (f.match(/(\d+\.\d+)/) || [])[1]).filter(Boolean) as string[]); } catch {} }
+    } catch {}
     const allVersions = [...new Set([...versions, ...fromSockets])].sort();
     res.json(allVersions.length ? allVersions : ['8.1', '8.2', '8.3']);
   } catch { res.json(['8.1', '8.2', '8.3']); }
@@ -53,7 +59,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     db.prepare("INSERT INTO php_domain_versions (domain, php_version) VALUES (?, ?) ON CONFLICT(domain) DO UPDATE SET php_version=excluded.php_version, updated_at=datetime('now')")
       .run(domain, php_version);
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true, domain, php_version });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -67,13 +73,12 @@ router.delete('/:domain', (req: Request, res: Response) => {
 
 router.get('/node-versions', async (_req: Request, res: Response) => {
   try {
-    const { stdout: installed } = await execAsync('nvm list --no-colors 2>/dev/null || ~/.nvm/nvm.sh && nvm list 2>/dev/null || node --version 2>/dev/null').catch(() => ({ stdout: '' }));
-    const { stdout: current }   = await execAsync('node --version 2>/dev/null').catch(() => ({ stdout: '' }));
-    const { stdout: available } = await execAsync('nvm ls-remote --lts --no-colors 2>/dev/null | tail -10').catch(() => ({ stdout: '' }));
+    const { stdout: installed } = await runFile('node', ['--version']).catch(() => ({ stdout: '', stderr: '' }));
+    const { stdout: current }   = await runFile('node', ['--version']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({
       current:   current.trim(),
       installed: installed.trim().split('\n').filter(Boolean).map(v => v.replace(/[*>→\s]/g, '')).filter(v => v.startsWith('v')),
-      available: available.trim().split('\n').filter(Boolean).map(v => v.trim().split(/\s+/)[0]).filter(Boolean),
+      available: [],
     });
   } catch { res.json({ current: '', installed: [], available: [] }); }
 });
@@ -82,7 +87,7 @@ router.post('/node-install', async (req: Request, res: Response) => {
   const { version } = req.body;
   if (!version || !/^v?\d+(\.\d+)*$/.test(version)) return res.status(400).json({ error: 'Invalid version' });
   try {
-    const { stdout } = await execAsync(`bash -c "source ~/.nvm/nvm.sh && nvm install ${version}" 2>&1`, { timeout: 300000 });
+    const { stdout } = await runFile('bash', ['-lc', `source ~/.nvm/nvm.sh && nvm install ${version.replace(/[^0-9v.]/g, '')}`], { timeout: 300000 });
     res.json({ success: true, output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -91,9 +96,10 @@ router.post('/node-install', async (req: Request, res: Response) => {
 
 router.get('/python-versions', async (_req: Request, res: Response) => {
   try {
-    const { stdout: current }   = await execAsync('python3 --version 2>/dev/null').catch(() => ({ stdout: '' }));
-    const { stdout: installed } = await execAsync('pyenv versions --bare 2>/dev/null').catch(() => ({ stdout: '' }));
-    const { stdout: available } = await execAsync('pyenv install --list 2>/dev/null | grep -E "^  3\\." | tail -10').catch(() => ({ stdout: '' }));
+    const { stdout: current }   = await runFile('python3', ['--version']).catch(() => ({ stdout: '', stderr: '' }));
+    const { stdout: installed } = await runFile('pyenv', ['versions', '--bare']).catch(() => ({ stdout: '', stderr: '' }));
+    const { stdout: availRaw } = await runFile('pyenv', ['install', '--list']).catch(() => ({ stdout: '', stderr: '' }));
+    const available = availRaw.split('\n').filter(l => /^\s+3\./.test(l)).slice(-10).join('\n');
     res.json({
       current:   current.trim(),
       installed: installed.trim().split('\n').filter(Boolean),
@@ -106,7 +112,7 @@ router.post('/python-install', async (req: Request, res: Response) => {
   const { version } = req.body;
   if (!version || !/^\d+\.\d+(\.\d+)?$/.test(version)) return res.status(400).json({ error: 'Invalid version' });
   try {
-    const { stdout } = await execAsync(`pyenv install ${version} 2>&1`, { timeout: 600000 });
+    const { stdout } = await runFile('pyenv', ['install', version], { timeout: 600000 });
     res.json({ success: true, output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

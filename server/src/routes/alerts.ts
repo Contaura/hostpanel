@@ -1,12 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import nodemailer from 'nodemailer';
 import si from 'systeminformation';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 function getSmtpConfig() {
   const get = (k: string) => (db.prepare('SELECT value FROM settings WHERE key=?').get(k) as any)?.value || '';
@@ -114,9 +112,9 @@ router.get('/current', async (_req: Request, res: Response) => {
 
 router.get('/packages', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('dnf check-update --quiet 2>/dev/null || true');
-    const lines = stdout.trim().split('\n').filter(l => l.trim() && !l.startsWith('Last') && l.includes(' '));
-    const updates = lines.map(l => {
+    const { stdout } = await runFile('dnf', ['check-update', '--quiet'], { timeout: 60000 }).catch((e: any) => ({ stdout: e.stdout || '', stderr: e.stderr || '' }));
+    const lines = stdout.trim().split('\n').filter((l: string) => l.trim() && !l.startsWith('Last') && l.includes(' '));
+    const updates = lines.map((l: string) => {
       const parts = l.trim().split(/\s+/);
       return parts.length >= 2 ? { package: parts[0], version: parts[1], repo: parts[2] || '' } : null;
     }).filter(Boolean);
@@ -126,10 +124,10 @@ router.get('/packages', async (_req: Request, res: Response) => {
 
 router.post('/packages/update', async (req: Request, res: Response) => {
   const { packages } = req.body; // array of package names, or empty for all
-  const pkgList = Array.isArray(packages) && packages.length ? packages.map(p => p.replace(/[^a-zA-Z0-9._-]/g, '')).join(' ') : '';
+  const pkgList: string[] = Array.isArray(packages) ? packages.map((p: string) => p.replace(/[^a-zA-Z0-9._-]/g, '')).filter(Boolean) : [];
   try {
-    const cmd = pkgList ? `dnf update -y ${pkgList}` : 'dnf update -y';
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 300000 });
+    const args = ['update', '-y', ...pkgList];
+    const { stdout, stderr } = await runFile('dnf', args, { timeout: 300000 });
     res.json({ success: true, output: stdout + stderr });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

@@ -1,13 +1,11 @@
 import { Router, Response } from 'express';
 import si from 'systeminformation';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import cron from 'node-cron';
 import db from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 router.get('/', async (_req: AuthRequest, res: Response) => {
   try {
@@ -66,7 +64,7 @@ router.get('/services', async (_req: AuthRequest, res: Response) => {
   const results = await Promise.all(
     services.map(async name => {
       try {
-        const { stdout } = await execAsync(`systemctl is-active ${name} 2>/dev/null || true`);
+        const { stdout } = await runFile('systemctl', ['is-active', name]).catch(() => ({ stdout: '', stderr: '' }));
         return { name, status: stdout.trim() === 'active' ? 'running' : 'stopped' };
       } catch {
         return { name, status: 'unknown' };

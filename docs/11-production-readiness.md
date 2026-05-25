@@ -188,3 +188,32 @@ The grep returned no matches for the prioritized route set. Server tests passed 
 
 - Continue the same route-by-route pattern for remaining lower-priority legacy `execAsync()` call sites outside the prioritized list, especially large modules such as `client-portal.ts`, `accounts.ts`, `ftp.ts`, and installer/script-management routes.
 - Expand mocked command-execution integration coverage to more individual endpoints as those lower-priority routes are converted.
+
+## Third shell-execution hardening pass
+
+Converted the remaining set of legacy `execAsync()`/`promisify(exec)` route modules to argv-based execution via the shared `runFile` helper:
+
+- `server/src/routes/stats.ts` — systemctl service checks
+- `server/src/routes/redirects.ts` — httpd reload after writing redirects
+- `server/src/routes/errpages.ts` — httpd reload after vhost update
+- `server/src/routes/processes.ts` — `ps aux` listing and `kill -15/-9`
+- `server/src/routes/ftp.ts` — `useradd`/`chown`/`userdel`; FTP user-list rewrite via fs APIs (no `sed`)
+- `server/src/routes/security-scanner.ts` — `which`, `clamscan`, `freshclam`; file-integrity baseline/check via Node `crypto`+`fs` walk (no `find | xargs sha256sum`)
+- `server/src/routes/web-extras.ts` — apachectl/du/df/vnstat/openssl/grep argv; bandwidth log aggregation in Node
+- `server/src/routes/parked-domains.ts` — apachectl graceful
+- `server/src/routes/addon-domains.ts` — apachectl graceful; vhost removal via `fs.rm` (no `rm -f`)
+- `server/src/routes/server-info.ts` — uname/hostname/lscpu/nproc/free/df/httpd/php/nginx/mysql/systemctl argv; `/etc/os-release` and `/proc/loadavg` read in Node
+- `server/src/routes/rspamd.ts` — systemctl is-active
+- `server/src/routes/alerts.ts` — `dnf check-update`/`dnf update -y …` as argv (package names validated then passed as separate args)
+- `server/src/routes/dkim.ts` — `opendkim-genkey`, `dig` argv; key dir creation via `mkdirSync`
+- `server/src/routes/waf.ts` — `httpd -M`, `apachectl graceful`, `fail2ban-client …` argv; ModSec rule list via `readdirSync`
+- `server/src/routes/php-domains.ts` — `apachectl graceful`, `node`/`python3`/`pyenv` argv; FPM version detection via `readdirSync` (no `ls | grep -oP | sort -V`)
+
+### Validation
+- `npm run test --workspace=server` — 9 files / 44 tests passed (added 13 new integration assertions for the routes above)
+- `npm run build` — passed
+- `npm audit --omit=dev --audit-level=moderate` — 0 vulnerabilities
+- Targeted grep for `execAsync|promisify(exec)` across this set returned no matches
+
+### Remaining follow-up
+Legacy `execAsync()` still lives in larger/older modules: `accounts.ts`, `backup.ts`, `client-portal.ts`, `cron.ts`, `dkim.ts` (already converted), `email.ts`, `scripts.ts`, `ssl-advanced.ts`, `wordpress.ts`, `apps.ts`, `reseller.ts`. These should be converted route-by-route with endpoint tests in a future pass.

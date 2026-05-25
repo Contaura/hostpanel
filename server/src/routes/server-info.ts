@@ -1,73 +1,73 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
+import { readFileSync } from 'fs';
 
 const router = Router();
-const execAsync = promisify(exec);
 
-async function run(cmd: string): Promise<string> {
+async function rf(cmd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await execAsync(cmd, { timeout: 10000 });
+    const { stdout } = await runFile(cmd, args, { timeout: 10000 });
     return stdout.trim();
-  } catch {
-    return '';
-  }
+  } catch { return ''; }
 }
 
 router.get('/', async (_req: Request, res: Response) => {
   try {
+    const osRelease = (() => { try { return readFileSync('/etc/os-release', 'utf8'); } catch { return ''; } })();
+    const osMatch = osRelease.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+    const os = osMatch ? osMatch[1] : '';
+
     const [
-      os, kernel, uptime, hostname,
-      cpuModel, cpuCores, totalMem, freeMem,
+      kernel, uptime, hostname,
+      cpuRaw, cpuCores, memRaw,
       apache, mysql, php, nginx,
-      disk, loadAvg,
+      dfRaw, loadRaw,
     ] = await Promise.all([
-      run('cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d \'"\' '),
-      run('uname -r'),
-      run('uptime -p 2>/dev/null || uptime'),
-      run('hostname -f'),
-      run('lscpu | grep "Model name" | cut -d: -f2 | xargs'),
-      run('nproc'),
-      run('free -m | awk \'/Mem:/{print $2}\''),
-      run('free -m | awk \'/Mem:/{print $7}\''),
-      run('httpd -v 2>/dev/null | head -1 || apache2 -v 2>/dev/null | head -1 || echo ""'),
-      run('mysql --version 2>/dev/null || mariadb --version 2>/dev/null || echo ""'),
-      run('php -v 2>/dev/null | head -1 || echo ""'),
-      run('nginx -v 2>&1 | head -1 || echo ""'),
-      run('df -h / | tail -1 | awk \'{print $2" total,",$3" used,",$4" free,",$5" used"}\''),
-      run('cat /proc/loadavg | awk \'{print $1,$2,$3}\''),
+      rf('uname', ['-r']),
+      rf('uptime', ['-p']),
+      rf('hostname', ['-f']),
+      rf('lscpu', []),
+      rf('nproc', []),
+      rf('free', ['-m']),
+      rf('httpd', ['-v']),
+      rf('mysql', ['--version']),
+      rf('php', ['-v']),
+      rf('nginx', ['-v']),
+      rf('df', ['-h', '/']),
+      (async () => { try { return readFileSync('/proc/loadavg', 'utf8').trim(); } catch { return ''; } })(),
     ]);
+
+    const cpuModel = (cpuRaw.match(/Model name:\s*(.+)/) || [])[1] || '';
+    const memLine = memRaw.split('\n').find(l => l.startsWith('Mem:')) || '';
+    const memParts = memLine.trim().split(/\s+/);
+    const totalMem = memParts[1] || '0';
+    const freeMem = memParts[6] || memParts[3] || '0';
+    const apacheFirst = apache.split('\n')[0] || '';
+    const mysqlFirst = mysql.split('\n')[0] || '';
+    const phpFirst = php.split('\n')[0] || '';
+    const nginxFirst = nginx.split('\n')[0] || '';
+    const dfLines = dfRaw.split('\n');
+    const dfData = (dfLines[dfLines.length - 1] || '').trim().split(/\s+/);
+    const disk = dfData.length >= 5 ? `${dfData[1]} total, ${dfData[2]} used, ${dfData[3]} free, ${dfData[4]} used` : '';
+    const loadFields = loadRaw.split(/\s+/);
+    const loadAvg = loadFields.length >= 3 ? `${loadFields[0]} ${loadFields[1]} ${loadFields[2]}` : '';
 
     const services = await Promise.all(
       ['httpd', 'nginx', 'mariadb', 'mysqld', 'postfix', 'dovecot', 'named', 'vsftpd', 'sshd', 'php-fpm'].map(async svc => {
-        const active = await run(`systemctl is-active ${svc} 2>/dev/null`);
+        const active = await rf('systemctl', ['is-active', svc]);
         return { name: svc, active: active === 'active' };
       })
-    ).then(all => all.filter(s => {
-      // Deduplicate: if both httpd and nginx are stopped, keep both; if mariadb active skip mysqld
-      return true;
-    }));
+    );
 
     res.json({
-      hostname,
-      os,
-      kernel,
-      uptime,
-      cpu: { model: cpuModel, cores: parseInt(cpuCores) || 1 },
+      hostname, os, kernel, uptime,
+      cpu: { model: cpuModel.trim(), cores: parseInt(cpuCores) || 1 },
       memory: { total_mb: parseInt(totalMem) || 0, available_mb: parseInt(freeMem) || 0 },
-      disk,
-      load_avg: loadAvg,
-      software: {
-        apache: apache || null,
-        nginx: nginx || null,
-        mysql: mysql || null,
-        php: php || null,
-      },
+      disk, load_avg: loadAvg,
+      software: { apache: apacheFirst || null, nginx: nginxFirst || null, mysql: mysqlFirst || null, php: phpFirst || null },
       services,
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 export default router;

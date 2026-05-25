@@ -1,9 +1,7 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 // Rspamd's controller worker exposes the management HTTP API on 11334 by
 // default, bound to loopback only. We proxy a small whitelist through the
@@ -22,7 +20,7 @@ async function controller(path: string): Promise<any> {
 
 router.get('/status', async (_req: Request, res: Response) => {
   try {
-    const { stdout: active } = await execAsync('systemctl is-active rspamd 2>/dev/null || echo inactive');
+    const { stdout: active } = await runFile('systemctl', ['is-active', 'rspamd']).catch(() => ({ stdout: 'inactive', stderr: '' }));
     const running = active.trim() === 'active';
     let stat: any = null;
     if (running) {
