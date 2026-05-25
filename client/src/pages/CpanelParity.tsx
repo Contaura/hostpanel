@@ -63,6 +63,9 @@ export default function CpanelParity() {
   async function runDnsSync() { const data = await post('/api/dns-cluster/sync', { domain: form.nsDomain }); setDnsSync(data); toast.success('DNS sync requested'); load(); }
   async function inspectImport() { await post('/api/transfer-import/inspect', { archivePath: form.archivePath }); toast.success('Transfer archive inspected'); load(); }
   async function executeImport(id: number) { await post(`/api/transfer-import/${id}/execute`, { confirm: true, domain: form.importDomain || undefined, username: form.importUsername || undefined }); toast.success('Transfer import executed'); load(); }
+  async function installPlugin() { await post('/api/extensions/plugins/install', { packagePath: form.pluginPackage, sha256: form.pluginSha256 || undefined }); toast.success('Plugin installed'); set('pluginPackage',''); set('pluginSha256',''); load(); }
+  async function togglePlugin(id: string, enabled: boolean) { await post(`/api/extensions/plugins/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, {}); toast.success(enabled ? 'Plugin enabled' : 'Plugin disabled'); load(); }
+  async function rollbackPlugin(id: string) { await post(`/api/extensions/plugins/${encodeURIComponent(id)}/rollback`, {}); toast.success('Plugin rolled back'); load(); }
 
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return <div className="space-y-5">
@@ -115,7 +118,8 @@ export default function CpanelParity() {
 
     <Panel title="9. Plugin / Update Ecosystem">
       <div className="grid md:grid-cols-3 gap-3 text-sm"><div>Current: <b>{updates.currentRevision || 'unknown'}</b></div><div>Remote: <b>{updates.remoteRevision || 'unknown'}</b></div><button className="btn-secondary" onClick={async()=>{ await post('/api/extensions/plugins/refresh', {}); load(); }}>Refresh Plugins</button></div>
-      <div className="text-sm text-slate-500">Plugins: {plugins.map(p=>`${p.name || p.id}@${p.version || 'unknown'}`).join(' • ') || 'No plugin manifests installed'}</div>
+      <div className="grid md:grid-cols-3 gap-3"><Text value={form.pluginPackage || ''} onChange={v=>set('pluginPackage',v)} placeholder="/root/plugin-package.tgz"/><Text value={form.pluginSha256 || ''} onChange={v=>set('pluginSha256',v)} placeholder="sha256 required/recommended"/><button className="btn-primary" onClick={installPlugin}>Verify + Install</button></div>
+      <div className="space-y-2">{plugins.map(p=><div key={p.id} className="rounded border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-wrap items-center justify-between gap-2"><div><b>{p.name || p.id}</b> <span className="text-slate-500">{p.version || 'unknown'} · {p.enabled ? 'enabled' : 'disabled'} · {p.signed ? 'signed' : 'unsigned'}</span></div><div className="flex gap-2"><button className="btn-secondary text-xs" onClick={()=>togglePlugin(p.id, !p.enabled)}>{p.enabled ? 'Disable' : 'Enable'}</button><button className="btn-secondary text-xs" onClick={()=>rollbackPlugin(p.id)}>Rollback</button></div></div>)}</div>
     </Panel>
   </div>;
 }

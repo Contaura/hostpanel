@@ -207,6 +207,20 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## Extensions / Plugins
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/extensions/updates` | Git and npm-audit update status |
+| `GET` | `/api/extensions/plugins` | List plugin manifests and available rollback snapshots |
+| `POST` | `/api/extensions/plugins/refresh` | Re-read plugin manifests |
+| `POST` | `/api/extensions/plugins/install` | Verify sha256 and install `.tgz` plugin package with rollback snapshot |
+| `POST` | `/api/extensions/plugins/:id/enable` | Enable plugin with rollback snapshot |
+| `POST` | `/api/extensions/plugins/:id/disable` | Disable plugin with rollback snapshot |
+| `POST` | `/api/extensions/plugins/:id/rollback` | Restore latest or requested rollback snapshot |
+
+---
+
 ## Transfer Imports
 
 | Method | Path | Description |

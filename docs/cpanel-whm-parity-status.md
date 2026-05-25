@@ -29,8 +29,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - Provides visitor, HTTP error, raw access, bandwidth, and Awstats/Webalizer-style summaries from local web logs.
 
 - **Server update/plugin ecosystem foundation**
-  - API: `/api/extensions/updates`, `/api/extensions/plugins`, `/api/extensions/plugins/refresh`
+  - API: `/api/extensions/updates`, `/api/extensions/plugins`, `/api/extensions/plugins/refresh`, `/api/extensions/plugins/install`, `/api/extensions/plugins/:id/enable`, `/api/extensions/plugins/:id/disable`, `/api/extensions/plugins/:id/rollback`
   - Reports git update state, npm audit metadata when available, and plugin manifests from a controlled plugin directory.
+  - Installs `.tgz` plugin packages only after sha256/package verification, snapshots existing plugin directories before changes, supports enable/disable, and can roll back to the latest saved snapshot.
 
 - **Web Disk / WebDAV foundation**
   - API: `/api/webdav`, `/api/webdav/config-preview`, `/api/webdav/reload`
@@ -62,7 +63,6 @@ These areas need deeper production hardening beyond the new API/UI foundations:
 - WebDAV password-file management and automated Apache/Nginx DAV package/service provisioning.
 - Backup wizard restore dry-run UI and selective restore execution.
 - phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
-- Plugin install/enable/disable still needs package signature verification and rollback support.
 
 ## Verification
 

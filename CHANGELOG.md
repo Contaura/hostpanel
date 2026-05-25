@@ -23,6 +23,7 @@ All notable changes to HostPanel are documented in this file.
 - Added phpMyAdmin installation and account-scoped launch flows for admins and client-portal users, including Apache alias config generation and feature/permission enforcement.
 - Added authenticated DNS cluster sync execution using `rndc retransfer` with managed temporary key files so TSIG secrets are not exposed in API responses or command previews.
 - Added guarded cPanel transfer/import execution with inspect reports, progress tracking, homedir restore rollback points, account record upserts, and MySQL SQL import support.
+- Added plugin package installation, enable/disable operations, sha256 verification, manifest sanitization, and rollback snapshots to the extension ecosystem.
 
 ### Fixed
 
