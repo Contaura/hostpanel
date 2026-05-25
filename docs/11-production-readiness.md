@@ -37,3 +37,34 @@ Both commands passed. The frontend build still reports existing Vite warnings ab
 - Add broader route-level tests for webhook senders that call `assertHttpTargetAllowed()`.
 - Continue reviewing all routes that execute shell commands or write system configuration as `root`.
 - Add CI so tests and builds run automatically before merge/deploy.
+
+## 2026-05-25 — CI and dependency audit baseline
+
+### Risk addressed
+
+HostPanel did not have a repository-level CI workflow, so production-readiness checks depended on manual execution on the server. The dependency audit also reported moderate vulnerabilities in production and development dependency trees.
+
+### Changes made
+
+- Added `.github/workflows/ci.yml` to run on pushes and pull requests to `master`.
+- CI now installs dependencies with `npm ci`, runs server tests, builds the server/client, and fails on moderate-or-higher production or development dependency vulnerabilities.
+- Ran `npm audit fix --omit=dev` to update the vulnerable transitive `qs` dependency.
+- Removed the direct `uuid` server dependency because it was unused in `server/src` and its advisory required a semver-major upgrade.
+- Upgraded client Vite to `^6.4.2`, clearing the dev dependency advisories without jumping to Vite 8.
+
+### Validation performed
+
+```bash
+npm audit --omit=dev
+npm audit
+npm run test --workspace=server
+npm run build
+```
+
+All audit, test, and build checks passed with zero reported npm vulnerabilities. The frontend build still reports the existing large bundle warning.
+
+### Follow-up
+
+- Consider adding branch protection once GitHub Actions is confirmed green on GitHub.
+- Add linting once an ESLint/Prettier policy is selected.
+- Add targeted integration tests for authenticated routes and dangerous root-level operations.
