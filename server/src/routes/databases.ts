@@ -3,10 +3,12 @@ import { spawn } from 'child_process';
 import { createReadStream } from 'fs';
 import mysql from 'mysql2/promise';
 import multer from 'multer';
-import { existsSync, unlinkSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { AuthRequest } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
+import { enforceResellerPrivilege } from './feature-lists';
 
 const router = Router();
 const sqlUpload = multer({ dest: '/tmp/', limits: { fileSize: 512 * 1024 * 1024 } });
@@ -27,6 +29,9 @@ const DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
 const DB_ROOT_USER = process.env.DB_ROOT_USER || 'root';
 const DB_ROOT_PASS = process.env.DB_ROOT_PASS || '';
+const PMA_ALIAS = process.env.PHPMYADMIN_ALIAS || '/phpMyAdmin';
+const PMA_CONF_FILE = process.env.PHPMYADMIN_CONF_FILE || '/etc/httpd/conf.d/hostpanel-phpmyadmin.conf';
+const PMA_CANDIDATES = (process.env.PHPMYADMIN_PATHS || '/usr/share/phpMyAdmin:/usr/share/phpmyadmin:/var/www/html/phpMyAdmin:/var/www/html/phpmyadmin').split(':').filter(Boolean);
 
 async function getConn() {
   return mysql.createConnection({
@@ -203,19 +208,67 @@ router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), asy
   }
 });
 
-/* ── phpMyAdmin detection ───────────────────────────────────── */
+/* ── phpMyAdmin detection / installation ────────────────────── */
 
-router.get('/phpmyadmin', async (_req: AuthRequest, res: Response) => {
-  const candidates = ['/usr/share/phpMyAdmin', '/var/www/html/phpMyAdmin', '/var/www/html/phpmyadmin', '/usr/share/phpmyadmin'];
-  const { existsSync } = await import('fs');
-  const found = candidates.find(p => existsSync(p));
-  if (found) return res.json({ installed: true, path: found, url: '/phpMyAdmin' });
+function pmaPath() { return PMA_CANDIDATES.find(p => existsSync(p)); }
+function pmaUrl(database?: string, user?: string) {
+  const q = new URLSearchParams();
+  if (database) q.set('db', database);
+  if (user) q.set('pma_username', user);
+  const suffix = q.toString();
+  return `${PMA_ALIAS.replace(/\/$/, '')}/${suffix ? `?${suffix}` : ''}`;
+}
+function writePmaApacheConfig(foundPath: string) {
+  mkdirSync(path.dirname(PMA_CONF_FILE), { recursive: true });
+  writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nAlias ${PMA_ALIAS} ${foundPath}\nAlias ${PMA_ALIAS}/ ${foundPath}/\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
+}
+
+router.get('/phpmyadmin', enforceResellerPrivilege('phpmyadmin'), async (_req: AuthRequest, res: Response) => {
+  const found = pmaPath();
+  if (found) return res.json({ installed: true, path: found, url: pmaUrl(), config: existsSync(PMA_CONF_FILE) ? PMA_CONF_FILE : null });
   // Check if accessible via URL
   try {
-    const response = await fetch('http://localhost/phpMyAdmin/');
-    if (response.status === 200) return res.json({ installed: true, url: '/phpMyAdmin' });
+    const response = await fetch(`http://localhost${PMA_ALIAS}/`);
+    if (response.status === 200) return res.json({ installed: true, url: pmaUrl() });
   } catch {}
-  res.json({ installed: false });
+  res.json({ installed: false, url: pmaUrl() });
+});
+
+router.post('/phpmyadmin/install', enforceResellerPrivilege('phpmyadmin'), async (_req: AuthRequest, res: Response) => {
+  try {
+    let found = pmaPath();
+    if (!found) {
+      try {
+        await runFile('dnf', ['install', '-y', 'phpMyAdmin'], { timeout: 300000 });
+      } catch (firstErr: any) {
+        await runFile('dnf', ['install', '-y', 'epel-release'], { timeout: 300000 });
+        await runFile('dnf', ['install', '-y', 'phpMyAdmin'], { timeout: 300000 });
+      }
+      found = pmaPath();
+    }
+    if (!found) return res.status(500).json({ error: 'phpMyAdmin package installed but no known install directory was found' });
+    writePmaApacheConfig(found);
+    await runFile('apachectl', ['graceful'], { timeout: 120000 }).catch(async () => { await runFile('systemctl', ['reload', 'httpd'], { timeout: 120000 }); });
+    res.json({ installed: true, path: found, url: pmaUrl(), config: PMA_CONF_FILE });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/phpmyadmin/account-scope', enforceResellerPrivilege('phpmyadmin'), async (req: AuthRequest, res: Response) => {
+  const account = String(req.query.account || '').trim();
+  const database = String(req.query.database || '').trim();
+  if (!account || !/^[a-zA-Z0-9_]+$/.test(account)) return res.status(400).json({ error: 'Valid account is required' });
+  if (database && !/^[a-zA-Z0-9_]+$/.test(database)) return res.status(400).json({ error: 'Invalid database name' });
+  let conn;
+  try {
+    conn = await getConn();
+    const [dbRows] = await conn.query<mysql.RowDataPacket[]>('SELECT schema_name AS name FROM information_schema.SCHEMATA');
+    const databases = (dbRows as any[]).map(r => r.name).filter((n: string) => n === account || n.startsWith(`${account}_`));
+    const selected = database && databases.includes(database) ? database : databases[0] || undefined;
+    const [userRows] = await conn.query<mysql.RowDataPacket[]>("SELECT user, host FROM mysql.user WHERE user NOT IN ('root','mysql','mariadb.sys') ORDER BY user");
+    const users = (userRows as any[]).map(r => ({ user: r.User ?? r.user, host: r.Host ?? r.host })).filter(r => r.user && (r.user === account || r.user.startsWith(`${account}_`)));
+    res.json({ installed: !!pmaPath(), url: pmaUrl(selected, users[0]?.user), account, selectedDatabase: selected || null, databases, users });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  finally { await conn?.end(); }
 });
 
 /* ── User privilege management ─────────────────────────────── */

@@ -90,6 +90,7 @@ const TEAM_PERMISSION_RULES: { re: RegExp; permission: string }[] = [
   { re: /^\/spam-rules(?:\/|$)/, permission: 'email-accounts' },
   { re: /^\/ftp(?:\/|$)/, permission: 'ftp' },
   { re: /^\/databases(?:\/|$)/, permission: 'databases' },
+  { re: /^\/phpmyadmin(?:\/|$)/, permission: 'phpmyadmin' },
   { re: /^\/backups(?:\/|$)/, permission: 'backup-wizard' },
   { re: /^\/stats(?:\/|$)/, permission: 'analytics' },
   { re: /^\/files(?:\/|$)/, permission: 'files' },
@@ -116,6 +117,8 @@ const PORTAL_FEATURE_RULES: { re: RegExp; feature: string }[] = [
   { re: /^\/webmail(?:\/|$)/, feature: 'email-accounts' },
   { re: /^\/mail-auth(?:\/|$)/, feature: 'email-accounts' },
   { re: /^\/spam-rules(?:\/|$)/, feature: 'email-accounts' },
+  { re: /^\/databases(?:\/|$)/, feature: 'databases' },
+  { re: /^\/phpmyadmin(?:\/|$)/, feature: 'phpmyadmin' },
   { re: /^\/backups(?:\/|$)/, feature: 'backup-wizard' },
   { re: /^\/stats(?:\/|$)/, feature: 'analytics' },
   { re: /^\/files(?:\/|$)/, feature: 'file-manager' },
@@ -651,6 +654,17 @@ const PORTAL_DB_HOST = process.env.DB_HOST || '127.0.0.1';
 const PORTAL_DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
 const PORTAL_DB_USER = process.env.DB_ROOT_USER || 'root';
 const PORTAL_DB_PASS = process.env.DB_ROOT_PASS || '';
+const PORTAL_PMA_ALIAS = process.env.PHPMYADMIN_ALIAS || '/phpMyAdmin';
+const PORTAL_PMA_CANDIDATES = (process.env.PHPMYADMIN_PATHS || '/usr/share/phpMyAdmin:/usr/share/phpmyadmin:/var/www/html/phpMyAdmin:/var/www/html/phpmyadmin').split(':').filter(Boolean);
+
+function portalPmaPath() { return PORTAL_PMA_CANDIDATES.find(p => existsSync(p)); }
+function portalPmaUrl(database?: string, user?: string) {
+  const q = new URLSearchParams();
+  if (database) q.set('db', database);
+  if (user) q.set('pma_username', user);
+  const suffix = q.toString();
+  return `${PORTAL_PMA_ALIAS.replace(/\/$/, '')}/${suffix ? `?${suffix}` : ''}`;
+}
 
 async function getPortalDbConn() {
   return mysql.createConnection({ host: PORTAL_DB_HOST, port: PORTAL_DB_PORT, user: PORTAL_DB_USER, password: PORTAL_DB_PASS });
@@ -690,6 +704,32 @@ router.delete('/databases/:name', clientAuth, async (req: Request, res: Response
     conn = await getPortalDbConn();
     await conn.query(`DROP DATABASE IF EXISTS \`${name}\``);
     res.json({ message: `Database ${name} dropped` });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  finally { await conn?.end(); }
+});
+
+router.get('/phpmyadmin', clientAuth, async (req: Request, res: Response) => {
+  const usernames = clientAccountUsernames((req as any).clientId, teamAccountScope(req));
+  if (!usernames.length) return res.json({ installed: !!portalPmaPath(), url: portalPmaUrl(), databases: [], users: [], selectedDatabase: null });
+  const requestedDb = String(req.query.database || '').trim();
+  if (requestedDb && !/^[a-zA-Z0-9_]+$/.test(requestedDb)) return res.status(400).json({ error: 'Invalid database name' });
+  let conn;
+  try {
+    conn = await getPortalDbConn();
+    const [dbRows] = await conn.query<mysql.RowDataPacket[]>('SELECT schema_name AS name FROM information_schema.SCHEMATA');
+    const databases = (dbRows as any[]).map(r => r.name).filter((n: string) => usernames.some(u => n === u || n.startsWith(`${u}_`)));
+    const selectedDatabase = requestedDb && databases.includes(requestedDb) ? requestedDb : databases[0] || null;
+    const [userRows] = await conn.query<mysql.RowDataPacket[]>("SELECT user, host FROM mysql.user WHERE user NOT IN ('root','mysql','mariadb.sys') ORDER BY user");
+    const users = (userRows as any[])
+      .map(r => ({ user: r.User ?? r.user, host: r.Host ?? r.host }))
+      .filter(r => r.user && usernames.some(u => r.user === u || r.user.startsWith(`${u}_`)));
+    res.json({
+      installed: !!portalPmaPath(),
+      url: portalPmaUrl(selectedDatabase || undefined, users[0]?.user),
+      selectedDatabase,
+      databases,
+      users,
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
   finally { await conn?.end(); }
 });

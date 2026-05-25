@@ -175,7 +175,7 @@ app.use('/api/errpages',    authenticateToken, errpageRoutes);
 app.use('/api/web',         authenticateToken, webExtrasRoutes);
 
 // Databases
-app.use('/api/databases', authenticateToken, enforceResellerPrivilege('phpmyadmin'), databaseRoutes);
+app.use('/api/databases', authenticateToken, enforceResellerPrivilege('databases'), databaseRoutes);
 
 // Email
 app.use('/api/email',       authenticateToken, enforceResellerPrivilege('email-accounts'), emailRoutes);

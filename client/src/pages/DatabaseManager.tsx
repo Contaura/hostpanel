@@ -7,6 +7,8 @@ import { openAuthenticatedDownload } from '../lib/api';
 
 interface DB { name: string; size_mb: number | null }
 interface DBUser { user: string; host: string }
+interface PhpMyAdminStatus { installed: boolean; url: string; path?: string; config?: string | null }
+interface PhpMyAdminScope { installed: boolean; url: string; account: string; selectedDatabase: string | null; databases: string[]; users: DBUser[] }
 
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
@@ -33,7 +35,10 @@ export default function DatabaseManager() {
   const [grants, setGrants] = useState<any>(null);
   const [newPrivs, setNewPrivs] = useState<Set<string>>(new Set());
   const [newPrivDb, setNewPrivDb] = useState('');
-  const [pmaUrl, setPmaUrl] = useState<string | null>(null);
+  const [pma, setPma] = useState<PhpMyAdminStatus | null>(null);
+  const [pmaInstalling, setPmaInstalling] = useState(false);
+  const [pmaScope, setPmaScope] = useState<PhpMyAdminScope | null>(null);
+  const [pmaScopeLoading, setPmaScopeLoading] = useState<string | null>(null);
   const [remoteAccess, setRemoteAccess] = useState<{ user: string; host: string }[]>([]);
   const [raForm, setRaForm] = useState({ user: '', host: '%', database: '*', privileges: ['ALL PRIVILEGES'] });
   const [raLoading, setRaLoading] = useState(false);
@@ -50,8 +55,40 @@ export default function DatabaseManager() {
   }, []);
 
   useEffect(() => {
-    axios.get('/api/databases/phpmyadmin').then(r => { if (r.data?.installed) setPmaUrl(r.data.url || '/phpMyAdmin'); }).catch(() => {});
+    loadPmaStatus();
   }, []);
+
+  async function loadPmaStatus() {
+    try { const { data } = await axios.get<PhpMyAdminStatus>('/api/databases/phpmyadmin'); setPma(data); }
+    catch { setPma(null); }
+  }
+
+  async function installPma() {
+    if (!await confirm('Install phpMyAdmin and expose it through Apache?')) return;
+    setPmaInstalling(true);
+    try {
+      const { data } = await axios.post<PhpMyAdminStatus>('/api/databases/phpmyadmin/install');
+      setPma(data);
+      toast.success('phpMyAdmin installed and Apache reloaded');
+    } catch (err: any) { toast.error(err.response?.data?.error || 'phpMyAdmin install failed'); }
+    finally { setPmaInstalling(false); }
+  }
+
+  function accountFromDb(name: string) {
+    return name.includes('_') ? name.split('_')[0] : name;
+  }
+
+  async function openPmaScope(database: string) {
+    const account = accountFromDb(database);
+    setPmaScopeLoading(database);
+    try {
+      const { data } = await axios.get<PhpMyAdminScope>('/api/databases/phpmyadmin/account-scope', { params: { account, database } });
+      setPmaScope(data);
+      if (!data.installed) toast.error('phpMyAdmin is not installed yet');
+      else window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) { toast.error(err.response?.data?.error || 'Failed to open scoped phpMyAdmin'); }
+    finally { setPmaScopeLoading(null); }
+  }
 
   async function load() {
     try {
@@ -193,7 +230,8 @@ export default function DatabaseManager() {
           <p className="page-subtitle">Manage MariaDB databases and users</p>
         </div>
         <div className="flex gap-2">
-          {pmaUrl && <a href={pmaUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary"><ExternalLink size={14} /> phpMyAdmin</a>}
+          {pma?.installed && <a href={pma.url || '/phpMyAdmin/'} target="_blank" rel="noopener noreferrer" className="btn-secondary"><ExternalLink size={14} /> phpMyAdmin</a>}
+          {!pma?.installed && <button onClick={installPma} disabled={pmaInstalling} className="btn-secondary"><ExternalLink size={14} /> {pmaInstalling ? 'Installing…' : 'Install phpMyAdmin'}</button>}
           <button onClick={() => setShowForm(v => !v)} className="btn-primary"><Plus size={14} /> New {tab === 'databases' ? 'Database' : 'User'}</button>
         </div>
       </div>
@@ -262,6 +300,19 @@ export default function DatabaseManager() {
       {tab === 'databases' && (
         <>
           <input ref={importRef} type="file" accept=".sql,.sql.gz,.gz" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) importDb(f); e.target.value = ''; }} />
+          <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">phpMyAdmin</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {pma?.installed ? `Installed${pma.path ? ` at ${pma.path}` : ''}` : 'Not installed. Install to enable account-scoped database GUI links.'}
+              </p>
+              {pmaScope && <p className="text-xs text-slate-400 mt-1">Last scope: {pmaScope.account} · {pmaScope.databases.length} DB(s) · {pmaScope.users.length} user(s)</p>}
+            </div>
+            <div className="flex gap-2">
+              {pma?.installed && <a className="btn-secondary" href={pma.url || '/phpMyAdmin/'} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open</a>}
+              {!pma?.installed && <button className="btn-primary" onClick={installPma} disabled={pmaInstalling}><ExternalLink size={14} /> {pmaInstalling ? 'Installing…' : 'Install'}</button>}
+            </div>
+          </div>
           <div className="space-y-3">
             <div className="flex justify-end">
               <div className="relative">
@@ -307,6 +358,7 @@ export default function DatabaseManager() {
                         <td className="px-3 py-3">
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
                             <button onClick={() => exportDb(db.name)} className="btn-icon text-blue-500" title="Export"><Download size={13} /></button>
+                            <button onClick={() => openPmaScope(db.name)} className="btn-icon text-indigo-500" title="Open in account-scoped phpMyAdmin" disabled={pmaScopeLoading === db.name || !pma?.installed}><ExternalLink size={13} /></button>
                             <button onClick={() => { setImportTarget(db.name); importRef.current?.click(); }} className="btn-icon text-amber-500" title="Import" disabled={importing === db.name}><Upload size={13} /></button>
                             <button onClick={() => deleteDb(db.name)} disabled={deletingDb === db.name} className="btn-icon hover:!text-rose-600 dark:hover:!text-rose-400 hover:!bg-rose-50 dark:hover:!bg-rose-900/30"><Trash2 size={13} /></button>
                           </div>

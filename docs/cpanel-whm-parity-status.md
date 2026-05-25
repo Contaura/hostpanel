@@ -48,9 +48,10 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - UI: `/cpanel-parity`
   - Calls existing `/api/backup/create` using guided presets for file/home and database backups.
 
-- **phpMyAdmin integration UI**
-  - UI: `/cpanel-parity`
-  - Uses existing `/api/databases/phpmyadmin` detection and provides a safe launch link when installed.
+- **phpMyAdmin integration**
+  - UI: `/cpanel-parity`, admin Database Manager, and client portal Databases page.
+  - API: `/api/databases/phpmyadmin`, `/api/databases/phpmyadmin/install`, `/api/databases/phpmyadmin/account-scope`, `/api/portal/phpmyadmin`.
+  - Detects installed phpMyAdmin, can install the package via `dnf`, writes a managed Apache alias, reloads Apache, and generates account/database-scoped launch links while enforcing reseller/client feature permissions.
 
 ## Remaining build-out after this foundation
 
@@ -60,7 +61,7 @@ These areas need deeper production hardening beyond the new API/UI foundations:
 - Feature-list enforcement middleware on existing account, reseller, portal, and navigation actions.
 - WebDAV password-file management and automated Apache/Nginx DAV package/service provisioning.
 - Backup wizard restore dry-run UI and selective restore execution.
-- phpMyAdmin SSO-style handoff is not implemented; current behavior is detection + safe link.
+- phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
 - Transfer/import execution remains intentionally gated after dry-run inspection.
 - DNS clustering needs signed authenticated remote sync execution after node trust is established.
 - Plugin install/enable/disable still needs package signature verification and rollback support.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, ExternalLink } from 'lucide-react';
 import { useToast } from '../../components/Toast';
 import { useConfirm } from '../../context/ConfirmContext';
 import { api, apost, adel, DbRow, DbUserRow } from '../api';
@@ -18,13 +18,20 @@ function Inner({ username }: { username: string }) {
   const confirm = useConfirm();
   const [dbs, setDbs]                 = useState<DbRow[]>([]);
   const [users, setUsers]             = useState<DbUserRow[]>([]);
+  const [pma, setPma]                 = useState<{ installed: boolean; url: string; selectedDatabase: string | null; databases: string[]; users: DbUserRow[] } | null>(null);
   const [dbForm, setDbForm]           = useState({ name: '' });
   const [userForm, setUserForm]       = useState({ username: '', password: '', database: '' });
   const [busy, setBusy]               = useState(false);
 
-  useEffect(() => { loadDbs(); loadUsers(); }, [username]);
+  useEffect(() => { loadDbs(); loadUsers(); loadPma(); }, [username]);
   async function loadDbs()    { try { const r = await api<DbRow[]>('/api/portal/databases');        setDbs(r.data); } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); } }
   async function loadUsers()  { try { const r = await api<DbUserRow[]>('/api/portal/databases/users'); setUsers(r.data); } catch (e: any) { toast.error(e.response?.data?.error || 'Failed'); } }
+  async function loadPma(database?: string) { try { const r = await api<any>(`/api/portal/phpmyadmin${database ? `?database=${encodeURIComponent(database)}` : ''}`); setPma(r.data); return r.data; } catch { setPma(null); return null; } }
+  async function openPmaForDb(database: string) {
+    const scoped = await loadPma(database);
+    if (!scoped?.installed) return toast.error('phpMyAdmin is not installed yet');
+    window.open(scoped.url, '_blank', 'noopener,noreferrer');
+  }
 
   async function addDb() {
     if (!dbForm.name) return;
@@ -63,6 +70,16 @@ function Inner({ username }: { username: string }) {
     <div>
       <PageTitle title="MySQL Databases" subtitle={`Databases and users must start with your account prefix (${prefix}).`} />
 
+      <div className="card p-4 mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">phpMyAdmin</p>
+          <p className="text-xs text-slate-500">
+            {pma?.installed ? `Available${pma.selectedDatabase ? ` · selected DB ${pma.selectedDatabase}` : ''}` : 'Not installed by your hosting provider yet.'}
+          </p>
+        </div>
+        {pma?.installed && <a className="btn-secondary text-xs" href={pma.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={12} /> Open phpMyAdmin</a>}
+      </div>
+
       <div className="card p-5 mb-4">
         <p className="text-sm font-semibold mb-3">Databases</p>
         <div className="grid grid-cols-12 gap-2 items-end mb-3">
@@ -81,7 +98,10 @@ function Inner({ username }: { username: string }) {
             {dbs.map(d => (
               <tr key={d.name} className="border-b border-slate-100 dark:border-slate-800 last:border-0">
                 <td className="py-2 px-1 font-mono text-xs">{d.name}</td>
-                <td className="text-right"><button className="btn-icon text-rose-500" onClick={() => delDb(d.name)} disabled={busy}><Trash2 size={12} /></button></td>
+                <td className="text-right flex justify-end gap-1">
+                  {pma?.installed && <button className="btn-icon text-indigo-500" title="Open in phpMyAdmin" onClick={() => openPmaForDb(d.name)}><ExternalLink size={12} /></button>}
+                  <button className="btn-icon text-rose-500" onClick={() => delDb(d.name)} disabled={busy}><Trash2 size={12} /></button>
+                </td>
               </tr>
             ))}
           </tbody>

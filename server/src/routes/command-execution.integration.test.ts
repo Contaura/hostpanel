@@ -56,6 +56,9 @@ describe('high-risk route command execution integration', () => {
     if (closeServer) await closeServer();
     closeServer = undefined;
     await fs.rm(tmp, { recursive: true, force: true });
+    delete process.env.PHPMYADMIN_PATHS;
+    delete process.env.PHPMYADMIN_CONF_FILE;
+    delete process.env.PHPMYADMIN_ALIAS;
     vi.resetModules();
   });
 
@@ -471,6 +474,24 @@ describe('high-risk route command execution integration', () => {
     const res = await fetch(`${server.url}/api/apps/`);
     expect(res.status).toBe(200);
     expect(runFileMock).toHaveBeenCalledWith('pm2', ['jlist']);
+  });
+
+  it('installs phpMyAdmin through dnf, writes Apache alias config, and reloads httpd', async () => {
+    const pmaDir = path.join(tmp, 'phpMyAdmin');
+    process.env.PHPMYADMIN_PATHS = pmaDir;
+    process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
+    process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
+    const server = await appFor('/api/databases', './databases');
+    closeServer = server.close;
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'dnf' && args.includes('phpMyAdmin')) await fs.mkdir(pmaDir, { recursive: true });
+      return { stdout: '', stderr: '' };
+    });
+    const res = await fetch(`${server.url}/api/databases/phpmyadmin/install`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('dnf', ['install', '-y', 'phpMyAdmin'], expect.objectContaining({ timeout: 300000 }));
+    expect(runFileMock).toHaveBeenCalledWith('apachectl', ['graceful'], expect.objectContaining({ timeout: 120000 }));
+    await expect(fs.readFile(process.env.PHPMYADMIN_CONF_FILE, 'utf8')).resolves.toContain(`Alias /phpMyAdmin ${pmaDir}`);
   });
 
   it('removes promisify(exec) from reseller route source', async () => {
