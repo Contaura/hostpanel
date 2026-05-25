@@ -36,6 +36,7 @@ export interface PortalClient {
   city?: string;
   country?: string;
   created_at: string;
+  team_user?: { id: number; permissions: string[]; account_id?: number | null };
 }
 
 export interface Invoice {

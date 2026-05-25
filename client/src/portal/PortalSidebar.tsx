@@ -12,53 +12,56 @@ import {
   Zap, ExternalLink, ChevronDown, Server, CheckCircle2,
 } from 'lucide-react';
 
-interface NavItem { to: string; icon: React.ElementType; label: string; end?: boolean; disabled?: boolean }
+interface NavItem { to: string; icon: React.ElementType; label: string; end?: boolean; disabled?: boolean; permission?: string; ownerOnly?: boolean }
 interface Section { label: string; items: NavItem[] }
 
-function buildSections(hasAccount: boolean): Section[] {
+function buildSections(hasAccount: boolean, teamPerms?: string[] | null): Section[] {
+  const isTeam = Array.isArray(teamPerms);
+  const allowed = (item: NavItem) => !isTeam || (!item.ownerOnly && (!item.permission || teamPerms.includes(item.permission)));
+
   return [
     { label: 'Main', items: [
       { to: '/portal',            icon: LayoutDashboard, label: 'Dashboard', end: true },
-      { to: '/portal/invoices',   icon: Receipt,         label: 'Invoices' },
+      { to: '/portal/invoices',   icon: Receipt,         label: 'Invoices', permission: 'billing' },
     ]},
     { label: 'Files & Backups', items: [
-      { to: '/portal/files',      icon: FolderOpen, label: 'File Manager', disabled: !hasAccount },
-      { to: '/portal/backups',    icon: Archive,    label: 'Backups',       disabled: !hasAccount },
+      { to: '/portal/files',      icon: FolderOpen, label: 'File Manager', disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/backups',    icon: Archive,    label: 'Backups',       disabled: !hasAccount, permission: 'backup-wizard' },
     ]},
     { label: 'Domains & Web', items: [
-      { to: '/portal/dns',         icon: Globe,          label: 'DNS Records',  disabled: !hasAccount },
-      { to: '/portal/subdomains',  icon: Network,        label: 'Subdomains',   disabled: !hasAccount },
-      { to: '/portal/redirects',   icon: ArrowRightLeft, label: 'Redirects',    disabled: !hasAccount },
-      { to: '/portal/error-pages', icon: AlertTriangle,  label: 'Error Pages',  disabled: !hasAccount },
-      { to: '/portal/htaccess',    icon: FileCode,       label: '.htaccess',    disabled: !hasAccount },
+      { to: '/portal/dns',         icon: Globe,          label: 'DNS Records',  disabled: !hasAccount, permission: 'dns' },
+      { to: '/portal/subdomains',  icon: Network,        label: 'Subdomains',   disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/redirects',   icon: ArrowRightLeft, label: 'Redirects',    disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/error-pages', icon: AlertTriangle,  label: 'Error Pages',  disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/htaccess',    icon: FileCode,       label: '.htaccess',    disabled: !hasAccount, permission: 'files' },
     ]},
     { label: 'Databases', items: [
-      { to: '/portal/databases',   icon: Database, label: 'MySQL Databases', disabled: !hasAccount },
+      { to: '/portal/databases',   icon: Database, label: 'MySQL Databases', disabled: !hasAccount, permission: 'databases' },
     ]},
     { label: 'Email', items: [
-      { to: '/portal/email',         icon: Mail,       label: 'Email Accounts', disabled: !hasAccount },
-      { to: '/portal/email-extras',  icon: MailPlus,   label: 'Forwarders & Auto-reply', disabled: !hasAccount },
-      { to: '/portal/mail-auth',     icon: MailSearch, label: 'DKIM / SPF / DMARC', disabled: !hasAccount },
-      { to: '/portal/spam-rules',    icon: Filter,     label: 'Spam Rules',     disabled: !hasAccount },
-      { to: '/portal/webmail',       icon: MailOpen,   label: 'Webmail' },
+      { to: '/portal/email',         icon: Mail,       label: 'Email Accounts', disabled: !hasAccount, permission: 'email-accounts' },
+      { to: '/portal/email-extras',  icon: MailPlus,   label: 'Forwarders & Auto-reply', disabled: !hasAccount, permission: 'email-accounts' },
+      { to: '/portal/mail-auth',     icon: MailSearch, label: 'DKIM / SPF / DMARC', disabled: !hasAccount, permission: 'email-accounts' },
+      { to: '/portal/spam-rules',    icon: Filter,     label: 'Spam Rules',     disabled: !hasAccount, permission: 'email-accounts' },
+      { to: '/portal/webmail',       icon: MailOpen,   label: 'Webmail', permission: 'email-accounts' },
     ]},
     { label: 'Security', items: [
-      { to: '/portal/ssl',              icon: Lock,        label: 'SSL', disabled: !hasAccount },
-      { to: '/portal/htpasswd',         icon: Shield,      label: 'Protected Dirs', disabled: !hasAccount },
-      { to: '/portal/hotlink',          icon: ShieldAlert, label: 'Hotlink Protection', disabled: !hasAccount },
-      { to: '/portal/security-scanner', icon: ShieldAlert, label: 'Security Scanner', disabled: !hasAccount },
-      { to: '/portal/ssh-keys',         icon: Key,         label: 'SSH Keys' },
+      { to: '/portal/ssl',              icon: Lock,        label: 'SSL', disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/htpasswd',         icon: Shield,      label: 'Protected Dirs', disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/hotlink',          icon: ShieldAlert, label: 'Hotlink Protection', disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/security-scanner', icon: ShieldAlert, label: 'Security Scanner', disabled: !hasAccount, permission: 'files' },
+      { to: '/portal/ssh-keys',         icon: Key,         label: 'SSH Keys', permission: 'files' },
     ]},
     { label: 'Server', items: [
-      { to: '/portal/cron',     icon: Clock,       label: 'Cron Jobs' },
-      { to: '/portal/ftp',      icon: Upload,      label: 'FTP Accounts' },
-      { to: '/portal/stats',    icon: BarChart3,   label: 'Site Stats',     disabled: !hasAccount },
-      { to: '/portal/scripts',  icon: PackageOpen, label: 'Install WordPress', disabled: !hasAccount },
+      { to: '/portal/cron',     icon: Clock,       label: 'Cron Jobs', permission: 'files' },
+      { to: '/portal/ftp',      icon: Upload,      label: 'FTP Accounts', permission: 'ftp' },
+      { to: '/portal/stats',    icon: BarChart3,   label: 'Site Stats',     disabled: !hasAccount, permission: 'analytics' },
+      { to: '/portal/scripts',  icon: PackageOpen, label: 'Install WordPress', disabled: !hasAccount, permission: 'files' },
     ]},
     { label: 'Account', items: [
-      { to: '/portal/profile',  icon: User, label: 'Profile & 2FA' },
+      { to: '/portal/profile',  icon: User, label: 'Profile & 2FA', ownerOnly: true },
     ]},
-  ];
+  ].map(section => ({ ...section, items: section.items.filter(allowed) })).filter(section => section.items.length > 0);
 }
 
 function AccountSwitcher() {
@@ -106,10 +109,11 @@ function AccountSwitcher() {
 }
 
 export default function PortalSidebar() {
-  const { selectedAccount } = usePortalAuth();
+  const { selectedAccount, client } = usePortalAuth();
   const [logoUrl, setLogoUrl]   = useState<string | null>(null);
   const [panelName, setPanelName] = useState('Client Portal');
-  const sections = buildSections(!!selectedAccount);
+  const teamPerms = client?.team_user?.permissions || null;
+  const sections = buildSections(!!selectedAccount, teamPerms);
 
   useEffect(() => {
     // Plain fetch (no Authorization header, no auto-redirect on 401) — the
@@ -134,7 +138,7 @@ export default function PortalSidebar() {
         }
         <div className="min-w-0">
           <span className="text-[15px] font-bold text-white tracking-tight truncate block">{panelName}</span>
-          <span className="block text-[10px] text-slate-500 -mt-0.5 font-medium">Client Portal</span>
+          <span className="block text-[10px] text-slate-500 -mt-0.5 font-medium">{teamPerms ? 'Team Portal' : 'Client Portal'}</span>
         </div>
       </div>
 

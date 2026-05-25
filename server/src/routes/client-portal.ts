@@ -76,13 +76,53 @@ function jwtSecret() {
   return process.env.JWT_SECRET || 'hostpanel-secret-change-in-production';
 }
 
+const TEAM_PERMISSION_RULES: { re: RegExp; permission: string }[] = [
+  { re: /^\/invoices(?:\/|$)/, permission: 'billing' },
+  { re: /^\/domains\/[^/]+\/dns(?:\/|$)/, permission: 'dns' },
+  { re: /^\/email(?:\/|$)/, permission: 'email-accounts' },
+  { re: /^\/webmail(?:\/|$)/, permission: 'email-accounts' },
+  { re: /^\/mail-auth(?:\/|$)/, permission: 'email-accounts' },
+  { re: /^\/spam-rules(?:\/|$)/, permission: 'email-accounts' },
+  { re: /^\/ftp(?:\/|$)/, permission: 'ftp' },
+  { re: /^\/databases(?:\/|$)/, permission: 'databases' },
+  { re: /^\/backups(?:\/|$)/, permission: 'backup-wizard' },
+  { re: /^\/stats(?:\/|$)/, permission: 'analytics' },
+  { re: /^\/files(?:\/|$)/, permission: 'files' },
+  { re: /^\/sshkeys(?:\/|$)/, permission: 'files' },
+  { re: /^\/cron(?:\/|$)/, permission: 'files' },
+  { re: /^\/scripts(?:\/|$)/, permission: 'files' },
+  { re: /^\/subdomains(?:\/|$)/, permission: 'files' },
+  { re: /^\/redirects(?:\/|$)/, permission: 'files' },
+  { re: /^\/errpages(?:\/|$)/, permission: 'files' },
+  { re: /^\/htpasswd(?:\/|$)/, permission: 'files' },
+  { re: /^\/hotlink(?:\/|$)/, permission: 'files' },
+  { re: /^\/ssl(?:\/|$)/, permission: 'files' },
+  { re: /^\/whois(?:\/|$)/, permission: 'dns' },
+];
+
+function requiredTeamPermission(req: Request): string | null {
+  if (req.method === 'GET' && /^\/(me|accounts)(?:\/|$)/.test(req.path)) return null;
+  if (/^\/(totp|change-password)(?:\/|$)/.test(req.path)) return '__client_owner_only__';
+  return TEAM_PERMISSION_RULES.find(rule => rule.re.test(req.path))?.permission || '__unmapped_portal_route__';
+}
+
 function clientAuth(req: Request, res: Response, next: NextFunction) {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const payload = jwt.verify(auth.slice(7), jwtSecret(), { algorithms: ['HS256'] }) as any;
-    if (payload.role !== 'client') return res.status(403).json({ error: 'Forbidden' });
+    if (payload.role !== 'client' && payload.role !== 'client_team') return res.status(403).json({ error: 'Forbidden' });
     (req as any).clientId = payload.clientId;
+    if (payload.role === 'client_team') {
+      const team = db.prepare('SELECT id, status, permissions, account_id FROM team_users WHERE id = ?').get(payload.teamUserId) as any;
+      if (!team || team.status !== 'active') return res.status(403).json({ error: 'Team subaccount disabled' });
+      const permissions = JSON.parse(team.permissions || '[]') as string[];
+      const required = requiredTeamPermission(req);
+      if (required && !permissions.includes(required)) return res.status(403).json({ error: `Team subaccount lacks ${required} permission` });
+      (req as any).teamUserId = team.id;
+      (req as any).teamPermissions = permissions;
+      (req as any).teamAccountId = team.account_id || null;
+    }
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });
@@ -107,7 +147,27 @@ router.post('/login', async (req: Request, res: Response) => {
   const hashToTest = client?.password_hash || DUMMY_HASH;
   const valid = await bcrypt.compare(password, hashToTest);
   if (!client || !client.password_hash || !valid) {
-    return res.status(401).json(GENERIC_ERR);
+    const team: any = db.prepare(`
+      SELECT tu.*, COALESCE(tu.client_id, a.client_id) AS resolved_client_id, c.name AS client_name, c.email AS client_email
+      FROM team_users tu
+      LEFT JOIN accounts a ON a.id = tu.account_id
+      LEFT JOIN clients c ON c.id = COALESCE(tu.client_id, a.client_id)
+      WHERE (tu.email = ? OR tu.username = ?) AND tu.status = 'active'
+    `).get(email, email);
+    const teamHashToTest = team?.password_hash || DUMMY_HASH;
+    const teamValid = await bcrypt.compare(password, teamHashToTest);
+    if (!team || !team.resolved_client_id || !teamValid) return res.status(401).json(GENERIC_ERR);
+    db.prepare("UPDATE team_users SET last_login=datetime('now') WHERE id=?").run(team.id);
+    const permissions = JSON.parse(team.permissions || '[]');
+    const token = jwt.sign({
+      clientId: team.resolved_client_id,
+      email: team.email,
+      role: 'client_team',
+      teamUserId: team.id,
+      accountId: team.account_id || null,
+      permissions
+    }, jwtSecret(), { expiresIn: '8h' });
+    return res.json({ token, name: team.username, email: team.email, team_user: { id: team.id, username: team.username, permissions } });
   }
 
   const totp = db.prepare('SELECT * FROM client_totp WHERE client_id = ?').get(client.id) as any;
@@ -140,8 +200,11 @@ router.post('/login/totp', async (req: Request, res: Response) => {
 /* ── Client profile ──────────────────────────────────────── */
 
 router.get('/me', clientAuth, (req: Request, res: Response) => {
-  const client = db.prepare('SELECT id, name, email, phone, company, city, country, created_at FROM clients WHERE id = ?').get((req as any).clientId);
+  const client: any = db.prepare('SELECT id, name, email, phone, company, city, country, created_at FROM clients WHERE id = ?').get((req as any).clientId);
   if (!client) return res.status(404).json({ error: 'Not found' });
+  if ((req as any).teamUserId) {
+    client.team_user = { id: (req as any).teamUserId, permissions: (req as any).teamPermissions || [], account_id: (req as any).teamAccountId || null };
+  }
   res.json(client);
 });
 
@@ -242,9 +305,9 @@ router.get('/accounts', clientAuth, (req: Request, res: Response) => {
            p.email_accts, p.databases, p.ftp_accts
     FROM accounts a
     LEFT JOIN plans p ON a.plan_id = p.id
-    WHERE a.client_id = ?
+    WHERE a.client_id = ? AND (? IS NULL OR a.id = ?)
     ORDER BY a.created_at DESC
-  `).all((req as any).clientId);
+  `).all((req as any).clientId, (req as any).teamAccountId || null, (req as any).teamAccountId || null);
   res.json(rows);
 });
 
@@ -254,8 +317,8 @@ router.get('/accounts/:id', clientAuth, (req: Request, res: Response) => {
            p.email_accts, p.databases, p.ftp_accts
     FROM accounts a
     LEFT JOIN plans p ON a.plan_id = p.id
-    WHERE a.id = ? AND a.client_id = ?
-  `).get(req.params.id, (req as any).clientId);
+    WHERE a.id = ? AND a.client_id = ? AND (? IS NULL OR a.id = ?)
+  `).get(req.params.id, (req as any).clientId, (req as any).teamAccountId || null, (req as any).teamAccountId || null);
   if (!acc) return res.status(404).json({ error: 'Not found' });
   res.json(acc);
 });

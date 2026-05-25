@@ -11,6 +11,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 - **User Manager / team subaccounts**
   - API: `/api/team-users`, `/api/team-users/permissions`
   - Stores scoped subaccounts with hashed passwords, account/client associations, status, notes, and permission keys.
+  - Team subaccounts can log into the client portal with their own credentials.
+  - Client-portal team tokens are checked server-side against route permission groups before protected actions run.
+  - Client-portal team navigation is filtered to assigned permission groups.
 
 - **WHM-style feature catalog / feature lists**
   - API: `/api/feature-lists/catalog`, `/api/feature-lists`, `/api/feature-lists/effective/:planId`, `/api/feature-lists/assign-plan`, `/api/feature-lists/reseller/:id`
@@ -53,7 +56,7 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 
 These areas need deeper production hardening beyond the new API/UI foundations:
 
-- Team subaccount authentication into the client portal and route-level enforcement across every client-facing API.
+- Remaining team subaccount hardening: account-level domain/resource narrowing for every portal route and audit log attribution with team user IDs.
 - Feature-list enforcement middleware on existing account, reseller, portal, and navigation actions.
 - WebDAV password-file management and automated Apache/Nginx DAV package/service provisioning.
 - Backup wizard restore dry-run UI and selective restore execution.
