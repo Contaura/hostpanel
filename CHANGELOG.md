@@ -4,6 +4,11 @@ All notable changes to HostPanel are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added `docs/cpanel-comparison.md` comparing HostPanel with cPanel/WHM for end-user and administrator functionality, including a prioritized gap list.
+- Added a cPanel-style Address Importer in Email Extras for bulk CSV import of email forwarders with duplicate skipping and row-level validation feedback.
+
 ### Fixed
 
 - Cache Manager now uses the actual cache API response schema for OPcache, Redis, and Memcached status/details, and sends Redis start/stop requests to the implemented `/api/cache/redis/toggle` endpoint instead of non-existent placeholder action URLs.

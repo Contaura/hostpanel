@@ -1,9 +1,9 @@
 import { useState, useEffect, Fragment } from 'react';
 import axios from 'axios';
 import { useToast } from '../components/Toast';
-import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil, Search } from 'lucide-react';
+import { Plus, Trash2, Mail, ToggleLeft, ToggleRight, Forward, Shield, Pencil, Search, Upload } from 'lucide-react';
 
-type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all';
+type Tab = 'forwarders' | 'autoresponders' | 'spam' | 'quotas' | 'domain-spam' | 'catch-all' | 'address-importer';
 
 interface Forwarder { source: string; dest: string }
 interface Autoresponder { id: number; email: string; subject: string; body: string; start_date: string; end_date: string; enabled: number }
@@ -51,6 +51,11 @@ export default function EmailExtras() {
   const [arSearch, setArSearch] = useState('');
   const [caSearch, setCaSearch] = useState('');
 
+  // Address importer
+  const [importCsv, setImportCsv] = useState('source,destination\nsales@example.com,team@example.net');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number; errors: { row: number; error: string; value: string }[] } | null>(null);
+
   // Delete tracking
   const [deleting, setDeleting] = useState<string | number | null>(null);
   const [addingSpamRule, setAddingSpamRule] = useState(false);
@@ -95,6 +100,21 @@ export default function EmailExtras() {
     try { await del(`/api/email-extras/forwarders/${encodeURIComponent(source)}`); success('Deleted'); loadTab('forwarders'); }
     catch (e: any) { error(e.response?.data?.error || 'Failed'); }
     finally { setDeleting(null); }
+  }
+
+  async function importForwarders() {
+    if (!importCsv.trim()) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const r = await post('/api/email-extras/import/forwarders', { csv: importCsv });
+      setImportResult(r.data);
+      success(`Imported ${r.data.imported} forwarder${r.data.imported === 1 ? '' : 's'}`);
+      loadTab('forwarders');
+    } catch (e: any) {
+      if (e.response?.data) setImportResult(e.response.data);
+      error(e.response?.data?.error || 'Import failed');
+    } finally { setImporting(false); }
   }
 
   async function saveAutoresponder() {
@@ -148,6 +168,7 @@ export default function EmailExtras() {
     { id: 'quotas', label: 'Disk Quotas', icon: Mail },
     { id: 'domain-spam', label: 'Per-Domain Rules', icon: Shield },
     { id: 'catch-all', label: 'Catch-All', icon: Mail },
+    { id: 'address-importer', label: 'Address Importer', icon: Upload },
   ];
 
   return (
@@ -432,6 +453,56 @@ export default function EmailExtras() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {tab === 'address-importer' && (
+        <div className="space-y-4">
+          <div className="card p-4 space-y-4">
+            <div>
+              <h3 className="font-semibold text-sm text-slate-900 dark:text-slate-100">Address Importer</h3>
+              <p className="text-xs text-slate-500 mt-1">Bulk import cPanel-style email forwarders from CSV. Use columns <code>source,destination</code>; quoted CSV values are supported.</p>
+            </div>
+            <textarea
+              className="input font-mono text-xs min-h-48 w-full"
+              value={importCsv}
+              onChange={e => setImportCsv(e.target.value)}
+              spellCheck={false}
+              placeholder="source,destination&#10;sales@example.com,team@example.net"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-primary" disabled={importing || !importCsv.trim()} onClick={importForwarders}>
+                <Upload size={14} /> {importing ? 'Importing…' : 'Import forwarders'}
+              </button>
+              <button type="button" className="btn-secondary" onClick={() => { setImportCsv('source,destination\nsales@example.com,team@example.net'); setImportResult(null); }}>Reset sample</button>
+            </div>
+          </div>
+
+          {importResult && (
+            <div className="card p-4 space-y-3">
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div><p className="text-xs text-slate-500">Imported</p><p className="font-semibold text-emerald-600">{importResult.imported ?? 0}</p></div>
+                <div><p className="text-xs text-slate-500">Skipped duplicates</p><p className="font-semibold">{importResult.skipped ?? 0}</p></div>
+                <div><p className="text-xs text-slate-500">Rows with errors</p><p className="font-semibold text-amber-600">{importResult.errors?.length ?? 0}</p></div>
+              </div>
+              {importResult.errors?.length > 0 && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-900 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead><tr><th className="table-header-cell">Row</th><th className="table-header-cell">Error</th><th className="table-header-cell">Value</th></tr></thead>
+                    <tbody>
+                      {importResult.errors.map(err => (
+                        <tr key={`${err.row}-${err.value}`} className="border-t border-amber-100 dark:border-amber-900">
+                          <td className="table-cell font-mono">{err.row}</td>
+                          <td className="table-cell">{err.error}</td>
+                          <td className="table-cell font-mono break-all">{err.value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       </>

@@ -62,6 +62,80 @@ router.delete('/forwarders/:source', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
+/* ── Address Importer (cPanel-style CSV forwarder import) ─── */
+
+const IMPORT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type ImportRowError = { row: number; error: string; value: string };
+
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { current += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      fields.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+function looksLikeHeader(fields: string[]) {
+  const first = fields[0]?.toLowerCase() || '';
+  const second = fields[1]?.toLowerCase() || '';
+  return ['source', 'from', 'email', 'address'].includes(first) && ['destination', 'dest', 'to', 'forward_to'].includes(second);
+}
+
+router.post('/import/forwarders', async (req: Request, res: Response) => {
+  const csv = typeof req.body?.csv === 'string' ? req.body.csv : '';
+  if (!csv.trim()) return res.status(400).json({ error: 'CSV content required' });
+
+  const existing = readForwarders();
+  const seen = new Set(existing.map(f => f.source.toLowerCase()));
+  const imported: { source: string; dest: string }[] = [];
+  const errors: ImportRowError[] = [];
+  let skipped = 0;
+
+  const lines: string[] = csv.split(/\r?\n/);
+  lines.forEach((line: string, index: number) => {
+    const rowNumber = index + 1;
+    if (!line.trim()) return;
+    const fields = parseCsvLine(line);
+    if (rowNumber === 1 && looksLikeHeader(fields)) return;
+    const [source, dest] = fields;
+    if (!IMPORT_EMAIL_RE.test(source || '') || !IMPORT_EMAIL_RE.test(dest || '')) {
+      errors.push({ row: rowNumber, error: 'Invalid source or destination email', value: line });
+      return;
+    }
+    const key = source.toLowerCase();
+    if (seen.has(key)) {
+      skipped += 1;
+      return;
+    }
+    seen.add(key);
+    imported.push({ source, dest });
+  });
+
+  if (imported.length === 0) {
+    return res.status(400).json({ error: 'No valid forwarders to import', imported: 0, skipped, errors });
+  }
+
+  try {
+    writeForwarders([...existing, ...imported]);
+    await runFile('postmap', [VIRTUAL_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
+    res.json({ imported: imported.length, skipped, errors });
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
 /* ── Autoresponders (stored in SQLite) ───────────────────── */
 
 router.get('/autoresponders', (_req: Request, res: Response) => {
