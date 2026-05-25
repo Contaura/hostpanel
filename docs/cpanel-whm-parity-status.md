@@ -33,9 +33,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - Reports git update state, npm audit metadata when available, and plugin manifests from a controlled plugin directory.
   - Installs `.tgz` plugin packages only after sha256/package verification, snapshots existing plugin directories before changes, supports enable/disable, and can roll back to the latest saved snapshot.
 
-- **Web Disk / WebDAV foundation**
-  - API: `/api/webdav`, `/api/webdav/config-preview`, `/api/webdav/reload`
-  - Stores WebDAV account metadata, validates paths under `/var/www`, and previews Apache DAV config before reload.
+- **Web Disk / WebDAV**
+  - API: `/api/webdav`, `/api/webdav/provision`, `/api/webdav/config-preview`, `/api/webdav/reload`
+  - Stores WebDAV account metadata, validates paths under `/var/www`, maintains htpasswd-compatible password entries, writes managed Apache DAV config, provisions Apache/httpd-tools packages, and reloads httpd.
 
 - **DNS clustering and nameserver automation**
   - API: `/api/dns-cluster/nodes`, `/api/dns-cluster/health-check`, `/api/dns-cluster/sync-preview`, `/api/dns-cluster/sync`, `/api/dns-cluster/nameserver-plan`
@@ -60,7 +60,6 @@ These areas need deeper production hardening beyond the new API/UI foundations:
 
 - Remaining team subaccount hardening: account-level domain/resource narrowing for every portal route and audit log attribution with team user IDs.
 - Feature-list enforcement middleware on existing account, reseller, portal, and navigation actions.
-- WebDAV password-file management and automated Apache/Nginx DAV package/service provisioning.
 - Backup wizard restore dry-run UI and selective restore execution.
 - phpMyAdmin SSO-style handoff is not implemented; current behavior is package install/detection plus account/database-scoped launch links.
 

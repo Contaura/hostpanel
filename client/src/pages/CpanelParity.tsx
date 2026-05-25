@@ -57,7 +57,8 @@ export default function CpanelParity() {
   async function assignPlan() { await post('/api/feature-lists/assign-plan', { planId: Number(form.planId), featureListId: Number(form.featureListId) }); toast.success('Plan feature list assigned'); load(); }
   async function searchMail() { const data = await json(`/api/mail-trace/search?limit=100&recipient=${encodeURIComponent(form.mailQuery || '')}&sender=${encodeURIComponent(form.mailQuery || '')}`); setMailEvents(data.events || []); }
   async function runBackup() { await post('/api/backup/create', { type: form.backupType, target: form.backupTarget || undefined }); toast.success('Backup job completed'); load(); }
-  async function saveWebdav() { await post('/api/webdav', { username: form.webdavUser, home: form.webdavHome, domain: form.webdavDomain || '', permissions: form.webdavPerm || 'rw' }); toast.success('WebDAV account saved'); load(); }
+  async function saveWebdav() { await post('/api/webdav', { username: form.webdavUser, home: form.webdavHome, domain: form.webdavDomain || '', permissions: form.webdavPerm || 'rw', password: form.webdavPassword || undefined }); toast.success('WebDAV account saved'); set('webdavPassword',''); load(); }
+  async function provisionWebdav() { await post('/api/webdav/provision', {}); toast.success('WebDAV packages/config provisioned'); load(); }
   async function saveDnsNode() { await post('/api/dns-cluster/nodes', { name: form.dnsName, host: form.dnsHost, role: 'secondary', tsig_name: form.dnsTsigName || '', tsig_secret: form.dnsTsigSecret || '' }); toast.success('DNS cluster node saved'); set('dnsTsigSecret',''); load(); }
   async function previewDnsSync() { const data = await post('/api/dns-cluster/sync-preview', { domain: form.nsDomain }); setDnsSync(data); }
   async function runDnsSync() { const data = await post('/api/dns-cluster/sync', { domain: form.nsDomain }); setDnsSync(data); toast.success('DNS sync requested'); load(); }
@@ -100,7 +101,8 @@ export default function CpanelParity() {
     </Panel>
 
     <Panel title="6. Web Disk / WebDAV">
-      <div className="grid md:grid-cols-4 gap-3"><Text value={form.webdavUser || ''} onChange={v=>set('webdavUser',v)} placeholder="webdav username"/><Text value={form.webdavHome || ''} onChange={v=>set('webdavHome',v)} placeholder="/var/www/domain/public_html"/><Text value={form.webdavDomain || ''} onChange={v=>set('webdavDomain',v)} placeholder="domain"/><button className="btn-primary" onClick={saveWebdav}>Save WebDAV Account</button></div>
+      <div className="grid md:grid-cols-5 gap-3"><Text value={form.webdavUser || ''} onChange={v=>set('webdavUser',v)} placeholder="webdav username"/><Text value={form.webdavPassword || ''} onChange={v=>set('webdavPassword',v)} placeholder="new/reset password" type="password"/><Text value={form.webdavHome || ''} onChange={v=>set('webdavHome',v)} placeholder="/var/www/domain/public_html"/><Text value={form.webdavDomain || ''} onChange={v=>set('webdavDomain',v)} placeholder="domain"/><button className="btn-primary" onClick={saveWebdav}>Save WebDAV Account</button></div>
+      <button className="btn-secondary" onClick={provisionWebdav}>Provision Apache DAV + reload</button>
       <div className="text-sm text-slate-500">Accounts: {webdav.map(w=>`${w.username}:${w.home}`).join(' • ') || 'None'}</div>
     </Panel>
 

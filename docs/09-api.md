@@ -207,6 +207,19 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## WebDAV
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/webdav` | List WebDAV accounts |
+| `POST` | `/api/webdav` | Create/update WebDAV account, password file, and Apache config |
+| `POST` | `/api/webdav/provision` | Install/enable Apache DAV prerequisites, render config, reload httpd |
+| `GET` | `/api/webdav/config-preview` | Preview generated Apache DAV config |
+| `POST` | `/api/webdav/reload` | Re-render config and reload httpd |
+| `DELETE` | `/api/webdav/:id` | Remove WebDAV account/password entry and reload config |
+
+---
+
 ## Extensions / Plugins
 
 | Method | Path | Description |

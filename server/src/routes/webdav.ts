@@ -86,7 +86,28 @@ async function reloadHttpd() {
   return { reloaded: !result.stderr, output: result.stdout || result.stderr };
 }
 
+async function provisionWebdavPackages() {
+  const actions: any[] = [];
+  const installs = [
+    ['dnf', ['install', '-y', 'httpd', 'httpd-tools'], 'Install Apache/httpd-tools for DAV and htpasswd'],
+    ['systemctl', ['enable', '--now', 'httpd'], 'Enable and start httpd'],
+  ];
+  for (const [cmd, args, description] of installs as [string, string[], string][]) {
+    const result = await runFile(cmd, args, { timeout: 300000 }).catch((e: any) => ({ stdout: '', stderr: e.message || String(e) }));
+    actions.push({ command: `${cmd} ${args.join(' ')}`, description, success: !result.stderr, output: result.stdout || result.stderr });
+  }
+  await renderConfig();
+  actions.push({ command: `write ${WEBDAV_CONF_FILE}`, description: 'Render managed WebDAV Apache config', success: true });
+  actions.push({ command: 'systemctl reload httpd', description: 'Reload httpd', ...(await reloadHttpd()) });
+  return actions;
+}
+
 router.get('/', (_req: Request, res: Response) => res.json(db.prepare('SELECT id, username, home, domain, enabled, permissions, created_at, updated_at FROM webdav_accounts ORDER BY username').all()));
+
+router.post('/provision', async (_req: Request, res: Response) => {
+  try { res.json({ provisioned: true, actions: await provisionWebdavPackages() }); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
+});
 
 router.post('/', async (req: Request, res: Response) => {
   const { username, home, enabled = 1, permissions = 'rw', password } = req.body || {};
