@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "vitest run src"
   },
   "dependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -49,6 +50,7 @@
     "@types/pg": "^8.11.5",
     "@types/uuid": "^9.0.8",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.7"
   }
 }

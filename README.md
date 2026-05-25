@@ -152,6 +152,7 @@ See the full documentation in [`docs/`](docs/):
 - [Client Portal](docs/08-client-portal.md)
 - [API Reference](docs/09-api.md)
 - [Upgrade & Backup](docs/10-upgrade.md)
+- [Production Readiness Log](docs/11-production-readiness.md)
 
 ---
 
