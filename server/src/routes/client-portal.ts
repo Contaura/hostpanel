@@ -8,6 +8,7 @@ import { existsSync } from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
 import db from '../db';
+import { requireClientFeature } from './feature-lists';
 import { registerDkimKey } from '../utils/opendkim';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
@@ -110,6 +111,30 @@ function requiredTeamPermission(req: Request): string | null {
   return TEAM_PERMISSION_RULES.find(rule => rule.re.test(req.path))?.permission || '__unmapped_portal_route__';
 }
 
+const PORTAL_FEATURE_RULES: { re: RegExp; feature: string }[] = [
+  { re: /^\/email(?:\/|$)/, feature: 'email-accounts' },
+  { re: /^\/webmail(?:\/|$)/, feature: 'email-accounts' },
+  { re: /^\/mail-auth(?:\/|$)/, feature: 'email-accounts' },
+  { re: /^\/spam-rules(?:\/|$)/, feature: 'email-accounts' },
+  { re: /^\/backups(?:\/|$)/, feature: 'backup-wizard' },
+  { re: /^\/stats(?:\/|$)/, feature: 'analytics' },
+  { re: /^\/files(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/sshkeys(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/cron(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/scripts(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/subdomains(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/redirects(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/errpages(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/htpasswd(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/hotlink(?:\/|$)/, feature: 'file-manager' },
+  { re: /^\/ssl(?:\/|$)/, feature: 'file-manager' },
+];
+
+function requiredPortalFeature(req: Request): string | null {
+  if (/^\/(login|me|accounts|totp|change-password)(?:\/|$)/.test(req.path)) return null;
+  return PORTAL_FEATURE_RULES.find(rule => rule.re.test(req.path))?.feature || null;
+}
+
 function clientAuth(req: Request, res: Response, next: NextFunction) {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
@@ -137,6 +162,8 @@ function clientAuth(req: Request, res: Response, next: NextFunction) {
         details: { role: 'client_team', team_user_id: team.id, client_id: payload.clientId, account_id: team.account_id || null }
       };
     }
+    const feature = requiredPortalFeature(req);
+    if (feature) return requireClientFeature(feature)(req, res, next);
     next();
   } catch {
     res.status(401).json({ error: 'Invalid or expired token' });

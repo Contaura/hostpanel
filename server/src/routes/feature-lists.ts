@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import db from '../db';
 
 const router = Router();
@@ -55,6 +55,66 @@ function parseRow(row: any) { return { ...row, features: JSON.parse(row.features
 function cleanFeatures(features: unknown): string[] {
   const valid = new Set(FEATURE_CATALOG.map(f => f.key));
   return Array.isArray(features) ? [...new Set(features.map(String))].filter(f => valid.has(f)) : [];
+}
+
+export function allFeatureKeys(): string[] { return FEATURE_CATALOG.map(f => f.key); }
+
+export function effectivePlanFeatures(planId: number | string | null | undefined): string[] {
+  if (!planId) return allFeatureKeys();
+  const row: any = db.prepare(`SELECT fl.features FROM plan_feature_lists pfl JOIN feature_lists fl ON fl.id=pfl.feature_list_id WHERE pfl.plan_id=?`).get(planId);
+  return row ? cleanFeatures(JSON.parse(row.features || '[]')) : allFeatureKeys();
+}
+
+export function accountHasFeature(accountId: number | string | null | undefined, feature: string): boolean {
+  if (!accountId) return true;
+  const account: any = db.prepare('SELECT plan_id FROM accounts WHERE id=?').get(accountId);
+  if (!account) return false;
+  return effectivePlanFeatures(account.plan_id).includes(feature);
+}
+
+export function clientHasAnyAccountFeature(clientId: number | string | null | undefined, feature: string): boolean {
+  if (!clientId) return false;
+  const accounts = db.prepare('SELECT id, plan_id FROM accounts WHERE client_id=?').all(clientId) as any[];
+  if (!accounts.length) return true;
+  return accounts.some(a => effectivePlanFeatures(a.plan_id).includes(feature));
+}
+
+export function resellerFeatureKeysForUsername(username: string | undefined): string[] {
+  if (!username) return [];
+  const reseller: any = db.prepare(`SELECT r.id FROM resellers r JOIN admin_users u ON u.id=r.admin_user_id WHERE u.username=?`).get(username);
+  if (!reseller) return [];
+  const row: any = db.prepare('SELECT features FROM reseller_privileges WHERE reseller_id=?').get(reseller.id);
+  return row ? cleanFeatures(JSON.parse(row.features || '[]')) : allFeatureKeys();
+}
+
+export function enforceResellerPrivilege(feature: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user;
+    if (user?.role !== 'reseller') return next();
+    const allowed = resellerFeatureKeysForUsername(user.username);
+    if (!allowed.includes(feature)) return res.status(403).json({ error: `Reseller lacks ${feature} privilege` });
+    next();
+  };
+}
+
+export function requireClientFeature(feature: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const accountId = (req as any).teamAccountId || accountIdFromPortalRequest(req);
+    const ok = accountId ? accountHasFeature(accountId, feature) : clientHasAnyAccountFeature((req as any).clientId, feature);
+    if (!ok) return res.status(403).json({ error: `Feature disabled for this account: ${feature}` });
+    next();
+  };
+}
+
+function accountIdFromPortalRequest(req: Request): number | null {
+  const explicit = req.params?.id || req.body?.accountId || req.query?.accountId;
+  if (explicit && /^\d+$/.test(String(explicit))) return Number(explicit);
+  const domain = req.params?.domain || req.body?.domain || req.query?.domain;
+  if (typeof domain === 'string' && domain) {
+    const account: any = db.prepare('SELECT id FROM accounts WHERE domain=? AND client_id=?').get(domain, (req as any).clientId);
+    return account?.id || null;
+  }
+  return null;
 }
 
 router.get('/catalog', (_req: Request, res: Response) => res.json({ features: FEATURE_CATALOG, groups: groups() }));

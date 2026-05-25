@@ -58,7 +58,7 @@ import nodeAppsRoutes        from './routes/node-apps';
 import serverInfoRoutes      from './routes/server-info';
 import mailToolsRoutes       from './routes/mail-tools';
 import securityScannerRoutes from './routes/security-scanner';
-import featureListsRoutes    from './routes/feature-lists';
+import featureListsRoutes, { enforceResellerPrivilege } from './routes/feature-lists';
 import mailTraceRoutes       from './routes/mail-trace';
 import analyticsRoutes       from './routes/analytics';
 import extensionsRoutes      from './routes/extensions';
@@ -164,8 +164,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/stats', authenticateToken, statsRoutes);
 
 // Files & Storage
-app.use('/api/files',  authenticateToken, fileRoutes);
-app.use('/api/backup', authenticateToken, backupRoutes);
+app.use('/api/files',  authenticateToken, enforceResellerPrivilege('file-manager'), fileRoutes);
+app.use('/api/backup', authenticateToken, enforceResellerPrivilege('backup-wizard'), backupRoutes);
 
 // Domains & Web
 app.use('/api/domains',     authenticateToken, domainRoutes);
@@ -175,11 +175,11 @@ app.use('/api/errpages',    authenticateToken, errpageRoutes);
 app.use('/api/web',         authenticateToken, webExtrasRoutes);
 
 // Databases
-app.use('/api/databases', authenticateToken, databaseRoutes);
+app.use('/api/databases', authenticateToken, enforceResellerPrivilege('phpmyadmin'), databaseRoutes);
 
 // Email
-app.use('/api/email',       authenticateToken, emailRoutes);
-app.use('/api/email-extras', authenticateToken, emailExtrasRoutes);
+app.use('/api/email',       authenticateToken, enforceResellerPrivilege('email-accounts'), emailRoutes);
+app.use('/api/email-extras', authenticateToken, enforceResellerPrivilege('address-importer'), emailExtrasRoutes);
 
 // Security
 app.use('/api/ssh-keys',        authenticateToken, sshkeyRoutes);
@@ -207,7 +207,7 @@ app.use('/api/admin-users',  authenticateToken, adminUsersRoutes);
 app.use('/api/api-tokens',   authenticateToken, apiTokensRoutes);
 
 // Hosting & Billing
-app.use('/api/accounts', authenticateToken, accountRoutes);
+app.use('/api/accounts', authenticateToken, enforceResellerPrivilege('feature-lists'), accountRoutes);
 app.use('/api/billing',  authenticateToken, billingRoutes);
 
 // Client portal — public routes (login uses clientAuth internally; me/invoices use clientAuth inside the router)
@@ -258,14 +258,14 @@ app.use('/api/mail-tools',        authenticateToken, mailToolsRoutes);
 app.use('/api/security-scanner',  authenticateToken, securityScannerRoutes);
 
 // cPanel/WHM parity foundations
-app.use('/api/feature-lists', authenticateToken, featureListsRoutes);
-app.use('/api/mail-trace',    authenticateToken, mailTraceRoutes);
-app.use('/api/analytics',     authenticateToken, analyticsRoutes);
-app.use('/api/extensions',    authenticateToken, extensionsRoutes);
-app.use('/api/team-users',    authenticateToken, teamUsersRoutes);
-app.use('/api/webdav',        authenticateToken, webdavRoutes);
-app.use('/api/dns-cluster',   authenticateToken, dnsClusterRoutes);
-app.use('/api/transfer-import', authenticateToken, transferImportRoutes);
+app.use('/api/feature-lists', authenticateToken, enforceResellerPrivilege('feature-lists'), featureListsRoutes);
+app.use('/api/mail-trace',    authenticateToken, enforceResellerPrivilege('mail-trace'), mailTraceRoutes);
+app.use('/api/analytics',     authenticateToken, enforceResellerPrivilege('analytics'), analyticsRoutes);
+app.use('/api/extensions',    authenticateToken, enforceResellerPrivilege('plugins'), extensionsRoutes);
+app.use('/api/team-users',    authenticateToken, enforceResellerPrivilege('team-users'), teamUsersRoutes);
+app.use('/api/webdav',        authenticateToken, enforceResellerPrivilege('webdav'), webdavRoutes);
+app.use('/api/dns-cluster',   authenticateToken, enforceResellerPrivilege('dns-clustering'), dnsClusterRoutes);
+app.use('/api/transfer-import', authenticateToken, enforceResellerPrivilege('transfer-tool'), transferImportRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.
