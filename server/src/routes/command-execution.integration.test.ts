@@ -311,4 +311,146 @@ describe('high-risk route command execution integration', () => {
     db.prepare('DELETE FROM php_domain_versions').run();
   });
 
+  it('runs backup create with tar argv, not shell', async () => {
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    await fs.mkdir(process.env.BACKUP_DIR, { recursive: true });
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const server = await appFor('/api/backup', './backup');
+    closeServer = server.close;
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-czf') {
+        await fs.writeFile(args[1], 'fake');
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const res = await fetch(`${server.url}/api/backup/create`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'files' }),
+    });
+    expect(res.status).toBe(200);
+    const tarCall = runFileMock.mock.calls.find(c => c[0] === 'tar' && (c[1] as string[])[0] === '-czf');
+    expect(tarCall).toBeTruthy();
+    const args = tarCall![1] as string[];
+    expect(args[0]).toBe('-czf');
+    expect(args[2]).toBe('-C');
+    expect(args[3]).toBe(path.resolve(process.env.WEBROOT!));
+    expect(args[4]).toBe('.');
+  });
+
+  it('runs backup restore with tar argv when restoring a tar.gz', async () => {
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.BACKUP_DIR, { recursive: true });
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const backupFile = path.join(process.env.BACKUP_DIR, 'files_all_2024-01-01T00-00-00.tar.gz');
+    await fs.writeFile(backupFile, 'fake');
+    const server = await appFor('/api/backup', './backup');
+    closeServer = server.close;
+    const res = await fetch(`${server.url}/api/backup/restore/files_all_2024-01-01T00-00-00.tar.gz`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('tar', ['-xzf', backupFile, '-C', process.env.WEBROOT], { timeout: 300000 });
+  });
+
+  it('installs composer-based scripts via runFile argv', async () => {
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const server = await appFor('/api/scripts', './scripts');
+    closeServer = server.close;
+    const res = await fetch(`${server.url}/api/scripts/install`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ script: 'laravel', domain: 'example.com' }),
+    });
+    expect(res.status).toBe(200);
+    const installPath = path.join(process.env.WEBROOT, 'example.com', 'public_html');
+    expect(runFileMock).toHaveBeenCalledWith(
+      'composer',
+      ['create-project', 'laravel/laravel', installPath, '--no-interaction'],
+      { timeout: 300000 },
+    );
+  });
+
+  it('scripts install rejects WordPress without DB credentials before any command runs', async () => {
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const server = await appFor('/api/scripts', './scripts');
+    closeServer = server.close;
+    const res = await fetch(`${server.url}/api/scripts/install`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ script: 'wordpress', domain: 'example.com' }),
+    });
+    expect(res.status).toBe(400);
+    expect(runFileMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects ssl-advanced wildcard issuance when the configured company email is malformed', async () => {
+    const envFile = path.join(tmp, 'hostpanel.env');
+    process.env.HOSTPANEL_ENV_FILE = envFile;
+    await fs.writeFile(envFile, 'company_email=bad;rm -rf /\n');
+    const server = await appFor('/api/ssl-advanced', './ssl-advanced');
+    closeServer = server.close;
+    const bad = await fetch(`${server.url}/api/ssl-advanced/wildcard`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'example.com', dns_plugin: 'cloudflare' }),
+    });
+    expect(bad.status).toBe(400);
+    expect(runFileMock).not.toHaveBeenCalled();
+
+    await fs.writeFile(envFile, 'company_email=ops@example.com\n');
+    const ok = await fetch(`${server.url}/api/ssl-advanced/wildcard`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ domain: 'example.com', dns_plugin: 'cloudflare' }),
+    });
+    expect(ok.status).toBe(200);
+    const callArgs = runFileMock.mock.calls.find(c => c[0] === 'certbot');
+    expect(callArgs).toBeDefined();
+    expect(callArgs![1]).toEqual(expect.arrayContaining([
+      'certonly', '--dns-cloudflare', '-d', 'example.com', '-d', '*.example.com',
+      '--non-interactive', '--agree-tos', '--email', 'ops@example.com',
+    ]));
+    for (const a of callArgs![1] as string[]) {
+      expect(a).not.toMatch(/[;&|`$()]/);
+    }
+  });
+
+  it('routes WP-CLI through runFile with --path argv (no shell string)', async () => {
+    process.env.WEBROOT = path.join(tmp, 'www');
+    await fs.mkdir(process.env.WEBROOT, { recursive: true });
+    const server = await appFor('/api/wordpress', './wordpress');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+    const res = await fetch(`${server.url}/api/wordpress/example.com/info`);
+    expect(res.status).toBe(200);
+    const expectedPath = path.join(process.env.WEBROOT!, 'example.com', 'public_html');
+    expect(runFileMock).toHaveBeenCalledWith(
+      'wp',
+      [`--path=${expectedPath}`, '--allow-root', 'core', 'version'],
+      expect.objectContaining({ timeout: 60000 }),
+    );
+    for (const call of runFileMock.mock.calls) {
+      if (call[0] === 'wp') {
+        for (const a of call[1] as string[]) {
+          expect(a).not.toMatch(/\s2>&1$/);
+          expect(a).not.toMatch(/[;&|`$()]/);
+        }
+      }
+    }
+  });
+
+  it('runs pm2 jlist with argv runFile when listing apps', async () => {
+    const server = await appFor('/api/apps', './apps');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: '[]', stderr: '' });
+    const res = await fetch(`${server.url}/api/apps/`);
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('pm2', ['jlist']);
+  });
+
+  it('removes promisify(exec) from reseller route source', async () => {
+    const src = await fs.readFile(path.resolve(__dirname, 'reseller.ts'), 'utf8');
+    expect(src).not.toMatch(/promisify\s*\(\s*exec\s*\)/);
+    expect(src).not.toMatch(/require\(['"]child_process['"]\)/);
+    expect(src).not.toMatch(/\bexecAsync\b/);
+  });
+
 });

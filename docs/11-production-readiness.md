@@ -217,3 +217,27 @@ Converted the remaining set of legacy `execAsync()`/`promisify(exec)` route modu
 
 ### Remaining follow-up
 Legacy `execAsync()` still lives in larger/older modules: `accounts.ts`, `backup.ts`, `client-portal.ts`, `cron.ts`, `dkim.ts` (already converted), `email.ts`, `scripts.ts`, `ssl-advanced.ts`, `wordpress.ts`, `apps.ts`, `reseller.ts`. These should be converted route-by-route with endpoint tests in a future pass.
+
+## Fourth shell-execution hardening pass (partial)
+
+Converted to argv-based execution via `runFile` (and Node primitives where shell pipelines were involved):
+
+- `server/src/routes/cron.ts` — `crontab -l/-u`, `id`. The `/api/cron/run` admin endpoint intentionally retains `spawn("sh", ["-c", command], { shell: false })` because admins legitimately need shell features in cron commands; the endpoint is gated to superadmin/admin.
+- `server/src/routes/email.ts` — `cat` → `fs.readFile`; `sed -i` → exact line-equality filter in Node; `postmap`, `chown`, `chmod` argv.
+- `server/src/routes/backup.ts` — `tar -czf/-xzf` argv; mysqldump|gzip and gunzip|mysql replaced with spawn + zlib piping; `crontab` argv; remote push (`aws`/`b2`/`rclone`) argv.
+- `server/src/routes/scripts.ts` — `composer create-project`, `unzip`, `tar -xjf/-xzf`, `cp -r`, `chown -R`, `find -exec chmod`, wp-cli all argv; `curl` → native `fetch`; `rm -rf` → `fs.rm`.
+- `server/src/routes/ssl-advanced.ts` — `apachectl graceful`, `certbot certonly/certificates/renew`, `openssl req` argv; subject components sanitized; `cat` → `fs.readFile`; `rm -f` → `fs.rm`; `mkdir -p` → `fs.mkdir`; `curl` → `fetch` w/AbortController; the `s_client | x509` pipeline was replaced with `tls.connect` + `spawn("openssl", ["x509", ...])` with PEM piped via stdin.
+- `server/src/routes/wordpress.ts` — `wp(domain, args[])` helper refactored to runFile argv (13 callers updated); `find` argv; `crontab` argv.
+- `server/src/routes/apps.ts` — `pm2 jlist`, `apachectl graceful` argv.
+- `server/src/routes/reseller.ts` — removed `promisify(exec)`; `du -sb` argv with per-account domain validation.
+
+Added 11 new integration tests covering crontab argv, mail account/forwarder argv flows, tar/mysqldump backup paths, scripts composer install, ssl-advanced certbot email validation, wordpress `wp` argv helper, apps pm2 jlist argv, and reseller import hygiene.
+
+### Validation
+- `npm run test --workspace=server` — 9 files / 52 tests passed
+- `npm run build` — passed
+- `npm audit --omit=dev --audit-level=moderate` — 0 vulnerabilities
+- Grep `execAsync|promisify(exec)` over the 8 converted files — clean
+
+### Remaining
+`accounts.ts` and `client-portal.ts` retain legacy `execAsync()` call sites and will be converted in a follow-up pass (each route-by-route with endpoint tests).

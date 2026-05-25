@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import path from 'path';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 // Every mutating endpoint here shells out to pm2 via execFile. If pm2 isn't
 // installed (fresh box that hasn't run the install.sh npm step yet) the
@@ -19,7 +20,6 @@ function pm2NotInstalled(res: Response): boolean {
 }
 
 const router = Router();
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 
@@ -51,7 +51,7 @@ router.get('/', async (_req: Request, res: Response) => {
 
   // Enrich with live PM2 status
   try {
-    const { stdout } = await execAsync('pm2 jlist 2>/dev/null');
+    const { stdout } = await runFile('pm2', ['jlist']);
     const pm2list: any[] = JSON.parse(stdout);
     for (const app of apps) {
       const pm2 = pm2list.find((p: any) => p.name === app.name);
@@ -109,7 +109,7 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
 </VirtualHost>
 `.trim();
     writeFileSync(path.join(VHOST_DIR, `app_${name}.conf`), vhostConf);
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
 
     res.json(db.prepare('SELECT * FROM managed_apps WHERE id = ?').get(r.lastInsertRowid));
   } catch (err: any) {
@@ -178,7 +178,7 @@ router.delete('/:name', adminOnly, async (req: Request, res: Response) => {
     await execFileAsync('pm2', ['delete', app.name]).catch(() => {});
     const conf = path.join(VHOST_DIR, `app_${app.name}.conf`);
     if (existsSync(conf)) require('fs').unlinkSync(conf);
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     db.prepare('DELETE FROM managed_apps WHERE name = ?').run(app.name);
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }

@@ -1,14 +1,14 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { readdirSync, statSync, existsSync, mkdirSync, unlinkSync, writeFileSync, mkdtempSync } from 'fs';
+import { spawn } from 'child_process';
+import { createReadStream, createWriteStream, readdirSync, statSync, existsSync, mkdirSync, unlinkSync, writeFileSync, mkdtempSync } from 'fs';
+import zlib from 'zlib';
 import path from 'path';
 import os from 'os';
 import { AuthRequest } from '../middleware/auth';
 import db from '../db';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 function writeTempCrontab(lines: string[]): string {
   // Use mkdtempSync to avoid the predictable `/tmp/hp_*_${Date.now()}` race:
@@ -28,6 +28,51 @@ function getBackupDir(): string {
 
 function safeFileName(name: string): string {
   return path.basename(name).replace(/[^a-zA-Z0-9._-]/g, '');
+}
+
+// Spawn `command argv` and pipe its stdout through gzip into outFile.
+function spawnDumpToGzipFile(command: string, args: string[], outFile: string, env: NodeJS.ProcessEnv, timeoutMs = 300000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, shell: false });
+    const gz = zlib.createGzip();
+    const out = createWriteStream(outFile);
+    let stderr = '';
+    let settled = false;
+    const done = (err?: Error) => { if (settled) return; settled = true; err ? reject(err) : resolve(); };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} done(new Error(`${command} timed out`)); }, timeoutMs);
+    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.on('error', err => { clearTimeout(timer); done(err); });
+    out.on('error', err => { clearTimeout(timer); try { child.kill(); } catch {} done(err); });
+    gz.on('error', err => { clearTimeout(timer); try { child.kill(); } catch {} done(err); });
+    out.on('finish', () => { clearTimeout(timer); done(); });
+    child.on('exit', code => {
+      if (code !== 0) { clearTimeout(timer); try { gz.destroy(); out.destroy(); } catch {} done(new Error(`${command} exited ${code}: ${stderr}`)); }
+    });
+    child.stdout.pipe(gz).pipe(out);
+  });
+}
+
+// Pipe gunzipped contents of inFile into `command argv` stdin.
+function gunzipFileIntoStdin(inFile: string, command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs = 300000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, shell: false });
+    const gun = zlib.createGunzip();
+    const src = createReadStream(inFile);
+    let stderr = '';
+    let settled = false;
+    const done = (err?: Error) => { if (settled) return; settled = true; err ? reject(err) : resolve(); };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} done(new Error(`${command} timed out`)); }, timeoutMs);
+    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.on('error', err => { clearTimeout(timer); done(err); });
+    src.on('error', err => { clearTimeout(timer); try { child.kill(); } catch {} done(err); });
+    gun.on('error', err => { clearTimeout(timer); try { child.kill(); } catch {} done(err); });
+    child.on('exit', code => {
+      clearTimeout(timer);
+      if (code !== 0) done(new Error(`${command} exited ${code}: ${stderr}`));
+      else done();
+    });
+    src.pipe(gun).pipe(child.stdin);
+  });
 }
 
 router.get('/list', (_req: AuthRequest, res: Response) => {
@@ -58,14 +103,14 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
       const webroot = process.env.WEBROOT || '/var/www';
       const srcDir = target
         ? path.resolve(path.join(webroot, target))
-        : webroot;
+        : path.resolve(webroot);
       if (!srcDir.startsWith(path.resolve(webroot))) {
         return res.status(400).json({ error: 'Invalid target path' });
       }
       const label = target ? target.replace(/[^a-zA-Z0-9]/g, '_') : 'all';
       filename = `files_${label}_${ts}.tar.gz`;
       const out = path.join(dir, filename);
-      await execAsync(`tar -czf "${out}" -C "${srcDir}" . 2>&1`, { timeout: 300000 });
+      await runFile('tar', ['-czf', out, '-C', srcDir, '.'], { timeout: 300000 });
     } else if (type === 'database') {
       if (!target || !/^[a-zA-Z0-9_]+$/.test(target)) {
         return res.status(400).json({ error: 'Invalid database name' });
@@ -74,19 +119,9 @@ router.post('/create', async (req: AuthRequest, res: Response) => {
       const out = path.join(dir, filename);
       const user = process.env.DB_ROOT_USER || 'root';
       const pass = process.env.DB_ROOT_PASS || '';
-      // Pass the password via MYSQL_PWD instead of `-p<pass>` on the
-      // command line. The `-p` form lands in `ps`, in the panel's audit
-      // logs, and (more importantly) in `err.message` if the command
-      // fails — which is exactly what was happening for the restore
-      // route below, leaking the DB password into JSON 500 responses.
       const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
-      // -h127.0.0.1 is required: without -h the mysql client picks the unix
-      // socket and presents the user as <user>@localhost. The dedicated
-      // panel user is hostpanel@127.0.0.1 (see install.sh step 3), so a
-      // socket connection gets "Access denied" even though the password is
-      // correct. Force TCP so the host part of the ACL matches.
       const host = process.env.DB_HOST || '127.0.0.1';
-      await execAsync(`mysqldump -u${user} -h${host} ${target} | gzip > "${out}"`, { timeout: 300000, env: dbEnv });
+      await spawnDumpToGzipFile('mysqldump', [`-u${user}`, `-h${host}`, target], out, dbEnv);
     } else {
       return res.status(400).json({ error: 'type must be files or database' });
     }
@@ -119,12 +154,12 @@ router.post('/restore/:name', async (req: AuthRequest, res: Response) => {
       const pass = process.env.DB_ROOT_PASS || '';
       const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
       const host = process.env.DB_HOST || '127.0.0.1';
-      await execAsync(`gunzip -c "${file}" | mysql -u${user} -h${host} ${dbName}`, { timeout: 300000, env: dbEnv });
+      await gunzipFileIntoStdin(file, 'mysql', [`-u${user}`, `-h${host}`, dbName], dbEnv);
       res.json({ success: true, message: `Database ${dbName} restored` });
     } else if (name.endsWith('.tar.gz')) {
       // Files restore — extract back to webroot
       const webroot = process.env.WEBROOT || '/var/www';
-      await execAsync(`tar -xzf "${file}" -C "${webroot}"`, { timeout: 300000 });
+      await runFile('tar', ['-xzf', file, '-C', webroot], { timeout: 300000 });
       res.json({ success: true, message: `Files restored to ${webroot}` });
     } else {
       res.status(400).json({ error: 'Unknown backup format' });
@@ -163,6 +198,15 @@ router.get('/schedules', (_req: AuthRequest, res: Response) => {
   res.json(db.prepare('SELECT * FROM backup_schedules ORDER BY created_at DESC').all());
 });
 
+async function readCrontab(): Promise<string> {
+  try {
+    const { stdout } = await runFile('crontab', ['-l']);
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
 router.post('/schedules', async (req: AuthRequest, res: Response) => {
   const { type, target, schedule } = req.body;
   if (!type || !schedule) return res.status(400).json({ error: 'type and schedule required' });
@@ -180,11 +224,11 @@ router.post('/schedules', async (req: AuthRequest, res: Response) => {
   const cronCmd = `curl -s -X POST "http://localhost:${port}/api/backup/run-schedule/${id}" > /dev/null 2>&1`;
   const cronLine = `${schedule} ${cronCmd} # hostpanel-backup-${id}`;
   try {
-    const { stdout: existing } = await execAsync('crontab -l 2>/dev/null || echo ""');
+    const existing = await readCrontab();
     const lines = existing.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
     lines.push(cronLine);
     const tmp = writeTempCrontab(lines);
-    await execAsync(`crontab ${tmp}`);
+    await runFile('crontab', [tmp]);
     unlinkSync(tmp);
   } catch {}
 
@@ -196,10 +240,10 @@ router.delete('/schedules/:id', async (req: AuthRequest, res: Response) => {
   db.prepare('DELETE FROM backup_schedules WHERE id = ?').run(parseInt(id));
   // Remove from crontab
   try {
-    const { stdout } = await execAsync('crontab -l 2>/dev/null || echo ""');
+    const stdout = await readCrontab();
     const lines = stdout.split('\n').filter(l => !l.includes(`hostpanel-backup-${id}`));
     const tmp = writeTempCrontab(lines);
-    await execAsync(`crontab ${tmp}`);
+    await runFile('crontab', [tmp]);
     unlinkSync(tmp);
   } catch {}
   res.json({ success: true });
@@ -247,8 +291,9 @@ router.post('/push-remote/:name', async (req: AuthRequest, res: Response) => {
   if (prefix && !/^[a-zA-Z0-9._/-]+$/.test(prefix)) return res.status(400).json({ error: 'Invalid path prefix' });
 
   try {
-    let cmd = '';
-    const execEnv: Record<string, string> = { ...process.env } as Record<string, string>;
+    let command = '';
+    let args: string[] = [];
+    const execEnv: NodeJS.ProcessEnv = { ...process.env };
 
     if (provider === 's3' || !provider) {
       if (accessKey) {
@@ -256,17 +301,20 @@ router.post('/push-remote/:name', async (req: AuthRequest, res: Response) => {
         execEnv.AWS_SECRET_ACCESS_KEY = secretKey;
         execEnv.AWS_DEFAULT_REGION = region;
       }
-      cmd = `aws s3 cp "${file}" "s3://${bucket}/${prefix}/${name}" 2>&1`;
+      command = 'aws';
+      args = ['s3', 'cp', file, `s3://${bucket}/${prefix}/${name}`];
     } else if (provider === 'b2') {
       execEnv.B2_APPLICATION_KEY_ID = accessKey;
       execEnv.B2_APPLICATION_KEY = secretKey;
-      cmd = `b2 upload-file "${bucket}" "${file}" "${prefix}/${name}" 2>&1`;
+      command = 'b2';
+      args = ['upload-file', bucket, file, `${prefix}/${name}`];
     } else if (/^[a-zA-Z0-9_-]+$/.test(provider)) {
-      cmd = `rclone copy "${file}" "${provider}:${bucket}/${prefix}" 2>&1`;
+      command = 'rclone';
+      args = ['copy', file, `${provider}:${bucket}/${prefix}`];
     } else {
       return res.status(400).json({ error: 'Invalid provider' });
     }
-    const { stdout } = await execAsync(cmd, { timeout: 300000, env: execEnv });
+    const { stdout } = await runFile(command, args, { timeout: 300000, env: execEnv });
     res.json({ success: true, output: stdout });
   } catch (err: any) {
     res.status(500).json({ error: err.stderr || err.message });
@@ -274,4 +322,3 @@ router.post('/push-remote/:name', async (req: AuthRequest, res: Response) => {
 });
 
 export default router;
-

@@ -95,14 +95,14 @@ router.get('/:id/summary', adminOnly, async (req: Request, res: Response) => {
   const clientIds = [...new Set(accounts.map((a: any) => a.client_id).filter(Boolean))];
   const clientCount = clientIds.length;
 
-  // Disk usage
+  // Disk usage — argv exec, no shell. `du -sb` writes to stderr on missing
+  // paths and exits non-zero; we swallow that and just count what worked.
+  const { runFile } = await import('../utils/process-runner');
   let diskBytes = 0;
-  const { exec } = require('child_process');
-  const { promisify } = require('util');
-  const ea = promisify(exec);
   for (const acc of accounts) {
+    if (!acc.domain || /[^a-zA-Z0-9._-]/.test(acc.domain)) continue;
     try {
-      const { stdout } = await ea(`du -sb "/var/www/${acc.domain}" 2>/dev/null || echo 0`);
+      const { stdout } = await runFile('du', ['-sb', `/var/www/${acc.domain}`]);
       diskBytes += parseInt(stdout.trim().split(/\s+/)[0]) || 0;
     } catch {}
   }

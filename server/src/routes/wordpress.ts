@@ -1,14 +1,14 @@
 import { Router, Request, Response } from 'express';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import multer from 'multer';
 import { existsSync, unlinkSync, readFileSync, promises as fsp } from 'fs';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
@@ -19,8 +19,8 @@ function wpPath(domain: string) {
   return path.join(WEBROOT, domain, 'public_html');
 }
 
-function wp(domain: string, cmd: string) {
-  return execAsync(`wp --path="${wpPath(domain)}" --allow-root ${cmd} 2>&1`, { timeout: 60000 });
+function wp(domain: string, args: string[]) {
+  return runFile('wp', [`--path=${wpPath(domain)}`, '--allow-root', ...args], { timeout: 60000 });
 }
 
 function validateDomain(domain: string): boolean {
@@ -35,7 +35,7 @@ router.get('/sites', async (_req: Request, res: Response) => {
     // WordPress codebase) rather than wp-config.php — that way half-installed
     // sites (files unpacked, config not yet written) still show up so the
     // user can finish setup instead of seeing an empty list.
-    const { stdout } = await execAsync(`find ${WEBROOT} -maxdepth 5 -path "*/wp-includes/version.php" 2>/dev/null`);
+    const { stdout } = await runFile('find', [WEBROOT, '-maxdepth', '5', '-path', '*/wp-includes/version.php']);
     const paths = stdout.trim().split('\n').filter(Boolean);
     const { existsSync } = await import('fs');
     const sites = paths.map(p => {
@@ -57,10 +57,10 @@ router.get('/:domain/info', async (req: Request, res: Response) => {
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const [core, url] = await Promise.all([
-      wp(domain, 'core version').catch(() => ({ stdout: 'unknown' })),
-      wp(domain, 'option get siteurl').catch(() => ({ stdout: '' })),
+      wp(domain, ['core', 'version']).catch(() => ({ stdout: 'unknown' })),
+      wp(domain, ['option', 'get', 'siteurl']).catch(() => ({ stdout: '' })),
     ]);
-    const updateCheck = await wp(domain, 'core check-update --format=json').catch(() => ({ stdout: '[]' }));
+    const updateCheck = await wp(domain, ['core', 'check-update', '--format=json']).catch(() => ({ stdout: '[]' }));
     let updates: any[] = [];
     try { updates = JSON.parse(updateCheck.stdout.trim()); } catch {}
     res.json({ version: core.stdout.trim(), url: url.stdout.trim(), core_updates: updates });
@@ -71,7 +71,7 @@ router.post('/:domain/core-update', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    const { stdout } = await wp(domain, 'core update');
+    const { stdout } = await wp(domain, ['core', 'update']);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -82,7 +82,7 @@ router.get('/:domain/plugins', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    const { stdout } = await wp(domain, 'plugin list --format=json');
+    const { stdout } = await wp(domain, ['plugin', 'list', '--format=json']);
     res.json(JSON.parse(stdout.trim()));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -94,7 +94,7 @@ router.post('/:domain/plugins/:slug/toggle', async (req: Request, res: Response)
   const { active } = req.body;
   try {
     const action = active ? 'deactivate' : 'activate';
-    const { stdout } = await wp(domain, `plugin ${action} ${slug}`);
+    const { stdout } = await wp(domain, ['plugin', action, slug]);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -104,7 +104,7 @@ router.post('/:domain/plugins/:slug/update', async (req: Request, res: Response)
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
   try {
-    const { stdout } = await wp(domain, `plugin update ${slug}`);
+    const { stdout } = await wp(domain, ['plugin', 'update', slug]);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -114,8 +114,8 @@ router.post('/:domain/plugins/:slug/delete', async (req: Request, res: Response)
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
   try {
-    await wp(domain, `plugin deactivate ${slug}`);
-    const { stdout } = await wp(domain, `plugin delete ${slug}`);
+    await wp(domain, ['plugin', 'deactivate', slug]);
+    const { stdout } = await wp(domain, ['plugin', 'delete', slug]);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -126,7 +126,7 @@ router.get('/:domain/themes', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    const { stdout } = await wp(domain, 'theme list --format=json');
+    const { stdout } = await wp(domain, ['theme', 'list', '--format=json']);
     res.json(JSON.parse(stdout.trim()));
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -136,7 +136,7 @@ router.post('/:domain/themes/:slug/activate', async (req: Request, res: Response
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid theme slug' });
   try {
-    const { stdout } = await wp(domain, `theme activate ${slug}`);
+    const { stdout } = await wp(domain, ['theme', 'activate', slug]);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -146,7 +146,7 @@ router.post('/:domain/themes/:slug/update', async (req: Request, res: Response) 
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid theme slug' });
   try {
-    const { stdout } = await wp(domain, `theme update ${slug}`);
+    const { stdout } = await wp(domain, ['theme', 'update', slug]);
     res.json({ output: stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -158,9 +158,9 @@ router.post('/:domain/update-all', async (req: Request, res: Response) => {
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
     const [core, plugins, themes] = await Promise.all([
-      wp(domain, 'core update').catch(e => ({ stdout: e.message })),
-      wp(domain, 'plugin update --all').catch(e => ({ stdout: e.message })),
-      wp(domain, 'theme update --all').catch(e => ({ stdout: e.message })),
+      wp(domain, ['core', 'update']).catch((e: any) => ({ stdout: e.message })),
+      wp(domain, ['plugin', 'update', '--all']).catch((e: any) => ({ stdout: e.message })),
+      wp(domain, ['theme', 'update', '--all']).catch((e: any) => ({ stdout: e.message })),
     ]);
     res.json({ core: core.stdout, plugins: plugins.stdout, themes: themes.stdout });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -177,10 +177,9 @@ router.post('/:domain/search-replace', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'search and replace must be strings' });
   }
   try {
-    // Use execFile argv form — the previous shell-string interpolation let a
-    // search value like `"; rm -rf / #` break out of the double quotes. wp-cli
-    // accepts the arguments unquoted here.
-    const { stdout } = await execFileAsync('wp', [
+    // argv form — the previous shell-string interpolation let a search value
+    // like `"; rm -rf / #` break out of the double quotes.
+    const { stdout } = await runFile('wp', [
       `--path=${wpPath(domain)}`,
       '--allow-root',
       'search-replace',
@@ -201,7 +200,7 @@ router.post('/:domain/plugins/upload', zipUpload.single('zip'), async (req: Requ
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
   try {
-    const { stdout } = await wp(domain, `plugin install "${req.file.path}" --activate`);
+    const { stdout } = await wp(domain, ['plugin', 'install', req.file.path, '--activate']);
     unlinkSync(req.file.path);
     res.json({ output: stdout });
   } catch (err: any) {
@@ -215,7 +214,7 @@ router.post('/:domain/themes/upload', zipUpload.single('zip'), async (req: Reque
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
   try {
-    const { stdout } = await wp(domain, `theme install "${req.file.path}"`);
+    const { stdout } = await wp(domain, ['theme', 'install', req.file.path]);
     unlinkSync(req.file.path);
     res.json({ output: stdout });
   } catch (err: any) {
@@ -250,7 +249,7 @@ const SCHEDULE_MAP: Record<string, string> = {
 async function syncWpCrontab() {
   const jobs = db.prepare('SELECT * FROM wp_auto_updates').all() as any[];
   try {
-    const { stdout } = await execAsync('crontab -l 2>/dev/null || true');
+    const { stdout } = await runFile('crontab', ['-l']).catch(() => ({ stdout: '', stderr: '' }));
     const existing = stdout.split('\n').filter(l => !l.includes('# wp-autoupdate:'));
     const newEntries = jobs.map(j => {
       const sched = SCHEDULE_MAP[j.schedule] || SCHEDULE_MAP.weekly;
@@ -259,6 +258,9 @@ async function syncWpCrontab() {
       if (j.update_plugins) parts.push('plugin update --all');
       if (j.update_themes)  parts.push('theme update --all');
       if (!parts.length) return null;
+      // domain comes from the wp_auto_updates table, which is only written
+      // through the PUT /auto-updates/:domain validator above (DOMAIN regex),
+      // so it's safe to embed in this crontab command string.
       const cmds = parts.map(p => `wp --path="${wpPath(j.domain)}" --allow-root ${p}`).join(' && ');
       return `${sched} ${cmds} # wp-autoupdate:${j.domain}`;
     }).filter(Boolean);
@@ -267,7 +269,7 @@ async function syncWpCrontab() {
     const { tmpdir } = await import('os');
     const tmp = join(tmpdir(), `cron_wp_${Date.now()}`);
     writeFileSync(tmp, [...existing, ...newEntries].join('\n') + '\n');
-    await execAsync(`crontab ${tmp}`);
+    await runFile('crontab', [tmp]);
     try { unlinkSync(tmp); } catch {}
   } catch {}
 }
@@ -362,4 +364,3 @@ router.delete('/:domain', adminOnly, async (req: Request, res: Response) => {
 });
 
 export default router;
-

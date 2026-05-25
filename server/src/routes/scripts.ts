@@ -1,13 +1,13 @@
 import { Router, Response } from 'express';
-import { exec, execFile } from 'child_process';
-import { promisify } from 'util';
 import path from 'path';
 import fs from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { AuthRequest } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
@@ -97,6 +97,12 @@ router.get('/available', (_req: AuthRequest, res: Response) => {
   res.json(list);
 });
 
+async function downloadToFile(url: string, dest: string): Promise<void> {
+  const resp = await fetch(url, { redirect: 'follow' });
+  if (!resp.ok || !resp.body) throw new Error(`Download failed for ${url}: HTTP ${resp.status}`);
+  await pipeline(Readable.fromWeb(resp.body as any), createWriteStream(dest));
+}
+
 router.post('/install', async (req: AuthRequest, res: Response) => {
   const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail } = req.body;
 
@@ -129,28 +135,36 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
 
     if (meta.url === 'composer') {
       const pkg = script === 'laravel' ? 'laravel/laravel' : `symfony/skeleton`;
-      await execAsync(`composer create-project ${pkg} "${installPath}" --no-interaction 2>&1`, { timeout: 300000 });
+      await runFile('composer', ['create-project', pkg, installPath, '--no-interaction'], { timeout: 300000 });
     } else {
       const isZip = meta.url.endsWith('.zip');
       const isBz2 = meta.url.endsWith('.bz2');
       const tmpFile = `/tmp/${script}-latest.${isZip ? 'zip' : isBz2 ? 'tar.bz2' : 'tar.gz'}`;
-      // Pass the URL as an argv element rather than interpolating into a shell
-      // string. The SCRIPTS table is hardcoded today but this keeps a future
-      // dynamic-URL change from re-introducing command injection.
-      await execFileAsync('curl', ['-L', '-o', tmpFile, meta.url], { timeout: 180000 });
-      await fs.mkdir(`/tmp/${script}-extract`, { recursive: true });
+      const extractDir = `/tmp/${script}-extract`;
+      // Native fetch instead of shelling out to curl
+      await downloadToFile(meta.url, tmpFile);
+      await fs.mkdir(extractDir, { recursive: true });
       if (isZip) {
-        await execAsync(`unzip -q "${tmpFile}" -d /tmp/${script}-extract 2>/dev/null`);
+        await runFile('unzip', ['-q', tmpFile, '-d', extractDir]);
       } else if (isBz2) {
-        await execAsync(`tar -xjf "${tmpFile}" -C /tmp/${script}-extract --strip-components=1 2>/dev/null || tar -xjf "${tmpFile}" -C /tmp/${script}-extract`);
+        try {
+          await runFile('tar', ['-xjf', tmpFile, '-C', extractDir, '--strip-components=1']);
+        } catch {
+          await runFile('tar', ['-xjf', tmpFile, '-C', extractDir]);
+        }
       } else {
-        await execAsync(`tar -xzf "${tmpFile}" -C /tmp/${script}-extract --strip-components=1 2>/dev/null || tar -xzf "${tmpFile}" -C /tmp/${script}-extract`);
+        try {
+          await runFile('tar', ['-xzf', tmpFile, '-C', extractDir, '--strip-components=1']);
+        } catch {
+          await runFile('tar', ['-xzf', tmpFile, '-C', extractDir]);
+        }
       }
       // Handle nested directory from zip
-      const extracted = await fs.readdir(`/tmp/${script}-extract`);
-      const src = extracted.length === 1 ? `/tmp/${script}-extract/${extracted[0]}` : `/tmp/${script}-extract`;
-      await execAsync(`cp -r "${src}/." "${installPath}/"`);
-      await execAsync(`rm -rf /tmp/${script}-extract "${tmpFile}"`);
+      const extracted = await fs.readdir(extractDir);
+      const src = extracted.length === 1 ? path.join(extractDir, extracted[0]) : extractDir;
+      await runFile('cp', ['-r', `${src}/.`, `${installPath}/`]);
+      await fs.rm(extractDir, { recursive: true, force: true });
+      await fs.rm(tmpFile, { force: true });
     }
 
     if (script === 'wordpress' && dbName && dbUser && dbPass) {
@@ -164,13 +178,16 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
         .replace("password_here", dbPass)
         .replace("localhost", process.env.DB_HOST || 'localhost');
 
-      // Fetch salts
+      // Fetch salts via native fetch — no shell, no curl
       try {
-        const { stdout: salts } = await execAsync(`curl -s https://api.wordpress.org/secret-key/1.1/salt/`);
-        wpConfig = wpConfig.replace(
-          /\/\*\*#@\+\*\/[\s\S]*?\/\*\*#@-\*\//,
-          salts
-        );
+        const saltsResp = await fetch('https://api.wordpress.org/secret-key/1.1/salt/');
+        if (saltsResp.ok) {
+          const salts = await saltsResp.text();
+          wpConfig = wpConfig.replace(
+            /\/\*\*#@\+\*\/[\s\S]*?\/\*\*#@-\*\//,
+            salts
+          );
+        }
       } catch {}
 
       await fs.writeFile(config, wpConfig);
@@ -179,7 +196,7 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
       // site title, admin user/pass/email can't escape via quotes.
       try {
         const siteUrl = `http://${domain}`;
-        await execFileAsync('wp', [
+        await runFile('wp', [
           `--path=${installPath}`,
           'core', 'install',
           `--url=${siteUrl}`,
@@ -192,8 +209,14 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
       } catch {}
     }
 
-    await execAsync(`chown -R apache:apache "${installPath}" 2>/dev/null || chown -R www-data:www-data "${installPath}" 2>/dev/null || true`);
-    await execAsync(`find "${installPath}" -type d -exec chmod 755 {} \\; && find "${installPath}" -type f -exec chmod 644 {} \\;`);
+    // chown — try apache first, then www-data; ignore failures
+    try { await runFile('chown', ['-R', 'apache:apache', installPath]); }
+    catch {
+      try { await runFile('chown', ['-R', 'www-data:www-data', installPath]); } catch {}
+    }
+    // chmod 755 on dirs, 644 on files — use find with -exec ... + (argv only)
+    try { await runFile('find', [installPath, '-type', 'd', '-exec', 'chmod', '755', '{}', '+']); } catch {}
+    try { await runFile('find', [installPath, '-type', 'f', '-exec', 'chmod', '644', '{}', '+']); } catch {}
 
     res.json({ message: `${meta.name} installed at ${installPath}`, url: `http://${domain}` });
   } catch (err: any) {

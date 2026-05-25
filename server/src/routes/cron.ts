@@ -1,6 +1,5 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -8,6 +7,7 @@ import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
 import db from '../db';
 import { AuthRequest, requireRole } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 // Cron routes are direct shell-exec primitives — POST /add and POST /run let
 // the caller run arbitrary commands as the panel uid (typically root). Keep
@@ -41,7 +41,6 @@ db.prepare(`CREATE TABLE IF NOT EXISTS cron_logs (
 )`).run();
 
 const router = Router();
-const execAsync = promisify(exec);
 
 interface CronJob {
   id: number;
@@ -54,19 +53,15 @@ interface CronJob {
 }
 
 async function readCrontab(): Promise<string> {
-  try {
-    const { stdout } = await execAsync('crontab -l 2>/dev/null || true');
-    return stdout;
-  } catch {
-    return '';
-  }
+  const { stdout } = await runFile('crontab', ['-l']).catch(() => ({ stdout: '', stderr: '' }));
+  return stdout;
 }
 
 async function writeCrontab(content: string): Promise<void> {
   const tmp = join(tmpdir(), `crontab_${randomBytes(8).toString('hex')}`);
   try {
     writeFileSync(tmp, content);
-    await execAsync(`crontab ${tmp}`);
+    await runFile('crontab', [tmp]);
   } finally {
     try { unlinkSync(tmp); } catch {}
   }
@@ -128,22 +123,33 @@ router.delete('/:id', adminOnly, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Run a cron job on-demand and log output
+// Run a cron job on-demand and log output.
+// SECURITY: This endpoint INTENTIONALLY executes an arbitrary command line
+// through `sh -c` because admins use it to test cron jobs that legitimately
+// contain shell syntax (pipes, redirection, &&). It is gated behind adminOnly
+// (superadmin/admin) — the same trust level that can edit /etc/crontab. Do
+// NOT generalize this pattern to other routes, and do NOT re-introduce
+// shell-string execution anywhere else in this file.
+function runShellCommand(command: string, timeoutMs: number): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve) => {
+    const child = spawn('sh', ['-c', command], { shell: false, timeout: timeoutMs });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', d => { stdout += d.toString(); });
+    child.stderr?.on('data', d => { stderr += d.toString(); });
+    child.on('close', code => resolve({ stdout, stderr, code: code ?? 1 }));
+    child.on('error', err => resolve({ stdout, stderr: stderr + String(err), code: 1 }));
+  });
+}
+
 router.post('/run', adminOnly, async (req: AuthRequest, res: Response) => {
   const { command } = req.body;
   if (!command?.trim()) return res.status(400).json({ error: 'command required' });
-  try {
-    const { stdout, stderr } = await execAsync(command, { timeout: 60000 });
-    const output = (stdout + stderr).trim();
-    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, 0, output);
-    res.json({ output, exit_code: 0 });
-  } catch (err: any) {
-    const output = (err.stdout + err.stderr || err.message).trim();
-    const exitCode = err.code || 1;
-    db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, exitCode, output);
-    sendCronFailureEmail(command, exitCode, output);
-    res.json({ output, exit_code: exitCode });
-  }
+  const { stdout, stderr, code } = await runShellCommand(command, 60000);
+  const output = (stdout + stderr).trim();
+  db.prepare('INSERT INTO cron_logs (command, exit_code, output) VALUES (?, ?, ?)').run(command, code, output);
+  if (code !== 0) sendCronFailureEmail(command, code, output);
+  res.json({ output, exit_code: code });
 });
 
 router.get('/logs', (_req: AuthRequest, res: Response) => {
@@ -174,10 +180,8 @@ const USER_RE = /^[a-z][a-z0-9_]{0,30}$/;
 const CRON_RE = /^(@(reboot|hourly|daily|weekly|monthly)|(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+)\s+(\*|[0-9,\-\/\*]+))$/;
 
 async function getUserCrontab(user: string): Promise<string[]> {
-  try {
-    const { stdout } = await execAsync(`crontab -u "${user}" -l 2>/dev/null`);
-    return stdout.split('\n').filter(l => l.trim() && !l.startsWith('#'));
-  } catch { return []; }
+  const { stdout } = await runFile('crontab', ['-u', user, '-l']).catch(() => ({ stdout: '', stderr: '' }));
+  return stdout.split('\n').filter(l => l.trim() && !l.startsWith('#'));
 }
 
 router.get('/account/:user', async (req: AuthRequest, res: Response) => {
@@ -202,10 +206,10 @@ router.post('/account/:user', adminOnly, async (req: AuthRequest, res: Response)
   if (!CRON_RE.test(schedule.trim())) return res.status(400).json({ error: 'Invalid cron schedule' });
   // crontab -u <user> requires <user> to be a real OS account. HostPanel's
   // "accounts" are DB rows backed by Apache vhosts, not necessarily Linux
-  // users, so check id <user> first and surface a clear 404 instead of the
+  // users, so check `id <user>` first and surface a clear 404 instead of the
   // raw 500 "user 'foo' unknown" that crontab spits out.
   try {
-    await execAsync(`id "${user}" 2>/dev/null`);
+    await runFile('id', [user]);
   } catch {
     return res.status(404).json({ error: `No OS user named '${user}'. Create the user (useradd ${user}) before adding a per-account cron job.` });
   }
@@ -215,8 +219,11 @@ router.post('/account/:user', adminOnly, async (req: AuthRequest, res: Response)
     lines.push(newLine);
     const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
     writeFileSync(tmp, lines.join('\n') + '\n');
-    await execAsync(`crontab -u "${user}" ${tmp}`);
-    unlinkSync(tmp);
+    try {
+      await runFile('crontab', ['-u', user, tmp]);
+    } finally {
+      try { unlinkSync(tmp); } catch {}
+    }
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -231,11 +238,13 @@ router.delete('/account/:user/:index', adminOnly, async (req: AuthRequest, res: 
     lines.splice(idx, 1);
     const tmp = join(tmpdir(), `crontab_${user}_${randomBytes(4).toString('hex')}`);
     writeFileSync(tmp, lines.join('\n') + '\n');
-    await execAsync(`crontab -u "${user}" ${tmp}`);
-    unlinkSync(tmp);
+    try {
+      await runFile('crontab', ['-u', user, tmp]);
+    } finally {
+      try { unlinkSync(tmp); } catch {}
+    }
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 export default router;
-

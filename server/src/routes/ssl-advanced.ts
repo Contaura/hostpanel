@@ -1,13 +1,30 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { spawn } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, promises as fsp } from 'fs';
 import path from 'path';
+import tls from 'tls';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 const VHOST_DIR = process.env.VHOST_DIR || '/etc/httpd/conf.d';
 const SSL_CONF  = path.join(VHOST_DIR, 'ssl_ciphers.conf');
+const HOSTPANEL_ENV_FILE = process.env.HOSTPANEL_ENV_FILE || '/etc/hostpanel.env';
+
+const DOMAIN_RE   = /^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
+const WILDCARD_RE = /^[a-zA-Z0-9._*-]+$/;
+const EMAIL_RE    = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function readCompanyEmail(): string | null {
+  try {
+    const content = readFileSync(HOSTPANEL_ENV_FILE, 'utf8');
+    const m = content.match(/^\s*company_email\s*=\s*(.+)\s*$/m);
+    if (!m) return null;
+    const v = m[1].trim().replace(/^['"]|['"]$/g, '');
+    return EMAIL_RE.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
 
 /* ── SSL/TLS cipher configuration ───────────────────────── */
 
@@ -55,7 +72,7 @@ SSLSessionTickets off
 ${cfg.hsts ? 'Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"' : ''}
 `.trim() + '\n';
     writeFileSync(SSL_CONF, conf);
-    await execAsync('apachectl graceful').catch(() => {});
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -66,16 +83,10 @@ router.post('/wildcard', async (req: Request, res: Response) => {
   const { domain, dns_plugin, credentials_file } = req.body;
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const plugin = (dns_plugin || 'cloudflare').toString();
-  // certbot DNS plugins are named like "cloudflare", "route53", "digitalocean".
-  // Restrict to a lowercase-alphanumeric token before letting it land in the
-  // shell command line or anywhere it could affect argv parsing.
   if (!/^[a-z0-9]+$/.test(plugin)) {
     return res.status(400).json({ error: 'Invalid dns_plugin' });
   }
-  // credentials_file must be an absolute, normalised path with no shell
-  // metacharacters. We don't enforce a fixed directory because operators
-  // legitimately keep these in /root, /etc/letsencrypt, /home/..., etc.
-  let credFlag = '';
+  let credPath: string | null = null;
   if (credentials_file) {
     const credStr = String(credentials_file);
     const resolved = path.resolve(credStr);
@@ -85,24 +96,69 @@ router.post('/wildcard', async (req: Request, res: Response) => {
     if (!existsSync(resolved)) {
       return res.status(400).json({ error: 'credentials_file does not exist' });
     }
-    credFlag = `--${plugin}-credentials "${resolved}"`;
+    credPath = resolved;
+  }
+  const email = readCompanyEmail();
+  if (!email) {
+    return res.status(400).json({ error: 'No valid company_email configured in hostpanel.env' });
   }
   try {
-    const { stdout, stderr } = await execAsync(
-      `certbot certonly --dns-${plugin} ${credFlag} -d "${domain}" -d "*.${domain}" --non-interactive --agree-tos --email $(grep company_email /etc/hostpanel.env 2>/dev/null | cut -d= -f2) 2>&1`,
-      { timeout: 180000 }
-    ).catch(e => ({ stdout: '', stderr: e.message }));
+    const args = [
+      'certonly',
+      `--dns-${plugin}`,
+      ...(credPath ? [`--${plugin}-credentials`, credPath] : []),
+      '-d', domain,
+      '-d', `*.${domain}`,
+      '--non-interactive',
+      '--agree-tos',
+      '--email', email,
+    ];
+    const { stdout, stderr } = await runFile('certbot', args, { timeout: 180000 })
+      .catch((e: any) => ({ stdout: '', stderr: e.message }));
     res.json({ output: stdout + stderr });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 /* ── Per-domain SSL test ─────────────────────────────────── */
 
+function fetchPeerCertPem(host: string, port = 443): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 10000 }, () => {
+      const peer = socket.getPeerCertificate(true);
+      socket.end();
+      if (!peer || !peer.raw) return reject(new Error('No peer certificate'));
+      const b64 = peer.raw.toString('base64');
+      const lines = b64.match(/.{1,64}/g) || [];
+      resolve('-----BEGIN CERTIFICATE-----\n' + lines.join('\n') + '\n-----END CERTIFICATE-----\n');
+    });
+    socket.on('error', reject);
+    socket.on('timeout', () => { socket.destroy(new Error('TLS connect timeout')); });
+  });
+}
+
+function opensslX509Info(pem: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('openssl', ['x509', '-noout', '-subject', '-dates', '-issuer'], { shell: false });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', d => { stdout += d.toString(); });
+    child.stderr.on('data', d => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code !== 0) return reject(new Error(`openssl x509 exited ${code}: ${stderr}`));
+      resolve(stdout);
+    });
+    child.stdin.write(pem);
+    child.stdin.end();
+  });
+}
+
 router.get('/test/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    const { stdout } = await execAsync(`echo | openssl s_client -connect "${domain}:443" -servername "${domain}" 2>/dev/null | openssl x509 -noout -subject -dates -issuer 2>/dev/null`);
+    const pem = await fetchPeerCertPem(domain);
+    const stdout = await opensslX509Info(pem);
     const notAfter  = stdout.match(/notAfter=(.+)/)?.[1]?.trim() || '';
     const notBefore = stdout.match(/notBefore=(.+)/)?.[1]?.trim() || '';
     const issuer    = stdout.match(/issuer=(.+)/)?.[1]?.trim() || '';
@@ -124,18 +180,37 @@ router.get('/acme-check/:domain', async (req: Request, res: Response) => {
   const testFile = `${challengeDir}/${testToken}`;
 
   try {
-    await execAsync(`mkdir -p "${challengeDir}" && echo "ok" > "${testFile}"`);
+    await fsp.mkdir(challengeDir, { recursive: true });
+    await fsp.writeFile(testFile, 'ok\n');
 
     // Wait briefly then probe via HTTP
     await new Promise(r => setTimeout(r, 500));
-    const { stdout, stderr } = await execAsync(`curl -sL --max-time 10 "http://${domain}/.well-known/acme-challenge/${testToken}" 2>&1`);
-    const reachable = stdout.trim() === 'ok';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    let body = '';
+    let fetchErr = '';
+    try {
+      const resp = await fetch(`http://${domain}/.well-known/acme-challenge/${testToken}`, { redirect: 'follow', signal: ctrl.signal });
+      body = await resp.text();
+    } catch (e: any) {
+      fetchErr = e.message || String(e);
+    } finally {
+      clearTimeout(timer);
+    }
+    const reachable = body.trim() === 'ok';
 
-    await execAsync(`rm -f "${testFile}"`).catch(() => {});
+    await fsp.rm(testFile, { force: true }).catch(() => {});
 
-    res.json({ domain, reachable, response: stdout.trim(), note: reachable ? 'HTTP-01 challenge path is accessible — certificate issuance should work.' : 'Challenge path not reachable. Check DNS, firewall, and webroot.' });
+    res.json({
+      domain,
+      reachable,
+      response: body.trim() || fetchErr,
+      note: reachable
+        ? 'HTTP-01 challenge path is accessible — certificate issuance should work.'
+        : 'Challenge path not reachable. Check DNS, firewall, and webroot.',
+    });
   } catch (err: any) {
-    await execAsync(`rm -f "${testFile}"`).catch(() => {});
+    await fsp.rm(testFile, { force: true }).catch(() => {});
     res.status(500).json({ error: err.message });
   }
 });
@@ -144,7 +219,7 @@ router.get('/acme-check/:domain', async (req: Request, res: Response) => {
 
 router.get('/renew-status', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('certbot certificates 2>&1', { timeout: 30000 });
+    const { stdout } = await runFile('certbot', ['certificates'], { timeout: 30000 });
     const certs: any[] = [];
     const certBlocks = stdout.split(/\n\s*-+\s*\n/);
     for (const block of certBlocks) {
@@ -163,38 +238,46 @@ router.post('/renew/:name', async (req: Request, res: Response) => {
   const { name } = req.params;
   if (!name || /[^a-zA-Z0-9._-]/.test(name)) return res.status(400).json({ error: 'Invalid cert name' });
   try {
-    const { stdout, stderr } = await execAsync(`certbot renew --cert-name "${name}" --force-renewal 2>&1`, { timeout: 120000 });
+    const { stdout, stderr } = await runFile('certbot', ['renew', '--cert-name', name, '--force-renewal'], { timeout: 120000 });
     res.json({ output: stdout + stderr });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/renew-all', async (_req: Request, res: Response) => {
   try {
-    const { stdout, stderr } = await execAsync('certbot renew 2>&1', { timeout: 300000 });
+    const { stdout, stderr } = await runFile('certbot', ['renew'], { timeout: 300000 });
     res.json({ output: stdout + stderr });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 /* ── CSR generator ───────────────────────────────────────── */
 
+function sanitizeSubjectComponent(s: string, max = 64): string {
+  // Strip characters that are special inside an OpenSSL subject DN
+  // (separators / =), shell metacharacters that could escape an exec, and
+  // any control bytes. Result is always safe to embed in a -subj string.
+  return String(s).replace(/[\/=+,\\"`$()<>;|&!\r\n\t\0]/g, '').slice(0, max);
+}
+
 router.post('/csr', async (req: Request, res: Response) => {
   const { domain, country = 'US', state = 'CA', city = 'San Francisco', org = 'My Company', email = '' } = req.body;
-  if (!domain || /[^a-zA-Z0-9._*-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
-  const stripSubj = (s: string) => String(s).replace(/["\\\/]/g, '').slice(0, 64);
-  const safeCountry = stripSubj(country).slice(0, 2);
-  const safeState   = stripSubj(state);
-  const safeCity    = stripSubj(city);
-  const safeOrg     = stripSubj(org);
+  if (!domain || !WILDCARD_RE.test(domain) || /[^a-zA-Z0-9._*-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const safeCountry = sanitizeSubjectComponent(country, 2);
+  const safeState   = sanitizeSubjectComponent(state);
+  const safeCity    = sanitizeSubjectComponent(city);
+  const safeOrg     = sanitizeSubjectComponent(org);
   const safeEmail   = String(email).replace(/[^a-zA-Z0-9.@_+-]/g, '').slice(0, 64);
+  if (safeEmail && !EMAIL_RE.test(safeEmail)) return res.status(400).json({ error: 'Invalid email' });
   const safe = domain.replace(/\*/g, 'wildcard').replace(/[^a-zA-Z0-9._-]/g, '_');
   const keyFile = `/tmp/hp_${safe}.key`;
   const csrFile = `/tmp/hp_${safe}.csr`;
   const subject = `/C=${safeCountry}/ST=${safeState}/L=${safeCity}/O=${safeOrg}/CN=${domain}${safeEmail ? `/emailAddress=${safeEmail}` : ''}`;
   try {
-    await execAsync(`openssl req -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${csrFile}" -subj "${subject}" 2>/dev/null`);
-    const { stdout: csr } = await execAsync(`cat "${csrFile}"`);
-    const { stdout: key } = await execAsync(`cat "${keyFile}"`);
-    await execAsync(`rm -f "${keyFile}" "${csrFile}"`).catch(() => {});
+    await runFile('openssl', ['req', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', csrFile, '-subj', subject]);
+    const csr = await fsp.readFile(csrFile, 'utf8');
+    const key = await fsp.readFile(keyFile, 'utf8');
+    await fsp.rm(keyFile, { force: true }).catch(() => {});
+    await fsp.rm(csrFile, { force: true }).catch(() => {});
     res.json({ csr, private_key: key, domain, subject });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -204,18 +287,21 @@ router.post('/csr', async (req: Request, res: Response) => {
 router.post('/self-signed', async (req: Request, res: Response) => {
   const { domain, days = 365, country = 'US', org = 'My Company' } = req.body;
   if (!domain || /[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
-  const stripSubj = (s: string) => String(s).replace(/["\\\/]/g, '').slice(0, 64);
-  const safeCountry = stripSubj(country).slice(0, 2);
-  const safeOrg     = stripSubj(org);
+  const safeCountry = sanitizeSubjectComponent(country, 2);
+  const safeOrg     = sanitizeSubjectComponent(org);
+  const numDays     = parseInt(String(days)) || 365;
+  if (numDays < 1 || numDays > 36500) return res.status(400).json({ error: 'Invalid days' });
   const safe = domain.replace(/[^a-zA-Z0-9._-]/g, '_');
   const keyFile = `/tmp/hp_ss_${safe}.key`;
   const crtFile = `/tmp/hp_ss_${safe}.crt`;
+  const subject = `/C=${safeCountry}/O=${safeOrg}/CN=${domain}`;
   try {
-    await execAsync(`openssl req -x509 -newkey rsa:2048 -nodes -keyout "${keyFile}" -out "${crtFile}" -days ${parseInt(String(days)) || 365} -subj "/C=${safeCountry}/O=${safeOrg}/CN=${domain}" 2>/dev/null`);
-    const { stdout: cert } = await execAsync(`cat "${crtFile}"`);
-    const { stdout: key } = await execAsync(`cat "${keyFile}"`);
-    await execAsync(`rm -f "${keyFile}" "${crtFile}"`).catch(() => {});
-    res.json({ certificate: cert, private_key: key, domain, days });
+    await runFile('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', crtFile, '-days', String(numDays), '-subj', subject]);
+    const cert = await fsp.readFile(crtFile, 'utf8');
+    const key  = await fsp.readFile(keyFile, 'utf8');
+    await fsp.rm(keyFile, { force: true }).catch(() => {});
+    await fsp.rm(crtFile, { force: true }).catch(() => {});
+    res.json({ certificate: cert, private_key: key, domain, days: numDays });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -227,14 +313,12 @@ router.post('/import', async (req: Request, res: Response) => {
   if (/[^a-zA-Z0-9._-]/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   const LE_DIR = `/etc/letsencrypt/live/${domain}`;
   try {
-    await execAsync(`mkdir -p "${LE_DIR}"`);
-    const { writeFileSync } = await import('fs');
-    writeFileSync(`${LE_DIR}/fullchain.pem`, (certificate + '\n' + (ca_bundle || '')).trim() + '\n');
-    writeFileSync(`${LE_DIR}/privkey.pem`, private_key.trim() + '\n');
-    await execAsync('apachectl graceful').catch(() => {});
+    await fsp.mkdir(LE_DIR, { recursive: true });
+    await fsp.writeFile(`${LE_DIR}/fullchain.pem`, (certificate + '\n' + (ca_bundle || '')).trim() + '\n');
+    await fsp.writeFile(`${LE_DIR}/privkey.pem`, private_key.trim() + '\n');
+    await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true, domain, path: LE_DIR });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 export default router;
-
