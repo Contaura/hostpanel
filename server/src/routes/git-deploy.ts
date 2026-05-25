@@ -1,13 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { parseDeployCommandPlan } from '../utils/deploy-plan';
+import { runFile } from '../utils/process-runner';
 import path from 'path';
 import { promises as fs } from 'fs';
 import crypto from 'crypto';
 import db from '../db';
 
 const router = Router();
-const execFileAsync = promisify(execFile);
 
 async function resolveDeployPath(p: string): Promise<string> {
   if (!p || typeof p !== 'string') throw new Error('deploy_path required');
@@ -19,14 +18,15 @@ async function resolveDeployPath(p: string): Promise<string> {
 }
 
 async function runDeploy(deployPath: string, deployCommand: string) {
-  if (typeof deployCommand !== 'string' || !deployCommand.trim()) {
-    throw new Error('deploy_command is empty');
-  }
   const cwd = await resolveDeployPath(deployPath);
-  // Pass cwd via execFile options rather than `cd "${path}" && …` so a malicious
-  // deploy_path can't break out of the quote and inject extra commands. The
-  // deploy_command itself remains an admin-authored shell script by design.
-  return execFileAsync('sh', ['-c', deployCommand], { cwd, timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+  const outputs: string[] = [];
+  for (const step of parseDeployCommandPlan(deployCommand)) {
+    const { stdout, stderr } = await runFile(step.command, step.args, { cwd, timeout: 120000, maxBuffer: 10 * 1024 * 1024 });
+    outputs.push(`$ ${step.command} ${step.args.join(' ')}`);
+    if (stdout) outputs.push(stdout);
+    if (stderr) outputs.push(stderr);
+  }
+  return { stdout: outputs.join('\n'), stderr: '' };
 }
 
 /* ── List deployments ────────────────────────────────────── */

@@ -2,6 +2,46 @@ import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import * as pty from 'node-pty';
 import jwt from 'jsonwebtoken';
+import db from './db';
+
+const DEFAULT_TERMINAL_SHELL = '/bin/bash';
+const ALLOWED_TERMINAL_SHELLS = new Set(['/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh']);
+const SENSITIVE_ENV_KEYS = new Set([
+  'JWT_SECRET',
+  'ADMIN_PASS_HASH',
+  'ADMIN_USER',
+  'DB_ROOT_PASS',
+  'DB_ROOT_USER',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'PAYPAL_CLIENT_SECRET',
+  'CLOUDFLARE_API_TOKEN',
+  'MYSQL_PWD',
+]);
+const SENSITIVE_ENV_PATTERNS = [/_TOKEN$/i, /_SECRET$/i, /_PASSWORD$/i, /_PRIVATE_KEY$/i, /^SECRET_/i];
+
+export function selectTerminalShell(candidate: string | undefined): string {
+  if (!candidate) return DEFAULT_TERMINAL_SHELL;
+  return ALLOWED_TERMINAL_SHELLS.has(candidate) ? candidate : DEFAULT_TERMINAL_SHELL;
+}
+
+export function sanitizeTerminalEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+  const sanitizedEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(source)) {
+    if (v === undefined) continue;
+    if (SENSITIVE_ENV_KEYS.has(k)) continue;
+    if (SENSITIVE_ENV_PATTERNS.some(pattern => pattern.test(k))) continue;
+    sanitizedEnv[k] = v;
+  }
+  return sanitizedEnv;
+}
+
+function auditTerminal(username: string, ip: string, details: Record<string, unknown>) {
+  try {
+    db.prepare("INSERT INTO audit_logs (username, action, resource, details, ip) VALUES (?, ?, ?, ?, ?)")
+      .run(username || 'anonymous', 'OPEN /api/terminal', 'terminal', JSON.stringify(details), ip);
+  } catch (_) {}
+}
 
 export function setupTerminal(httpServer: HttpServer): void {
   const wss = new WebSocketServer({
@@ -49,7 +89,9 @@ export function setupTerminal(httpServer: HttpServer): void {
       return;
     }
 
-    const shell = process.env.SHELL || '/bin/bash';
+    const shell = selectTerminalShell(process.env.SHELL);
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '';
+    auditTerminal(payload?.username || 'anonymous', ip, { role: payload?.role, shell });
 
     // Strip HostPanel/server-internal secrets from the env handed to the shell.
     // The terminal is admin-only and runs as the same uid as the panel, so
@@ -57,24 +99,7 @@ export function setupTerminal(httpServer: HttpServer): void {
     // but propagating them needlessly puts them in every child process env,
     // shell history, and `env`/`printenv` output. Keep the env a normal login
     // shell would expect.
-    const SENSITIVE_ENV_KEYS = new Set([
-      'JWT_SECRET',
-      'ADMIN_PASS_HASH',
-      'ADMIN_USER',
-      'DB_ROOT_PASS',
-      'DB_ROOT_USER',
-      'STRIPE_SECRET_KEY',
-      'STRIPE_WEBHOOK_SECRET',
-      'PAYPAL_CLIENT_SECRET',
-      'CLOUDFLARE_API_TOKEN',
-      'MYSQL_PWD',
-    ]);
-    const sanitizedEnv: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (v === undefined) continue;
-      if (SENSITIVE_ENV_KEYS.has(k)) continue;
-      sanitizedEnv[k] = v;
-    }
+    const sanitizedEnv = sanitizeTerminalEnv(process.env);
 
     let ptyProcess: pty.IPty;
     try {

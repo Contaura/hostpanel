@@ -5,6 +5,7 @@ import multer from 'multer';
 import { AuthRequest } from '../middleware/auth';
 import { assertSafeFileTarget, resolveInsideBase } from '../utils/file-path';
 import { assertArchiveListingHasNoLinks, assertSafeArchiveEntryListing } from '../utils/archive-path';
+import { buildArchiveCommand, buildArchiveExtractCommand, buildArchiveListCommand, runFile } from '../utils/process-runner';
 
 const router = Router();
 
@@ -19,31 +20,13 @@ async function assertSafePath(resolvedPath: string): Promise<void> {
 }
 
 
-async function assertArchiveSafeToExtract(src: string, archivePath: string, execA: (command: string) => Promise<{ stdout: string }>): Promise<void> {
-  const lower = archivePath.toLowerCase();
-  let namesCommand = '';
-  let verboseCommand = '';
-
-  if (lower.endsWith('.zip')) {
-    namesCommand = `unzip -Z1 "${src}"`;
-    verboseCommand = `zipinfo -l "${src}"`;
-  } else if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
-    namesCommand = `tar -tzf "${src}"`;
-    verboseCommand = `tar -tzvf "${src}"`;
-  } else if (lower.endsWith('.tar.bz2')) {
-    namesCommand = `tar -tjf "${src}"`;
-    verboseCommand = `tar -tjvf "${src}"`;
-  } else if (lower.endsWith('.tar')) {
-    namesCommand = `tar -tf "${src}"`;
-    verboseCommand = `tar -tvf "${src}"`;
-  }
-
-  if (!namesCommand || !verboseCommand) throw new Error('Unsupported archive format');
-
-  const names = await execA(namesCommand);
+async function assertArchiveSafeToExtract(src: string, archivePath: string): Promise<void> {
+  const listCommand = buildArchiveListCommand(src || archivePath);
+  const names = await runFile(listCommand.command, listCommand.args);
   assertSafeArchiveEntryListing(names.stdout);
 
-  const verbose = await execA(verboseCommand);
+  const [verboseCommand, ...verboseArgs] = listCommand.verboseArgs;
+  const verbose = await runFile(verboseCommand, verboseArgs);
   assertArchiveListingHasNoLinks(verbose.stdout);
 }
 
@@ -186,9 +169,6 @@ router.get('/download', async (req: AuthRequest, res: Response) => {
 router.post('/compress', async (req: AuthRequest, res: Response) => {
   const { paths, destination, format } = req.body; // paths: string[], destination: string, format: 'zip'|'tar.gz'
   if (!paths?.length || !destination) return res.status(400).json({ error: 'paths and destination required' });
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execA = promisify(exec);
   try {
     const dest = safePath(destination);
     await assertSafePath(dest);
@@ -197,12 +177,8 @@ router.post('/compress', async (req: AuthRequest, res: Response) => {
       await assertSafePath(src);
       return src;
     }));
-    const srcList = safeSources.map(p => `"${p}"`).join(' ');
-    if (format === 'zip') {
-      await execA(`zip -r "${dest}" ${srcList}`);
-    } else {
-      await execA(`tar -czf "${dest}" ${srcList}`);
-    }
+    const archive = buildArchiveCommand(format, dest, safeSources);
+    await runFile(archive.command, archive.args);
     res.json({ message: 'Archive created', destination });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -210,23 +186,14 @@ router.post('/compress', async (req: AuthRequest, res: Response) => {
 router.post('/extract', async (req: AuthRequest, res: Response) => {
   const { path: archivePath, destination } = req.body;
   if (!archivePath) return res.status(400).json({ error: 'path required' });
-  const { exec } = await import('child_process');
-  const { promisify } = await import('util');
-  const execA = promisify(exec);
   try {
     const src = safePath(archivePath);
     const dest = destination ? safePath(destination) : path.dirname(src);
     await assertSafePath(src);
     await assertSafePath(dest);
-    const ext = archivePath.toLowerCase();
-    await assertArchiveSafeToExtract(src, archivePath, execA);
-    let cmd = '';
-    if (ext.endsWith('.zip'))    cmd = `unzip -o "${src}" -d "${dest}"`;
-    else if (ext.endsWith('.tar.gz') || ext.endsWith('.tgz')) cmd = `tar --no-same-owner --no-same-permissions -xzf "${src}" -C "${dest}"`;
-    else if (ext.endsWith('.tar.bz2')) cmd = `tar --no-same-owner --no-same-permissions -xjf "${src}" -C "${dest}"`;
-    else if (ext.endsWith('.tar'))     cmd = `tar --no-same-owner --no-same-permissions -xf "${src}" -C "${dest}"`;
-    else return res.status(400).json({ error: 'Unsupported archive format' });
-    await execA(cmd);
+    await assertArchiveSafeToExtract(src, archivePath);
+    const extract = buildArchiveExtractCommand(src, dest);
+    await runFile(extract.command, extract.args);
     res.json({ message: 'Extracted successfully' });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -264,12 +231,9 @@ router.post('/chmod', async (req: AuthRequest, res: Response) => {
   try {
     const target = safePath(p);
     await assertSafePath(target);
-    const flag = recursive ? '-R ' : '';
     await fs.chmod(target, parseInt(mode, 8));
     if (recursive) {
-      const { exec } = await import('child_process');
-      const { promisify } = await import('util');
-      await promisify(exec)(`chmod -R ${mode} "${target}"`);
+      await runFile('chmod', ['-R', mode, target]);
     }
     res.json({ success: true });
   } catch (err: any) {

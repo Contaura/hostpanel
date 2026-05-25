@@ -105,3 +105,37 @@ Both checks passed during the TDD cycle. Full audit, full server test run, and f
 - Use `lstat()` in directory listings so listing a directory does not follow symlinks for metadata.
 - Add authenticated route integration tests for `/api/files/*` endpoints.
 - For the strongest race resistance, move high-risk file operations toward descriptor-based/openat-style primitives where Node support allows it.
+
+## 2026-05-25 — Authenticated route tests, terminal audit, argv process helpers, and frontend code splitting
+
+### Risk addressed
+
+Several high-risk operations still needed production-readiness follow-up: file-manager archive/chmod operations used shell-string commands, git deploy executed admin-authored deploy strings through `sh -c`, the web terminal needed stronger environment/shell controls and audit visibility, authenticated file routes lacked integration coverage, and the frontend shipped most pages in the initial bundle.
+
+### Changes made
+
+- Added `server/src/utils/process-runner.ts` with `execFile`-based helpers that force `shell: false`.
+- Reworked file-manager archive creation, archive listing/extraction, and recursive chmod calls to use executable-plus-argv helpers instead of interpolated shell strings.
+- Added `server/src/utils/deploy-plan.ts` to parse simple `&&`-chained deploy recipes into allowlisted argv command steps and reject unsupported shell syntax/metacharacters.
+- Updated git-deploy execution to run parsed deploy steps with `execFile` and a validated `cwd` instead of `sh -c`.
+- Added authenticated `/api/files/*` integration tests for unauthenticated access, admin write/read/list/delete, and readonly write blocking.
+- Added middleware integration tests proving admin/superadmin access and readonly/reseller/client rejection for admin-config-style routes.
+- Hardened the web terminal by allowlisting local shells, stripping exact and pattern-matched secret environment variables, and inserting an audit-log row when an admin opens a terminal session.
+- Converted `client/src/App.tsx` route pages to `React.lazy()` plus `Suspense`, splitting page code into per-route chunks and reducing the initial JS bundle.
+
+### Validation performed
+
+```bash
+npm run test --workspace=server
+npm run build
+npm audit --omit=dev --audit-level=moderate
+npm audit --audit-level=moderate
+```
+
+All tests, full build, and both audit checks passed with zero reported vulnerabilities. The frontend build now emits per-route chunks; the largest initial `index` JS chunk is much smaller than before, with terminal/chart-heavy code isolated into lazy chunks.
+
+### Follow-up
+
+- Continue replacing legacy `execAsync()` shell-string call sites across the older service/config routes.
+- Add endpoint-level integration tests around individual root-level service/config routes before each shell replacement.
+- Add GitHub branch protection after the pushed CI run is confirmed green on GitHub.
