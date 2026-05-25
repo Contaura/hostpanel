@@ -453,4 +453,83 @@ describe('high-risk route command execution integration', () => {
     expect(src).not.toMatch(/\bexecAsync\b/);
   });
 
+  it('reloads httpd via argv when suspending an account', async () => {
+    process.env.VHOST_DIR = path.join(tmp, 'vhosts');
+    await fs.mkdir(process.env.VHOST_DIR, { recursive: true });
+    const server = await appFor('/api/accounts', './accounts');
+    closeServer = server.close;
+    const db = (await import('../db')).default;
+    db.pragma('foreign_keys = OFF');
+    const uniq = `susp-${Date.now()}-${Math.random().toString(36).slice(2,8)}.example.com`;
+    const r: any = db.prepare("INSERT INTO accounts (username, domain) VALUES (?, ?)").run(`u_${Date.now()}`, uniq);
+    await fs.writeFile(path.join(process.env.VHOST_DIR!, `${uniq}.conf`), '# vhost');
+    const res = await fetch(`${server.url}/api/accounts/${r.lastInsertRowid}/suspend`, { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('systemctl', ['reload', 'httpd']);
+    await expect(fs.access(path.join(process.env.VHOST_DIR!, `${uniq}.conf.disabled`))).resolves.toBeUndefined();
+    db.prepare('DELETE FROM accounts WHERE id = ?').run(r.lastInsertRowid);
+    db.pragma('foreign_keys = ON');
+  });
+
+  it('reports account usage via du argv (no shell sort|head pipeline)', async () => {
+    process.env.WEBROOT = path.join(tmp, 'www');
+    const uniq = `usage-${Date.now()}-${Math.random().toString(36).slice(2,8)}.example.com`;
+    const accountDir = path.join(process.env.WEBROOT, uniq);
+    await fs.mkdir(path.join(accountDir, 'sub1'), { recursive: true });
+    await fs.writeFile(path.join(accountDir, 'sub1', 'a.txt'), 'hello');
+    const server = await appFor('/api/accounts', './accounts');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: '1234\t' + accountDir + '\n', stderr: '' });
+    const db = (await import('../db')).default;
+    db.pragma('foreign_keys = OFF');
+    const r: any = db.prepare("INSERT INTO accounts (username, domain) VALUES (?, ?)").run(`u_${Date.now()}`, uniq);
+    const res = await fetch(`${server.url}/api/accounts/${r.lastInsertRowid}/usage`);
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('du', ['-sb', '--', accountDir]);
+    db.prepare('DELETE FROM accounts WHERE id = ?').run(r.lastInsertRowid);
+    db.pragma('foreign_keys = ON');
+  });
+
+  it('reloads bind via runFile rndc when a client appends a DNS record', async () => {
+    process.env.NAMED_DIR = path.join(tmp, 'named');
+    await fs.mkdir(process.env.NAMED_DIR, { recursive: true });
+    await fs.writeFile(path.join(process.env.NAMED_DIR, 'cpdns.example.com.zone'), '; zone\n');
+
+    vi.resetModules();
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+    const route = (await import('./client-portal')).default;
+    const db = (await import('../db')).default;
+    db.pragma('foreign_keys = OFF');
+    const uniq = `cpdns-${Date.now()}-${Math.random().toString(36).slice(2,8)}.example.com`;
+    db.prepare("INSERT INTO clients (id, name, email, password_hash) VALUES (9001, ?, ?, ?) ON CONFLICT(id) DO NOTHING").run('CP Tester', 'cp@example.com', 'x');
+    db.prepare("INSERT INTO accounts (username, domain, client_id) VALUES (?, ?, 9001)").run(`cpu_${Date.now()}`, uniq);
+    await fs.writeFile(path.join(process.env.NAMED_DIR, `${uniq}.zone`), '; zone\n');
+
+    const app = express();
+    app.use(express.json());
+    // shim: inject clientId so clientAuth middleware would have passed
+    app.use((req: any, _res, next) => { req.clientId = 9001; req.headers.authorization = 'Bearer test'; next(); });
+    // The portal's clientAuth middleware verifies a JWT; for this test we mount the route directly
+    // and the route handler reads (req as any).clientId. The clientAuth chain must still be bypassed.
+    // Easiest: monkey-patch the route by walking its layer stack to replace clientAuth with our shim.
+    for (const layer of (route as any).stack) {
+      if (layer.route?.stack) {
+        layer.route.stack = layer.route.stack.filter((l: any) => l.name !== 'clientAuth');
+      }
+    }
+    app.use('/api/portal', route);
+    const server = await listen(app);
+    closeServer = server.close;
+    const res = await fetch(`${server.url}/api/portal/domains/${uniq}/dns`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'www', type: 'A', value: '1.2.3.4', ttl: '300' }),
+    });
+    expect(res.status).toBe(200);
+    expect(runFileMock).toHaveBeenCalledWith('rndc', ['reload']);
+    db.prepare('DELETE FROM accounts WHERE client_id = 9001').run();
+    db.prepare('DELETE FROM clients WHERE id = 9001').run();
+    db.pragma('foreign_keys = ON');
+  });
+
 });

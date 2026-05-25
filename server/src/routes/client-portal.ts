@@ -1,8 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { exec, spawn } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -13,7 +13,15 @@ import { registerDkimKey } from '../utils/opendkim';
 const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
 
-const execAsync = promisify(exec);
+
+async function tailFileLines(file: string, maxLines = 50000): Promise<string[]> {
+  try {
+    const data = await fs.readFile(file, 'utf-8');
+    const lines = data.split('\n');
+    return lines.slice(Math.max(0, lines.length - maxLines));
+  } catch { return []; }
+}
+
 const PORTAL_DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,253}[a-zA-Z0-9]$/;
 const PORTAL_EMAIL_RE  = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 const PORTAL_NAMED_DIR  = process.env.NAMED_DIR  || '/etc/named';
@@ -258,7 +266,7 @@ router.get('/accounts/:id/usage', clientAuth, async (req: Request, res: Response
   const accountDir = path.join(PORTAL_WEBROOT, acc.domain);
   let diskBytes = 0;
   try {
-    const { stdout } = await execAsync(`du -sb "${accountDir}" 2>/dev/null`);
+    const { stdout } = await runFile('du', ['-sb', '--', accountDir]).catch(() => ({ stdout: '0\t', stderr: '' }));
     diskBytes = parseInt(stdout.split('\t')[0]) || 0;
   } catch { /* directory missing — leave 0 */ }
   res.json({ disk_bytes: diskBytes, directory: accountDir });
@@ -312,7 +320,7 @@ router.post('/domains/:domain/dns', clientAuth, async (req: Request, res: Respon
   if (!/^\d+$/.test(String(ttl))) return res.status(400).json({ error: 'ttl must be a positive integer' });
   const zoneFile = path.join(PORTAL_NAMED_DIR, `${domain}.zone`);
   await fs.appendFile(zoneFile, `${name}\t${ttl}\tIN\t${type}\t${value}\n`);
-  await execAsync('rndc reload 2>/dev/null || true');
+  await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ message: 'DNS record added' });
 });
 
@@ -331,7 +339,7 @@ router.delete('/domains/:domain/dns/:index', clientAuth, async (req: Request, re
   recordLines.splice(idx, 1);
   const headerLines = all.filter(l => !l.trim() || l.startsWith(';'));
   await fs.writeFile(zoneFile, [...headerLines, ...recordLines].join('\n') + '\n');
-  await execAsync('rndc reload 2>/dev/null || true');
+  await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -374,20 +382,20 @@ router.post('/email/accounts', clientAuth, async (req: Request, res: Response) =
   const entry = `${email}:${hash}:5000:5000::${PORTAL_MAIL_HOME}/${domain}/${user}::${quotaRule}`;
   await fs.appendFile(PORTAL_PASSWD_FILE, entry + '\n');
   await fs.appendFile(path.join(PORTAL_VMAIL_DIR, 'mailbox'), `${email}    ${domain}/${user}/\n`);
-  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
+  await runFile('postmap', [path.join(PORTAL_VMAIL_DIR, 'mailbox')]).catch(() => ({ stdout: '', stderr: '' }));
   // Keep virtual_mailbox_domains in sync so Postfix accepts mail for this
   // domain. Right-side value is ignored; just needs the key to exist.
   const domainsFile = path.join(PORTAL_VMAIL_DIR, 'domains');
   const existingDomains = await fs.readFile(domainsFile, 'utf-8').catch(() => '');
   if (!new RegExp(`^${domain.replace(/[.]/g, '\\.')}\\b`, 'm').test(existingDomains)) {
     await fs.appendFile(domainsFile, `${domain} OK\n`);
-    await execAsync(`postmap ${domainsFile} 2>/dev/null || true`);
+    await runFile('postmap', [domainsFile]).catch(() => ({ stdout: '', stderr: '' }));
   }
   // Maildir lives under MAIL_HOME, owned by vmail (uid 5000) so Dovecot LMTP
   // can write to it.
   await fs.mkdir(path.join(PORTAL_MAIL_HOME, domain, user), { recursive: true });
-  await execAsync(`chown -R 5000:5000 ${PORTAL_MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
-  await execAsync(`chmod 700 ${PORTAL_MAIL_HOME}/${domain}/${user} 2>/dev/null || true`);
+  await runFile('chown', ['-R', '5000:5000', path.join(PORTAL_MAIL_HOME, domain, user)]).catch(() => ({ stdout: '', stderr: '' }));
+  await fs.chmod(path.join(PORTAL_MAIL_HOME, domain, user), 0o700).catch(() => {});
   res.json({ message: `Mailbox ${email} created` });
 });
 
@@ -400,9 +408,18 @@ router.delete('/email/accounts/:email', clientAuth, async (req: Request, res: Re
   // of @, none of which are shell or sed metacharacters, so the sed pattern
   // below is safe to interpolate. Mirror the admin email.ts delete flow.
   const escaped = email.replace(/[.@]/g, '\\$&');
-  await execAsync(`sed -i '/^${escaped}:/d' ${PORTAL_PASSWD_FILE} 2>/dev/null || true`);
-  await execAsync(`sed -i '/^${escaped}/d' ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
-  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/mailbox 2>/dev/null || true`);
+  {
+    const content = await fs.readFile(PORTAL_PASSWD_FILE, 'utf-8').catch(() => '');
+    const next = content.split('\n').filter(line => !line.startsWith(email + ':')).join('\n');
+    await fs.writeFile(PORTAL_PASSWD_FILE, next).catch(() => {});
+  }
+  {
+    const mailboxPath = path.join(PORTAL_VMAIL_DIR, 'mailbox');
+    const content = await fs.readFile(mailboxPath, 'utf-8').catch(() => '');
+    const next = content.split('\n').filter(line => !line.startsWith(email)).join('\n');
+    await fs.writeFile(mailboxPath, next).catch(() => {});
+  }
+  await runFile('postmap', [path.join(PORTAL_VMAIL_DIR, 'mailbox')]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -429,7 +446,7 @@ router.post('/email/forwarders', clientAuth, async (req: Request, res: Response)
   const domain = from.split('@')[1];
   if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
   await fs.appendFile(path.join(PORTAL_VMAIL_DIR, 'aliases'), `${from}    ${to}\n`);
-  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
+  await runFile('postmap', [path.join(PORTAL_VMAIL_DIR, 'aliases')]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ message: 'Forwarder created' });
 });
 
@@ -439,8 +456,13 @@ router.delete('/email/forwarders/:from', clientAuth, async (req: Request, res: R
   const domain = from.split('@')[1];
   if (!clientOwnsDomain((req as any).clientId, domain)) return res.status(403).json({ error: 'Not your domain' });
   const escaped = from.replace(/[.@]/g, '\\$&');
-  await execAsync(`sed -i '/^${escaped}\\s/d' ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
-  await execAsync(`postmap ${PORTAL_VMAIL_DIR}/aliases 2>/dev/null || true`);
+  {
+    const aliasesPath = path.join(PORTAL_VMAIL_DIR, 'aliases');
+    const content = await fs.readFile(aliasesPath, 'utf-8').catch(() => '');
+    const next = content.split('\n').filter(line => !(line === from || line.startsWith(from + ' ') || line.startsWith(from + '\t'))).join('\n');
+    await fs.writeFile(aliasesPath, next).catch(() => {});
+  }
+  await runFile('postmap', [path.join(PORTAL_VMAIL_DIR, 'aliases')]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -486,13 +508,13 @@ router.post('/ftp/users', clientAuth, async (req: Request, res: Response) => {
   if (fullUser.length > 32) return res.status(400).json({ error: 'username too long when combined with account prefix' });
   const homeDir = path.join(PORTAL_WEBROOT, domain, 'public_html');
   try {
-    await execAsync(`id "${fullUser}" 2>/dev/null`);
+    await runFile('id', [fullUser]);
     return res.status(409).json({ error: 'FTP user already exists' });
   } catch { /* expected — user doesn't exist yet */ }
   // Create the OS user with /sbin/nologin shell so the only thing they
   // can do is FTP. Use spawn+stdin for chpasswd so the password never
   // touches the process command line.
-  await execAsync(`useradd -d "${homeDir}" -s /sbin/nologin -M "${fullUser}"`);
+  await runFile('useradd', ['-d', homeDir, '-s', '/sbin/nologin', '-M', fullUser]);
   await new Promise<void>((resolve, reject) => {
     const p = spawn('chpasswd');
     p.stdin.write(`${fullUser}:${password}\n`); p.stdin.end();
@@ -509,8 +531,12 @@ router.delete('/ftp/users/:username', clientAuth, async (req: Request, res: Resp
   const { username } = req.params;
   if (!/^[a-z][a-z0-9_]{0,31}$/.test(username)) return res.status(400).json({ error: 'Invalid username' });
   if (!clientPrefixOwner((req as any).clientId, username)) return res.status(403).json({ error: 'Not your FTP user' });
-  await execAsync(`userdel "${username}" 2>/dev/null || true`);
-  await execAsync(`sed -i '/^${username}$/d' ${PORTAL_FTP_USER_LIST} 2>/dev/null || true`);
+  await runFile('userdel', [username]).catch(() => ({ stdout: '', stderr: '' }));
+  {
+    const content = await fs.readFile(PORTAL_FTP_USER_LIST, 'utf-8').catch(() => '');
+    const next = content.split('\n').filter(line => line !== username).join('\n');
+    await fs.writeFile(PORTAL_FTP_USER_LIST, next).catch(() => {});
+  }
   await fs.unlink(path.join(PORTAL_FTP_USER_DIR, username)).catch(() => {});
   res.json({ success: true });
 });
@@ -628,7 +654,7 @@ router.get('/whois/:domain', clientAuth, async (req: Request, res: Response) => 
     if (!existsSync('/usr/bin/whois') && !existsSync('/usr/local/bin/whois')) {
       return res.status(503).json({ error: 'whois binary not installed on this server' });
     }
-    const { stdout } = await execAsync(`whois "${domain}" 2>/dev/null`, { timeout: 15000, maxBuffer: 1024 * 1024 });
+    const { stdout } = await runFile('whois', [domain], { timeout: 15000 });
     res.json({ domain, raw: stdout });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -642,7 +668,7 @@ router.get('/ssl/:domain/status', clientAuth, async (req: Request, res: Response
   const certPath = `/etc/letsencrypt/live/${domain}/fullchain.pem`;
   if (!existsSync(certPath)) return res.json({ issued: false });
   try {
-    const { stdout } = await execAsync(`openssl x509 -in "${certPath}" -noout -enddate 2>/dev/null`);
+    const { stdout } = await runFile('openssl', ['x509', '-in', certPath, '-noout', '-enddate']);
     const m = stdout.match(/notAfter=(.+)/);
     res.json({ issued: true, expires: m?.[1]?.trim() || null });
   } catch { res.json({ issued: true, expires: null }); }
@@ -659,10 +685,7 @@ router.post('/ssl/:domain', clientAuth, async (req: Request, res: Response) => {
   const email = client?.email;
   if (!email) return res.status(400).json({ error: 'No contact email on file; ask your hosting provider to set one' });
   try {
-    const { stdout, stderr } = await execAsync(
-      `certbot --apache -d "${domain}" --non-interactive --agree-tos -m "${email}" 2>&1`,
-      { timeout: 180000 },
-    );
+    const { stdout, stderr } = await runFile('certbot', ['--apache', '-d', domain, '--non-interactive', '--agree-tos', '-m', email], { timeout: 180000 });
     res.json({ success: true, output: stdout + stderr });
   } catch (e: any) {
     res.status(500).json({ error: e.message, output: (e.stdout || '') + (e.stderr || '') });
@@ -709,7 +732,7 @@ router.post('/subdomains', clientAuth, async (req: Request, res: Response) => {
   await fs.mkdir(docRoot, { recursive: true });
   await fs.writeFile(path.join(docRoot, 'index.html'), `<html><body><h1>${fqdn}</h1></body></html>`);
   await fs.writeFile(confFile, `<VirtualHost *:80>\n  ServerName ${fqdn}\n  DocumentRoot ${docRoot}\n  <Directory ${docRoot}>\n    AllowOverride All\n    Require all granted\n  </Directory>\n</VirtualHost>\n`);
-  await execAsync('systemctl reload httpd 2>/dev/null || true');
+  await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ message: 'Subdomain created', fqdn, docroot: docRoot });
 });
 
@@ -721,7 +744,7 @@ router.delete('/subdomains/:fqdn', clientAuth, async (req: Request, res: Respons
   if (!owned.some(d => fqdn === d.domain || fqdn.endsWith('.' + d.domain))) return res.status(403).json({ error: 'Not your subdomain' });
   if (owned.some(d => d.domain === fqdn)) return res.status(400).json({ error: 'Refusing to delete the parent account domain — use the admin panel' });
   await fs.unlink(path.join(PORTAL_VHOST_DIR, `${fqdn}.conf`)).catch(() => {});
-  await execAsync('systemctl reload httpd 2>/dev/null || true');
+  await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -801,7 +824,7 @@ router.delete('/redirects/:id', clientAuth, async (req: Request, res: Response) 
 const PORTAL_CRON_RE = /^(@(reboot|hourly|daily|weekly|monthly)|(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+)\s+(\*(?:\/\d+)?|[0-9,\-\/\*]+))$/;
 
 async function osUserExists(name: string): Promise<boolean> {
-  try { await execAsync(`id "${name}" 2>/dev/null`); return true; } catch { return false; }
+  try { await runFile('id', [name]); return true; } catch { return false; }
 }
 
 router.get('/cron', clientAuth, async (req: Request, res: Response) => {
@@ -812,10 +835,11 @@ router.get('/cron', clientAuth, async (req: Request, res: Response) => {
   for (const base of usernames) {
     // Match exact account-username and prefix-only OS users we created via
     // /api/portal/ftp/users (which prepends <base>_).
-    const { stdout } = await execAsync(`getent passwd | awk -F: '{print $1}'`).catch(() => ({ stdout: '' }));
+    const { stdout: passwdRaw } = await runFile('getent', ['passwd']).catch(() => ({ stdout: '', stderr: '' }));
+    const stdout = passwdRaw.split('\n').map(line => line.split(':')[0]).filter(Boolean).join('\n');
     const candidates = stdout.split('\n').filter(u => u === base || u.startsWith(base + '_'));
     for (const u of candidates) {
-      const { stdout: tab } = await execAsync(`crontab -u "${u}" -l 2>/dev/null || true`);
+      const { stdout: tab } = await runFile('crontab', ['-u', u, '-l']).catch(() => ({ stdout: '', stderr: '' }));
       const lines = tab.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
       if (lines.length) out.push({ user: u, jobs: lines.map((line, id) => ({ id, line })) });
     }
@@ -835,11 +859,11 @@ router.post('/cron', clientAuth, async (req: Request, res: Response) => {
   const { mkdtempSync, writeFileSync, unlinkSync } = await import('fs');
   const dir = mkdtempSync(path.join(tmpdir(), 'portal-cron-'));
   try {
-    const { stdout: existing } = await execAsync(`crontab -u "${user}" -l 2>/dev/null || true`);
+    const { stdout: existing } = await runFile('crontab', ['-u', user, '-l']).catch(() => ({ stdout: '', stderr: '' }));
     const next = (existing.replace(/\n+$/, '') + '\n' + `${schedule.trim()} ${command.trim()}\n`).replace(/^\n+/, '');
     const tmp = path.join(dir, 'crontab');
     writeFileSync(tmp, next);
-    await execAsync(`crontab -u "${user}" "${tmp}"`);
+    await runFile('crontab', ['-u', user, tmp]);
     unlinkSync(tmp);
   } finally {
     try { await fs.rmdir(dir); } catch { /* best-effort */ }
@@ -852,7 +876,7 @@ router.delete('/cron/:user/:index', clientAuth, async (req: Request, res: Respon
   const idx = parseInt(req.params.index);
   if (!clientPrefixOwner((req as any).clientId, user)) return res.status(403).json({ error: 'Not your OS user' });
   if (!Number.isFinite(idx) || idx < 0) return res.status(400).json({ error: 'Invalid index' });
-  const { stdout: existing } = await execAsync(`crontab -u "${user}" -l 2>/dev/null || true`);
+  const { stdout: existing } = await runFile('crontab', ['-u', user, '-l']).catch(() => ({ stdout: '', stderr: '' }));
   const lines = existing.split('\n').filter(l => l.trim() && !l.startsWith('#'));
   if (idx >= lines.length) return res.status(404).json({ error: 'Job not found' });
   lines.splice(idx, 1);
@@ -862,7 +886,7 @@ router.delete('/cron/:user/:index', clientAuth, async (req: Request, res: Respon
   try {
     const tmp = path.join(dir, 'crontab');
     writeFileSync(tmp, lines.join('\n') + (lines.length ? '\n' : ''));
-    await execAsync(`crontab -u "${user}" "${tmp}"`);
+    await runFile('crontab', ['-u', user, tmp]);
     unlinkSync(tmp);
   } finally {
     try { await fs.rmdir(dir); } catch { /* best-effort */ }
@@ -924,7 +948,7 @@ router.post('/email/catch-all', clientAuth, async (req: Request, res: Response) 
   const filtered = content.split('\n').filter(l => l && !l.startsWith(`@${domain}`)).join('\n');
   const next = filtered.replace(/\n+$/, '') + `\n@${domain}    ${destination}\n`;
   await fs.writeFile(aliasesPath, next);
-  await execAsync(`postmap ${aliasesPath} 2>/dev/null || true`);
+  await runFile('postmap', [aliasesPath]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -935,7 +959,7 @@ router.delete('/email/catch-all/:domain', clientAuth, async (req: Request, res: 
   const aliasesPath = path.join(PORTAL_VMAIL_DIR, 'aliases');
   const content = await fs.readFile(aliasesPath, 'utf-8').catch(() => '');
   await fs.writeFile(aliasesPath, content.split('\n').filter(l => !l.startsWith(`@${domain}`)).join('\n'));
-  await execAsync(`postmap ${aliasesPath} 2>/dev/null || true`);
+  await runFile('postmap', [aliasesPath]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -946,7 +970,7 @@ router.get('/webmail', clientAuth, async (_req: Request, res: Response) => {
   const configured = (setting || process.env.WEBMAIL_URL || '').trim();
   const installed =
     existsSync('/usr/share/roundcubemail') ||
-    await execAsync('rpm -q roundcubemail >/dev/null 2>&1 && echo y || true').then(r => r.stdout.trim() === 'y').catch(() => false);
+    await runFile('rpm', ['-q', 'roundcubemail']).then(() => true).catch(() => false);
   // Same-origin default — the install.sh Apache alias mounts /roundcube
   const url = configured || (installed ? '/roundcube' : '');
   res.json({ installed, url });
@@ -974,7 +998,7 @@ router.post('/mail-auth/:domain/dkim', clientAuth, async (req: Request, res: Res
     return res.status(503).json({ error: 'opendkim-tools not installed on this server' });
   }
   await fs.mkdir(`/etc/opendkim/keys/${domain}`, { recursive: true });
-  await execAsync(`opendkim-genkey -b 2048 -d "${domain}" -s default -D "/etc/opendkim/keys/${domain}"`);
+  await runFile('opendkim-genkey', ['-b', '2048', '-d', domain, '-s', 'default', '-D', `/etc/opendkim/keys/${domain}`]);
   // Register the key with OpenDKIM (KeyTable + SigningTable + reload) so
   // outbound mail from this domain actually gets signed. Without this the
   // key just sits on disk unused.
@@ -997,7 +1021,7 @@ router.post('/mail-auth/:domain/spf', clientAuth, async (req: Request, res: Resp
   const content = await fs.readFile(zonePath, 'utf-8').catch(() => '');
   const stripped = content.split('\n').filter(l => !l.includes('v=spf1')).join('\n');
   await fs.writeFile(zonePath, stripped.replace(/\n+$/, '') + `\n@\t3600\tIN\tTXT\t"${spf}"\n`);
-  await execAsync('rndc reload 2>/dev/null || true');
+  await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true, spf });
 });
 
@@ -1017,7 +1041,7 @@ router.post('/mail-auth/:domain/dmarc', clientAuth, async (req: Request, res: Re
   const content = await fs.readFile(zonePath, 'utf-8').catch(() => '');
   const stripped = content.split('\n').filter(l => !(l.startsWith('_dmarc') && l.includes('v=DMARC1'))).join('\n');
   await fs.writeFile(zonePath, stripped.replace(/\n+$/, '') + `\n_dmarc\t3600\tIN\tTXT\t"${dmarc}"\n`);
-  await execAsync('rndc reload 2>/dev/null || true');
+  await runFile('rndc', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true, dmarc });
 });
 
@@ -1055,7 +1079,7 @@ router.post('/sshkeys', clientAuth, async (req: Request, res: Response) => {
   const file = path.join(sshDir, 'authorized_keys');
   const existing = await fs.readFile(file, 'utf-8').catch(() => '');
   await fs.writeFile(file, existing.replace(/\n+$/, '') + (existing ? '\n' : '') + trimmed + '\n', { mode: 0o600 });
-  await execAsync(`chown -R "${user}:${user}" "${sshDir}" 2>/dev/null || true`);
+  await runFile('chown', ['-R', `${user}:${user}`, sshDir]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -1068,7 +1092,7 @@ router.delete('/sshkeys/:user/:id', clientAuth, async (req: Request, res: Respon
   keys.splice(id, 1);
   const sshDir = path.join('/home', user, '.ssh');
   await fs.writeFile(path.join(sshDir, 'authorized_keys'), keys.map(k => k.raw).join('\n') + (keys.length ? '\n' : ''), { mode: 0o600 });
-  await execAsync(`chown -R "${user}:${user}" "${sshDir}" 2>/dev/null || true`);
+  await runFile('chown', ['-R', `${user}:${user}`, sshDir]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ success: true });
 });
 
@@ -1105,7 +1129,7 @@ router.post('/backups/:domain', clientAuth, async (req: Request, res: Response) 
   const out = path.join(PORTAL_BACKUP_DIR, filename);
   const src = path.join(PORTAL_WEBROOT, domain);
   if (!existsSync(src)) return res.status(404).json({ error: `${src} does not exist` });
-  await execAsync(`tar -czf "${out}" -C "${path.dirname(src)}" "${path.basename(src)}" 2>/dev/null || true`, { timeout: 300000 });
+  await runFile('tar', ['-czf', out, '-C', path.dirname(src), path.basename(src)], { timeout: 300000 }).catch(() => ({ stdout: '', stderr: '' }));
   const st = await fs.stat(out);
   res.json({ name: filename, size: st.size, created: new Date().toISOString() });
 });
@@ -1152,17 +1176,46 @@ router.post('/scripts/install', clientAuth, async (req: Request, res: Response) 
   const installPath = path.join(PORTAL_WEBROOT, domain, 'public_html');
   await fs.mkdir(installPath, { recursive: true });
   // Download WordPress
-  await execAsync(`curl -L -o /tmp/wp-portal.tar.gz https://wordpress.org/latest.tar.gz`, { timeout: 180000 });
-  await fs.mkdir('/tmp/wp-portal-extract', { recursive: true });
-  await execAsync(`tar -xzf /tmp/wp-portal.tar.gz -C /tmp/wp-portal-extract --strip-components=1`);
-  await execAsync(`cp -r /tmp/wp-portal-extract/. "${installPath}/"`);
-  await execAsync(`rm -rf /tmp/wp-portal-extract /tmp/wp-portal.tar.gz`);
-  // wp-config + wp core install via wp-cli
-  await execAsync(`/usr/local/bin/wp config create --path="${installPath}" --dbname="${dbName}" --dbuser="${dbUser}" --dbpass="${dbPass}" --dbhost=localhost --skip-check --allow-root --force`);
-  if (siteTitle && adminUser && adminPass && adminEmail) {
-    await execAsync(`/usr/local/bin/wp core install --allow-root --path="${installPath}" --url="http://${domain}" --title="${siteTitle.replace(/"/g, '')}" --admin_user="${String(adminUser).replace(/[^a-zA-Z0-9_]/g, '')}" --admin_password="${String(adminPass).replace(/"/g, '')}" --admin_email="${adminEmail}" --skip-email`);
+  {
+    const { createWriteStream } = await import('fs');
+    const { pipeline } = await import('stream/promises');
+    const { Readable } = await import('stream');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 180000);
+    try {
+      const r = await fetch('https://wordpress.org/latest.tar.gz', { signal: ctrl.signal });
+      if (!r.ok || !r.body) throw new Error(`download failed: ${r.status}`);
+      await pipeline(Readable.fromWeb(r.body as any), createWriteStream('/tmp/wp-portal.tar.gz'));
+    } finally { clearTimeout(timer); }
   }
-  await execAsync(`chown -R apache:apache "${installPath}" 2>/dev/null || true`);
+  await fs.mkdir('/tmp/wp-portal-extract', { recursive: true });
+  await runFile('tar', ['-xzf', '/tmp/wp-portal.tar.gz', '-C', '/tmp/wp-portal-extract', '--strip-components=1']);
+  await runFile('cp', ['-r', '/tmp/wp-portal-extract/.', `${installPath}/`]);
+  await fs.rm('/tmp/wp-portal-extract', { recursive: true, force: true });
+  await fs.rm('/tmp/wp-portal.tar.gz', { force: true });
+  // wp-config + wp core install via wp-cli
+  await runFile('/usr/local/bin/wp', ['config', 'create', `--path=${installPath}`, `--dbname=${dbName}`, `--dbuser=${dbUser}`, `--dbpass=${dbPass}`, '--dbhost=localhost', '--skip-check', '--allow-root', '--force']);
+  if (siteTitle && adminUser && adminPass && adminEmail) {
+    {
+      const safeTitle = String(siteTitle).replace(/["`$\\]/g, '');
+      const safeAdminUser = String(adminUser).replace(/[^a-zA-Z0-9_]/g, '');
+      const safeAdminPass = String(adminPass).replace(/["`$\\]/g, '');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(adminEmail))) {
+        return res.status(400).json({ error: 'Invalid admin email' });
+      }
+      await runFile('/usr/local/bin/wp', [
+        'core', 'install', '--allow-root',
+        `--path=${installPath}`,
+        `--url=http://${domain}`,
+        `--title=${safeTitle}`,
+        `--admin_user=${safeAdminUser}`,
+        `--admin_password=${safeAdminPass}`,
+        `--admin_email=${adminEmail}`,
+        '--skip-email',
+      ]);
+    }
+  }
+  await runFile('chown', ['-R', 'apache:apache', installPath]).catch(() => ({ stdout: '', stderr: '' }));
   res.json({ message: 'WordPress installed', url: `http://${domain}` });
 });
 
@@ -1480,11 +1533,20 @@ router.get('/stats/:domain', clientAuth, async (req: Request, res: Response) => 
     // Awk over the access log: $7 is the URL path, $10 is response size
     // in CLF combined log format. Aggregate hits + bytes total + top 10
     // paths. tail -50000 caps memory for very chatty logs.
-    const { stdout: total } = await execAsync(`tail -50000 "${log}" 2>/dev/null | awk '{ hits++; bytes += ($10 ~ /^[0-9]+$/ ? $10 : 0) } END { print hits"\\t"bytes }'`, { timeout: 15000 });
-    const [hitsStr, bytesStr] = total.trim().split('\t');
-    const { stdout: top } = await execAsync(`tail -50000 "${log}" 2>/dev/null | awk '{ print $7 }' | sort | uniq -c | sort -rn | head -10`, { timeout: 15000 });
-    const topPaths = top.split('\n').filter(Boolean).map(l => { const m = l.trim().match(/^(\d+)\s+(.+)$/); return m ? { hits: parseInt(m[1]), path: m[2] } : null; }).filter(Boolean);
-    res.json({ hits: parseInt(hitsStr) || 0, bytes: parseInt(bytesStr) || 0, top: topPaths, log_path: log });
+    const lines = await tailFileLines(log, 50000);
+    let hits = 0, bytes = 0;
+    const pathCount: Record<string, number> = {};
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 10) continue;
+      hits += 1;
+      const sz = parts[9];
+      if (/^\d+$/.test(sz)) bytes += parseInt(sz);
+      const p = parts[6];
+      if (p) pathCount[p] = (pathCount[p] || 0) + 1;
+    }
+    const topPaths = Object.entries(pathCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([p, h]) => ({ hits: h, path: p }));
+    res.json({ hits, bytes, top: topPaths, log_path: log });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1502,8 +1564,7 @@ router.post('/security-scan/:domain', clientAuth, async (req: Request, res: Resp
   // returns 1 when it finds infections, 2 on error) is still reported
   // as a usable JSON response.
   try {
-    const { stdout, stderr } = await execAsync(`clamscan -r --infected --no-summary "${target}" 2>&1`, { timeout: 300000 })
-      .catch((e: any) => ({ stdout: (e.stdout || '') as string, stderr: (e.stderr || '') as string }));
+    const { stdout, stderr } = await runFile('clamscan', ['-r', '--infected', '--no-summary', target], { timeout: 300000 }).catch((e: any) => ({ stdout: (e.stdout || '') as string, stderr: (e.stderr || '') as string }));
     const lines: string[] = (stdout + stderr).split('\n').filter(Boolean);
     const infected = lines.filter((l: string) => l.includes(': ') && !l.startsWith('LibClamAV')).map((l: string) => l.trim());
     res.json({ scanned: target, infected_count: infected.length, infected });

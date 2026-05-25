@@ -1,6 +1,8 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
+import zlib from 'zlib';
+import { createWriteStream } from 'fs';
+import { runFile } from '../utils/process-runner';
 import fs from 'fs/promises';
 import path from 'path';
 import bcrypt from 'bcryptjs';
@@ -9,7 +11,23 @@ import db from '../db';
 import { AuthRequest } from '../middleware/auth';
 
 const router = Router();
-const execAsync = promisify(exec);
+
+function dumpDbToGzip(dbHost: string, user: string, dbName: string, outPath: string, env: NodeJS.ProcessEnv, timeoutMs = 300000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const dump = spawn('mysqldump', [`-u${user}`, `-h${dbHost}`, dbName], { env, shell: false });
+    const gzip = zlib.createGzip();
+    const out = createWriteStream(outPath);
+    let timer: NodeJS.Timeout | null = setTimeout(() => { dump.kill('SIGKILL'); reject(new Error('mysqldump timeout')); }, timeoutMs);
+    const done = (err?: Error) => { if (timer) { clearTimeout(timer); timer = null; } err ? reject(err) : resolve(); };
+    dump.on('error', done);
+    dump.stderr.on('data', () => {});
+    dump.stdout.pipe(gzip).pipe(out);
+    out.on('error', done);
+    out.on('finish', () => done());
+    dump.on('close', code => { if (code !== 0) done(new Error(`mysqldump exit ${code}`)); });
+  });
+}
+
 
 // /:id/export tars the whole account webroot and mysqldumps every account-
 // owned database in one shot. /:id/usage walks the same tree with du + find.
@@ -59,13 +77,13 @@ router.get('/check-expiry', async (_req: AuthRequest, res: Response) => {
   for (const acc of expired) {
     db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(acc.id);
     try {
-      await execAsync(`mv "${path.join(VHOST_DIR, `${acc.domain}.conf`)}" "${path.join(VHOST_DIR, `${acc.domain}.conf.disabled`)}" 2>/dev/null || true`);
+      await fs.rename(path.join(VHOST_DIR, `${acc.domain}.conf`), path.join(VHOST_DIR, `${acc.domain}.conf.disabled`)).catch(() => {});
     } catch {}
     suspended.push(acc.username);
   }
 
   if (suspended.length > 0) {
-    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
   }
 
   res.json({ checked: expired.length, suspended });
@@ -124,7 +142,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 </VirtualHost>
 `;
     await fs.writeFile(path.join(VHOST_DIR, `${domain}.conf`), vhostConf).catch(() => {});
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
 
     // Insert into DB
     const result = db.prepare(`
@@ -192,7 +210,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response) => {
   try {
     // Remove vhost config (don't delete web files — admin should do that manually)
     await fs.unlink(path.join(VHOST_DIR, `${account.domain}.conf`)).catch(() => {});
-    await execAsync('systemctl reload httpd 2>/dev/null || true');
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     db.prepare('DELETE FROM accounts WHERE id = ?').run(req.params.id);
     res.json({ success: true });
   } catch (err: any) {
@@ -215,21 +233,35 @@ router.get('/:id/usage', heavyLimit, async (req: AuthRequest, res: Response) => 
     let diskBytes = 0;
     let breakdown: { dir: string; bytes: number }[] = [];
     try {
-      const { stdout } = await execAsync(`du -sb "${accountDir}" 2>/dev/null`);
+      const { stdout } = await runFile('du', ['-sb', '--', accountDir]);
       diskBytes = parseInt(stdout.split('\t')[0]) || 0;
       // Breakdown by top-level subdir
-      const { stdout: sub } = await execAsync(`du -sb "${accountDir}"/* 2>/dev/null | sort -rn | head -10`);
-      breakdown = sub.trim().split('\n').filter(Boolean).map(line => {
-        const [bytes, dir] = line.split('\t');
-        return { dir: dir?.replace(accountDir + '/', '') || dir, bytes: parseInt(bytes) || 0 };
-      });
+      const entries = await fs.readdir(accountDir, { withFileTypes: true }).catch(() => [] as any[]);
+      const sizes: { dir: string; bytes: number }[] = [];
+      for (const entry of entries) {
+        const full = path.join(accountDir, entry.name);
+        const { stdout: entryRaw } = await runFile('du', ['-sb', '--', full]).catch(() => ({ stdout: '', stderr: '' }));
+        const bytes = parseInt(entryRaw.split('\t')[0]) || 0;
+        sizes.push({ dir: entry.name, bytes });
+      }
+      sizes.sort((a, b) => b.bytes - a.bytes);
+      breakdown = sizes.slice(0, 10);
     } catch {}
 
     // File count
     let fileCount = 0;
     try {
-      const { stdout } = await execAsync(`find "${accountDir}" -type f 2>/dev/null | wc -l`);
-      fileCount = parseInt(stdout.trim()) || 0;
+      async function countFiles(dir: string): Promise<number> {
+        let count = 0;
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [] as any[]);
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) count += await countFiles(full);
+          else if (entry.isFile()) count += 1;
+        }
+        return count;
+      }
+      fileCount = await countFiles(accountDir);
     } catch {}
 
     res.json({ disk_bytes: diskBytes, file_count: fileCount, breakdown, directory: accountDir });
@@ -266,7 +298,7 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
     await fs.mkdir(path.join(tmpDir, 'files'), { recursive: true });
     await fs.mkdir(path.join(tmpDir, 'databases'), { recursive: true });
     if (exists(webDir)) {
-      await execAsync(`tar -czf "${tmpDir}/files/files.tar.gz" -C "${path.dirname(webDir)}" "${account.domain}" 2>/dev/null || true`, { timeout: 300000 });
+      await runFile('tar', ['-czf', path.join(tmpDir, 'files/files.tar.gz'), '-C', path.dirname(webDir), account.domain], { timeout: 300000 }).catch(() => ({ stdout: '', stderr: '' }));
     }
 
     // Dump all databases owned by this account user. Pull the list via
@@ -276,8 +308,7 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
     const pass = process.env.DB_ROOT_PASS || '';
     const dbEnv = { ...process.env, ...(pass ? { MYSQL_PWD: pass } : {}) };
     try {
-      const { execFile: ef } = await import('child_process');
-      const efAsync = promisify(ef);
+      
       // SHOW DATABASES LIKE accepts SQL wildcards; build the pattern from the
       // validated username — no quote injection possible since the regex above
       // restricts to [A-Za-z0-9_].
@@ -286,10 +317,10 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
       // matches the host part of MariaDB's ACL (a socket connection would
       // be rejected as @localhost).
       const dbHost = process.env.DB_HOST || '127.0.0.1';
-      const { stdout: dbs } = await efAsync('mysql', [`-u${user}`, `-h${dbHost}`, '-N', '-B', '-e', `SHOW DATABASES LIKE '${likePattern}'`], { env: dbEnv });
+      const { stdout: dbs } = await runFile('mysql', [`-u${user}`, `-h${dbHost}`, '-N', '-B', '-e', `SHOW DATABASES LIKE '${likePattern}'`], { env: dbEnv });
       for (const dbName of dbs.split('\n').filter(Boolean)) {
         if (/^[a-zA-Z0-9_]+$/.test(dbName)) {
-          await execAsync(`mysqldump -u${user} -h${dbHost} ${dbName} | gzip > "${tmpDir}/databases/${dbName}.sql.gz"`, { timeout: 300000, env: dbEnv });
+          await dumpDbToGzip(dbHost, user, dbName, path.join(tmpDir, 'databases', `${dbName}.sql.gz`), dbEnv);
         }
       }
     } catch {}
@@ -299,7 +330,8 @@ router.post('/:id/export', heavyLimit, async (req: AuthRequest, res: Response) =
     await fs.writeFile(path.join(tmpDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
     // Bundle everything
-    await execAsync(`tar -czf "${archivePath}" -C "${tmpDir}" . && rm -rf "${tmpDir}"`, { timeout: 300000 });
+    await runFile('tar', ['-czf', archivePath, '-C', tmpDir, '.'], { timeout: 300000 });
+    await fs.rm(tmpDir, { recursive: true, force: true });
 
     res.download(archivePath, archiveName);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
@@ -312,8 +344,8 @@ router.post('/:id/suspend', async (req: AuthRequest, res: Response) => {
   if (!account) return res.status(404).json({ error: 'Account not found' });
   try {
     db.prepare("UPDATE accounts SET status='suspended' WHERE id=?").run(account.id);
-    await execAsync(`mv "${path.join(VHOST_DIR, `${account.domain}.conf`)}" "${path.join(VHOST_DIR, `${account.domain}.conf.disabled`)}" 2>/dev/null || true`);
-    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+    await fs.rename(path.join(VHOST_DIR, `${account.domain}.conf`), path.join(VHOST_DIR, `${account.domain}.conf.disabled`)).catch(() => {});
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -323,8 +355,8 @@ router.post('/:id/unsuspend', async (req: AuthRequest, res: Response) => {
   if (!account) return res.status(404).json({ error: 'Account not found' });
   try {
     db.prepare("UPDATE accounts SET status='active' WHERE id=?").run(account.id);
-    await execAsync(`mv "${path.join(VHOST_DIR, `${account.domain}.conf.disabled`)}" "${path.join(VHOST_DIR, `${account.domain}.conf`)}" 2>/dev/null || true`);
-    await execAsync('systemctl reload httpd 2>/dev/null || true').catch(() => {});
+    await fs.rename(path.join(VHOST_DIR, `${account.domain}.conf.disabled`), path.join(VHOST_DIR, `${account.domain}.conf`)).catch(() => {});
+    await runFile('systemctl', ['reload', 'httpd']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });

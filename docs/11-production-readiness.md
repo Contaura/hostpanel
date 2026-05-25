@@ -241,3 +241,27 @@ Added 11 new integration tests covering crontab argv, mail account/forwarder arg
 
 ### Remaining
 `accounts.ts` and `client-portal.ts` retain legacy `execAsync()` call sites and will be converted in a follow-up pass (each route-by-route with endpoint tests).
+
+## Fourth shell-execution hardening pass (continued)
+
+Converted the remaining modules from the user-prioritized set:
+
+- `server/src/routes/accounts.ts` — suspend/unsuspend now use `fs.rename` for vhost.conf moves; `systemctl reload httpd` and `du -sb` via argv; `du | sort | head` and `find | wc` replaced with `fs.readdir` + per-entry stat aggregation; `tar -czf … && rm -rf` split into argv `tar` + `fs.rm` recursive; `mysqldump | gzip` replaced with `spawn("mysqldump", argv) → zlib.createGzip() → createWriteStream`.
+- `server/src/routes/client-portal.ts` — 30+ exec call sites converted: `rndc reload`, `postmap`, `chown/chmod`, `useradd`/`userdel`, `id`, `whois`, `openssl x509`, `certbot --apache`, `systemctl reload httpd`, `getent passwd`, `crontab -u/-l/<file>`, `rpm -q`, `opendkim-genkey`, `clamscan` all argv; `sed -i` patterns replaced with line-equality filtering in Node; WordPress install download switched from `curl` to native `fetch` + `stream.pipeline`, with `tar`/`cp`/`rm` via argv/fs primitives and added input validation (siteTitle, adminUser, adminPass, adminEmail) before `wp config create`/`wp core install` argv; access-log `tail|awk|sort|uniq|head` aggregation moved to in-process JS.
+- `server/src/routes/email-extras.ts` — final stragglers (`postmap`, `postfix reload`, `systemctl restart spamassassin`, `repquota`) all argv.
+
+Added 3 integration tests covering: account suspend reloads httpd via argv; account `usage` reports `du` via argv; client-portal DNS append reloads `rndc` via argv.
+
+### Validation
+- `npm run test --workspace=server` — 9 files / 55 tests passed
+- `npm run build` — passed
+- `npm audit --omit=dev --audit-level=moderate` — 0 vulnerabilities
+- Grep `execAsync|promisify(exec)` across all 10 user-listed files (accounts, backup, client-portal, cron, email, scripts, ssl-advanced, wordpress, apps, reseller) plus email-extras — clean
+
+### Out of scope for this pass (additional `execAsync()` discovered)
+- `node-apps.ts` (pm2 jlist/startup, tail logs)
+- `resource-limits.ts` (du, nginx symlink+reload, repquota, setquota)
+- `logs.ts` (tail/ls log files)
+- `cache.ts` (php -r opcache, redis-cli, nc → memcached)
+
+These were not on the prioritized list and remain for a future pass.

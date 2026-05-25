@@ -1,12 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { runFile } from '../utils/process-runner';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import db from '../db';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const VIRTUAL_FILE = process.env.VIRTUAL_FILE || '/etc/postfix/virtual';
 
@@ -47,8 +45,8 @@ router.post('/forwarders', async (req: Request, res: Response) => {
     if (list.find(f => f.source === source)) return res.status(409).json({ error: 'Forwarder already exists' });
     list.push({ source, dest });
     writeForwarders(list);
-    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [VIRTUAL_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -58,8 +56,8 @@ router.delete('/forwarders/:source', async (req: Request, res: Response) => {
     const source = decodeURIComponent(req.params.source);
     const list = readForwarders().filter(f => f.source !== source);
     writeForwarders(list);
-    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [VIRTUAL_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -144,7 +142,7 @@ router.put('/spam', async (req: Request, res: Response) => {
       .filter(([k]) => allowed.has(k))
       .map(([k, v]) => `${k} ${String(v).replace(/[\r\n]/g, '')}`);
     writeFileSync(SA_CONFIG, '# Managed by HostPanel\n' + lines.join('\n') + '\n');
-    await execAsync('systemctl restart spamassassin').catch(() => {});
+    await runFile('systemctl', ['restart', 'spamassassin']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -153,7 +151,7 @@ router.put('/spam', async (req: Request, res: Response) => {
 
 router.get('/quotas', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync('repquota -a -s 2>/dev/null || echo ""');
+    const { stdout } = await runFile('repquota', ['-a', '-s']).catch(() => ({ stdout: '', stderr: '' }));
     const lines = stdout.split('\n').filter(l => l.trim() && !l.startsWith('-') && !l.startsWith('Block'));
     const quotas = lines.map(l => {
       const parts = l.trim().split(/\s+/);
@@ -243,8 +241,8 @@ router.post('/catch-all', async (req: Request, res: Response) => {
       list.push({ source, dest });
       writeForwarders(list);
     }
-    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [VIRTUAL_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true, source, dest });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -254,8 +252,8 @@ router.delete('/catch-all/:domain', async (req: Request, res: Response) => {
   try {
     const list = readForwarders().filter(f => f.source !== source);
     writeForwarders(list);
-    await execAsync('postmap ' + VIRTUAL_FILE).catch(() => {});
-    await execAsync('postfix reload').catch(() => {});
+    await runFile('postmap', [VIRTUAL_FILE]).catch(() => ({ stdout: '', stderr: '' }));
+    await runFile('postfix', ['reload']).catch(() => ({ stdout: '', stderr: '' }));
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
