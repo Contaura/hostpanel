@@ -62,6 +62,7 @@ export default function CpanelParity() {
   async function previewDnsSync() { const data = await post('/api/dns-cluster/sync-preview', { domain: form.nsDomain }); setDnsSync(data); }
   async function runDnsSync() { const data = await post('/api/dns-cluster/sync', { domain: form.nsDomain }); setDnsSync(data); toast.success('DNS sync requested'); load(); }
   async function inspectImport() { await post('/api/transfer-import/inspect', { archivePath: form.archivePath }); toast.success('Transfer archive inspected'); load(); }
+  async function executeImport(id: number) { await post(`/api/transfer-import/${id}/execute`, { confirm: true, domain: form.importDomain || undefined, username: form.importUsername || undefined }); toast.success('Transfer import executed'); load(); }
 
   if (loading) return <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" /></div>;
   return <div className="space-y-5">
@@ -108,8 +109,8 @@ export default function CpanelParity() {
     </Panel>
 
     <Panel title="8. Full Transfer / Import Tool">
-      <div className="grid md:grid-cols-3 gap-3"><Text value={form.archivePath || ''} onChange={v=>set('archivePath',v)} placeholder="/root/cpmove-user.tar.gz"/><button className="btn-secondary" onClick={inspectImport}>Inspect / Dry Run</button></div>
-      <div className="text-sm text-slate-500">Inspections: {imports.map(i=>`#${i.id} ${i.status}`).join(' • ') || 'None'}</div>
+      <div className="grid md:grid-cols-4 gap-3"><Text value={form.archivePath || ''} onChange={v=>set('archivePath',v)} placeholder="/root/cpmove-user.tar.gz"/><Text value={form.importDomain || ''} onChange={v=>set('importDomain',v)} placeholder="override domain optional"/><Text value={form.importUsername || ''} onChange={v=>set('importUsername',v)} placeholder="override username optional"/><button className="btn-secondary" onClick={inspectImport}>Inspect / Dry Run</button></div>
+      <div className="space-y-2">{imports.map(i=><div key={i.id} className="rounded border border-slate-200 dark:border-slate-800 p-3 text-sm flex flex-wrap items-center justify-between gap-2"><div><b>#{i.id}</b> {i.status} <span className="text-slate-500">{i.report?.archivePath || i.archive_path}</span><div className="text-xs text-slate-500">Domains: {(i.report?.domains || []).join(', ') || 'none'} · DBs: {(i.report?.databases || []).length || 0} · Steps: {(i.report?.steps || []).length}</div></div><button className="btn-primary text-xs" disabled={!['inspected','failed'].includes(i.status)} onClick={()=>executeImport(i.id)}>Execute Import</button></div>)}</div>
     </Panel>
 
     <Panel title="9. Plugin / Update Ecosystem">

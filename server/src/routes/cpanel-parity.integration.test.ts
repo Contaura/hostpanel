@@ -19,8 +19,8 @@ function listen(app: express.Express): Promise<{ url: string; close: () => Promi
 
 describe('cPanel parity control-plane routes', () => {
   let tmp = ''; let closeServer: (() => Promise<void>) | undefined;
-  beforeEach(async () => { tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-parity-')); process.env.DATA_DIR = tmp; process.env.WEBDAV_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-webdav.conf'); process.env.WEBDAV_PASSWD_FILE = path.join(tmp, 'httpd', '.hostpanel-webdav-passwd'); process.env.WEBDAV_ALLOWED_ROOT = path.join(tmp, 'www') + path.sep; runFileMock.mockReset(); vi.resetModules(); });
-  afterEach(async () => { if (closeServer) await closeServer(); closeServer = undefined; await fs.rm(tmp, { recursive: true, force: true }); delete process.env.DATA_DIR; delete process.env.WEBDAV_CONF_FILE; delete process.env.WEBDAV_PASSWD_FILE; delete process.env.WEBDAV_ALLOWED_ROOT; vi.resetModules(); });
+  beforeEach(async () => { tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-parity-')); process.env.DATA_DIR = tmp; process.env.WEBDAV_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-webdav.conf'); process.env.WEBDAV_PASSWD_FILE = path.join(tmp, 'httpd', '.hostpanel-webdav-passwd'); process.env.WEBDAV_ALLOWED_ROOT = path.join(tmp, 'www') + path.sep; process.env.WEBROOT = path.join(tmp, 'www'); process.env.TRANSFER_ROLLBACK_DIR = path.join(tmp, 'rollbacks'); runFileMock.mockReset(); vi.resetModules(); });
+  afterEach(async () => { if (closeServer) await closeServer(); closeServer = undefined; await fs.rm(tmp, { recursive: true, force: true }); delete process.env.DATA_DIR; delete process.env.WEBDAV_CONF_FILE; delete process.env.WEBDAV_PASSWD_FILE; delete process.env.WEBDAV_ALLOWED_ROOT; delete process.env.WEBROOT; delete process.env.TRANSFER_ROLLBACK_DIR; vi.resetModules(); });
   async function appForRoutes() {
     const team = (await import('./team-users')).default;
     const webdav = (await import('./webdav')).default;
@@ -69,5 +69,48 @@ describe('cPanel parity control-plane routes', () => {
     expect(JSON.stringify(await sync.json())).not.toContain('ZmFrZS1jbHVzdGVy');
     const inspect = await fetch(`${server.url}/transfer/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archivePath: archive }) });
     expect(inspect.status).toBe(400); // tmp archives are intentionally outside approved import roots
+  });
+
+  it('executes cPanel transfer import with file rollback and progress report', async () => {
+    const archive = `/var/backups/hostpanel-test-${Date.now()}.tar.gz`;
+    await fs.mkdir('/var/backups', { recursive: true });
+    await fs.writeFile(archive, 'fake');
+    const entries = [
+      'cpmove-demo/userdata/example.com',
+      'cpmove-demo/homedir/public_html/index.html',
+      'cpmove-demo/mysql/demo_app.sql',
+    ];
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tf') return { stdout: entries.join('\n') + '\n', stderr: '' };
+      if (cmd === 'tar' && args[0] === '-xf') {
+        const staging = args[args.indexOf('-C') + 1];
+        await fs.mkdir(path.join(staging, 'cpmove-demo', 'homedir', 'public_html'), { recursive: true });
+        await fs.mkdir(path.join(staging, 'cpmove-demo', 'mysql'), { recursive: true });
+        await fs.writeFile(path.join(staging, 'cpmove-demo', 'homedir', 'public_html', 'index.html'), 'imported');
+        await fs.writeFile(path.join(staging, 'cpmove-demo', 'mysql', 'demo_app.sql'), '-- sql');
+        return { stdout: '', stderr: '' };
+      }
+      if (cmd === 'mysql') return { stdout: '', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const server = await appForRoutes(); closeServer = server.close;
+    const inspect = await fetch(`${server.url}/transfer/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archivePath: archive }) });
+    expect(inspect.status).toBe(200);
+    const inspected = await inspect.json();
+    expect(inspected.report.executable).toBe(true);
+    const existing = path.join(process.env.WEBROOT!, 'example.com', 'public_html');
+    await fs.mkdir(existing, { recursive: true });
+    await fs.writeFile(path.join(existing, 'old.html'), 'old');
+    const exec = await fetch(`${server.url}/transfer/${inspected.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true, sections: { databases: false } }) });
+    expect(exec.status).toBe(200);
+    const body = await exec.json();
+    expect(body.status).toBe('completed');
+    await expect(fs.readFile(path.join(existing, 'index.html'), 'utf8')).resolves.toBe('imported');
+    const db = (await import('../db')).default;
+    const account = db.prepare('SELECT username,domain FROM accounts WHERE domain=?').get('example.com') as any;
+    expect(account.username).toBe('demo');
+    const progress = await fetch(`${server.url}/transfer/${inspected.id}`);
+    expect((await progress.json()).report.steps.some((s: any) => s.step === 'files-restored')).toBe(true);
+    await fs.rm(archive, { force: true });
   });
 });

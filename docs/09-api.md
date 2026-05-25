@@ -207,6 +207,17 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## Transfer Imports
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/transfer-import` | List inspected/executed transfer imports and progress reports |
+| `POST` | `/api/transfer-import/inspect` | Inspect cPanel archive and build executable import report |
+| `GET` | `/api/transfer-import/:id` | Read one import status/progress report |
+| `POST` | `/api/transfer-import/:id/execute` | Execute guarded import with `confirm=true`, file rollback point, account upsert, and SQL import |
+
+---
+
 ## Common Response Formats
 
 **Success:**
