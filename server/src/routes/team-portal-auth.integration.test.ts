@@ -43,7 +43,9 @@ describe('client portal team subaccount authentication', () => {
     const passwordHash = await bcrypt.hash('password123', 4);
     const clientId = Number(db.prepare("INSERT INTO clients (name,email,portal_enabled,password_hash) VALUES ('Acme','owner@example.com',1,?)").run(passwordHash).lastInsertRowid);
     const accountId = Number(db.prepare("INSERT INTO accounts (username,domain,client_id,status) VALUES ('acme','example.com',?,'active')").run(clientId).lastInsertRowid);
+    const otherAccountId = Number(db.prepare("INSERT INTO accounts (username,domain,client_id,status) VALUES ('other','other.com',?,'active')").run(clientId).lastInsertRowid);
     db.prepare("INSERT INTO invoices (invoice_number,client_id,account_id,amount,due_date) VALUES ('INV-1',?,?,25,'2027-01-01')").run(clientId, accountId);
+    db.prepare("INSERT INTO invoices (invoice_number,client_id,account_id,amount,due_date) VALUES ('INV-2',?,?,50,'2027-01-01')").run(clientId, otherAccountId);
     const teamHash = await bcrypt.hash('team-password', 4);
     db.prepare('INSERT INTO team_users (client_id,account_id,username,email,password_hash,permissions,status) VALUES (?,?,?,?,?,?,\'active\')')
       .run(clientId, accountId, 'helper', 'helper@example.com', teamHash, JSON.stringify(permissions));
@@ -78,5 +80,31 @@ describe('client portal team subaccount authentication', () => {
     const invoices = await fetch(`${server.url}/api/portal/invoices`, { headers: { authorization: `Bearer ${token}` } });
     expect(invoices.status).toBe(200);
     expect(await invoices.json()).toHaveLength(1);
+  });
+
+  it('narrows billing views for team subaccounts to their assigned hosting account', async () => {
+    const server = await appWithSeed(['billing']); closeServer = server.close;
+    const login = await fetch(`${server.url}/api/portal/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'helper@example.com', password: 'team-password' }) });
+    const { token } = await login.json();
+
+    const invoices = await fetch(`${server.url}/api/portal/invoices`, { headers: { authorization: `Bearer ${token}` } });
+    expect(invoices.status).toBe(200);
+    const rows = await invoices.json();
+    expect(rows.map((row: any) => row.invoice_number)).toEqual(['INV-1']);
+
+    const forbidden = await fetch(`${server.url}/api/portal/invoices/2`, { headers: { authorization: `Bearer ${token}` } });
+    expect(forbidden.status).toBe(404);
+  });
+
+  it('blocks team subaccounts from domains outside their assigned hosting account', async () => {
+    const server = await appWithSeed(['dns']); closeServer = server.close;
+    const login = await fetch(`${server.url}/api/portal/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'helper@example.com', password: 'team-password' }) });
+    const { token } = await login.json();
+
+    const ownDomain = await fetch(`${server.url}/api/portal/domains/example.com/dns`, { headers: { authorization: `Bearer ${token}` } });
+    expect(ownDomain.status).toBe(200);
+
+    const otherDomain = await fetch(`${server.url}/api/portal/domains/other.com/dns`, { headers: { authorization: `Bearer ${token}` } });
+    expect(otherDomain.status).toBe(403);
   });
 });
