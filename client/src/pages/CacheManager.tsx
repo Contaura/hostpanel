@@ -41,10 +41,13 @@ export default function CacheManager() {
   }
 
   async function redisAction(action: 'start' | 'stop') {
-    const r = await fetchApi(`/api/cache/redis/${action}`, { method: 'POST' });
+    const r = await fetchApi('/api/cache/redis/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ enabled: action === 'start' }),
+    });
     const d = await r.json();
     if (d.error) toast.error(d.error);
-    else { toast.success(`Redis ${action}ped`); loadAll(); }
+    else { toast.success(`Redis ${action === 'start' ? 'started' : 'stopped'}`); loadAll(); }
   }
 
   const Stat = ({ label, value }: { label: string; value: any }) => (
@@ -85,19 +88,13 @@ export default function CacheManager() {
             </div>
             <button className="btn-danger text-xs" disabled={flushing === 'opcache'} onClick={() => flush('opcache')}><Trash2 size={12} className="mr-1" />Flush OPcache</button>
           </div>
-          {opcache.memory_usage && (
+          {opcache.enabled && (
             <div className="card">
-              <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 mb-4">
-                <div
-                  className="bg-indigo-500 h-2 rounded-full"
-                  style={{ width: `${Math.round(opcache.memory_usage.used_memory / (opcache.memory_usage.used_memory + opcache.memory_usage.free_memory) * 100)}%` }}
-                />
-              </div>
               <div className="grid grid-cols-4 gap-3">
-                <Stat label="Used Memory" value={`${(opcache.memory_usage.used_memory / 1e6).toFixed(1)} MB`} />
-                <Stat label="Free Memory" value={`${(opcache.memory_usage.free_memory / 1e6).toFixed(1)} MB`} />
-                <Stat label="Cached Scripts" value={opcache.opcache_statistics?.num_cached_scripts} />
-                <Stat label="Hit Rate" value={opcache.opcache_statistics?.opcache_hit_rate ? `${Number(opcache.opcache_statistics.opcache_hit_rate).toFixed(1)}%` : '—'} />
+                <Stat label="Used Memory" value={opcache.used ? `${(Number(opcache.used) / 1e6).toFixed(1)} MB` : '—'} />
+                <Stat label="Free Memory" value={opcache.free ? `${(Number(opcache.free) / 1e6).toFixed(1)} MB` : '—'} />
+                <Stat label="Cached Files" value={opcache.cached_files ?? '—'} />
+                <Stat label="Hit Rate" value={opcache.hit_rate ? `${Number(opcache.hit_rate).toFixed(1)}%` : '—'} />
               </div>
             </div>
           )}
@@ -108,12 +105,12 @@ export default function CacheManager() {
         <div className="space-y-4">
           <div className="card flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${redis.running ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              <span className="font-medium text-sm">Redis {redis.running ? 'Running' : 'Stopped'}</span>
+              <span className={`w-2 h-2 rounded-full ${redis.enabled ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className="font-medium text-sm">Redis {redis.enabled ? 'Running' : 'Stopped'}</span>
               {redis.version && <span className="text-xs text-slate-500">v{redis.version}</span>}
             </div>
             <div className="flex gap-2">
-              {redis.running ? (
+              {redis.enabled ? (
                 <>
                   <button className="btn-danger text-xs" disabled={flushing === 'redis'} onClick={() => flush('redis')}><Trash2 size={12} className="mr-1" />Flush All</button>
                   <button className="btn-ghost text-xs" onClick={() => redisAction('stop')}><Square size={12} className="mr-1" />Stop</button>
@@ -123,12 +120,12 @@ export default function CacheManager() {
               )}
             </div>
           </div>
-          {redis.running && (
+          {redis.enabled && (
             <div className="card grid grid-cols-4 gap-3">
-              <Stat label="Connected Clients" value={redis.connected_clients} />
-              <Stat label="Used Memory" value={redis.used_memory_human} />
-              <Stat label="Total Keys (DB0)" value={redis.db0_keys} />
-              <Stat label="Uptime" value={redis.uptime_in_days ? `${redis.uptime_in_days}d` : '—'} />
+              <Stat label="Connected Clients" value={redis.connected ?? '—'} />
+              <Stat label="Used Memory" value={redis.memory ?? '—'} />
+              <Stat label="Total Keys (DB0)" value={redis.keys ?? '0'} />
+              <Stat label="Uptime" value={redis.uptime ? `${Math.floor(Number(redis.uptime) / 86400)}d` : '—'} />
             </div>
           )}
         </div>
@@ -138,14 +135,14 @@ export default function CacheManager() {
         <div className="space-y-4">
           <div className="card flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className={`w-2 h-2 rounded-full ${memcached.running ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              <span className="font-medium text-sm">Memcached {memcached.running ? 'Running' : 'Stopped'}</span>
+              <span className={`w-2 h-2 rounded-full ${memcached.enabled ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span className="font-medium text-sm">Memcached {memcached.enabled ? 'Running' : 'Stopped'}</span>
             </div>
-            {memcached.running && (
+            {memcached.enabled && (
               <button className="btn-danger text-xs" disabled={flushing === 'memcached'} onClick={() => flush('memcached')}><Trash2 size={12} className="mr-1" />Flush All</button>
             )}
           </div>
-          {memcached.running && (
+          {memcached.enabled && (
             <div className="card grid grid-cols-4 gap-3">
               <Stat label="Current Items" value={memcached.curr_items} />
               <Stat label="Total Items" value={memcached.total_items} />

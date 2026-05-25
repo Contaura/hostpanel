@@ -3,13 +3,25 @@ import { RefreshCw, Shield, Ban, FileText, Power, Search } from 'lucide-react';
 import { useToast } from '../components/Toast';
 import { fetchApi } from '../lib/api';
 
+interface Fail2BanJail {
+  name: string;
+  total: number;
+  current: number;
+  banned: string[];
+}
+
+interface Fail2BanStatus {
+  installed: boolean;
+  jails: Fail2BanJail[];
+}
+
 export default function WafManager() {
   const toast = useToast();
   const [waf, setWaf] = useState<any>(null);
-  const [f2b, setF2b] = useState<any>(null);
+  const [f2b, setF2b] = useState<Fail2BanStatus | null>(null);
   const [rules, setRules] = useState<any[]>([]);
   const [rulesLoaded, setRulesLoaded] = useState(false);
-  const [jailDetail, setJailDetail] = useState<Record<string, any>>({});
+  const [expandedJail, setExpandedJail] = useState<string | null>(null);
   const [togglingJail, setTogglingJail] = useState<string | null>(null);
   const [tab, setTab] = useState<'modsec' | 'fail2ban' | 'rules'>('modsec');
   const [unbanIp, setUnbanIp] = useState('');
@@ -47,11 +59,8 @@ export default function WafManager() {
     else { toast.success(`ModSecurity set to ${mode}`); load(); }
   }
 
-  async function loadJail(name: string) {
-    if (jailDetail[name]) return;
-    const r = await fetchApi(`/api/waf/fail2ban/${name}`);
-    const data = await r.json();
-    setJailDetail(j => ({ ...j, [name]: data }));
+  function toggleJailDetails(name: string) {
+    setExpandedJail(current => current === name ? null : name);
   }
 
   async function toggleJail(name: string, currentlyRunning: boolean) {
@@ -71,10 +80,11 @@ export default function WafManager() {
   }
 
   async function unban() {
-    const r = await fetchApi('/api/waf/fail2ban/unban', { method: 'POST', body: JSON.stringify({ jail: f2b?.jails?.[0] || 'sshd', ip: unbanIp }) });
+    const jail = banJail || f2b?.jails?.[0]?.name || 'sshd';
+    const r = await fetchApi('/api/waf/fail2ban/unban', { method: 'POST', body: JSON.stringify({ jail, ip: unbanIp }) });
     const d = await r.json();
     if (d.error) toast.error(d.error);
-    else { toast.success(`Unbanned ${unbanIp}`); setUnbanIp(''); load(); }
+    else { toast.success(`Unbanned ${unbanIp} from ${jail}`); setUnbanIp(''); load(); }
   }
 
   return (
@@ -184,78 +194,95 @@ export default function WafManager() {
       {tab === 'fail2ban' && f2b && (
         <div className="space-y-4">
           <div className="card flex items-center gap-2">
-            <Ban size={16} className={f2b.running ? 'text-emerald-500' : 'text-red-500'} />
-            <span className="font-medium text-sm">Fail2Ban {f2b.running ? 'Running' : 'Stopped'}</span>
+            <Ban size={16} className={f2b.installed ? 'text-emerald-500' : 'text-red-500'} />
+            <span className="font-medium text-sm">Fail2Ban {f2b.installed ? 'Installed' : 'Not Installed'}</span>
           </div>
 
-          {/* Quick ban/unban */}
-          <div className="card grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Ban IP</p>
-              <div className="flex gap-2">
-                <select className="input text-sm" value={banJail} onChange={e => setBanJail(e.target.value)}>
-                  <option value="">Select jail</option>
-                  {(f2b.jails || []).map((j: string) => <option key={j} value={j}>{j}</option>)}
-                </select>
-                <input className="input flex-1" placeholder="1.2.3.4" value={banIp} onChange={e => setBanIp(e.target.value)} />
-                <button className="btn-danger text-sm" onClick={ban}>Ban</button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Unban IP</p>
-              <div className="flex gap-2">
-                <input className="input flex-1" placeholder="1.2.3.4" value={unbanIp} onChange={e => setUnbanIp(e.target.value)} />
-                <button className="btn-secondary text-sm" onClick={unban}>Unban</button>
-              </div>
-            </div>
-          </div>
-
-          {/* Jails */}
-          <div className="space-y-2">
-            {(f2b.jails || []).map((jail: string) => {
-              const detail = jailDetail[jail];
-              const isRunning = f2b.running;
-              return (
-                <div key={jail} className="card">
-                  <div className="flex items-center justify-between">
-                    <button
-                      className="flex items-center gap-2 text-sm font-medium flex-1 text-left"
-                      onClick={() => { loadJail(jail); setJailDetail(j => ({ ...j, [jail]: j[jail] === undefined ? null : j[jail] })); }}
-                    >
-                      <span>{jail}</span>
-                      <span className="text-slate-400 text-xs">Click to expand</span>
-                    </button>
-                    <button
-                      onClick={() => toggleJail(jail, isRunning)}
-                      disabled={togglingJail === jail}
-                      className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${isRunning ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100'}`}
-                      title={isRunning ? 'Stop jail' : 'Start jail'}
-                    >
-                      <Power size={11} />
-                      {togglingJail === jail ? '…' : isRunning ? 'Stop' : 'Start'}
-                    </button>
+          {f2b.installed ? (
+            <>
+              {/* Quick ban/unban */}
+              <div className="card grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Ban IP</p>
+                  <div className="flex gap-2">
+                    <select className="input text-sm" value={banJail} onChange={e => setBanJail(e.target.value)}>
+                      <option value="">Select jail</option>
+                      {f2b.jails.map(j => <option key={j.name} value={j.name}>{j.name}</option>)}
+                    </select>
+                    <input className="input flex-1" placeholder="1.2.3.4" value={banIp} onChange={e => setBanIp(e.target.value)} />
+                    <button className="btn-danger text-sm" onClick={ban} disabled={!banJail || !banIp.trim()}>Ban</button>
                   </div>
-                  {detail && (
-                    <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
-                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Currently Banned</p><p className="font-bold text-lg">{detail.currently_banned ?? '—'}</p></div>
-                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Total Banned</p><p className="font-bold text-lg">{detail.total_banned ?? '—'}</p></div>
-                      <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Failed Attempts</p><p className="font-bold text-lg">{detail.currently_failed ?? '—'}</p></div>
-                      {detail.banned_ips?.length > 0 && (
-                        <div className="col-span-3">
-                          <p className="text-slate-500 mb-1">Banned IPs</p>
-                          <div className="flex flex-wrap gap-1">
-                            {detail.banned_ips.map((ip: string) => (
-                              <span key={ip} className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded text-xs font-mono">{ip}</span>
-                            ))}
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Unban IP</p>
+                  <div className="flex gap-2">
+                    <select className="input text-sm" value={banJail} onChange={e => setBanJail(e.target.value)}>
+                      <option value="">Auto</option>
+                      {f2b.jails.map(j => <option key={j.name} value={j.name}>{j.name}</option>)}
+                    </select>
+                    <input className="input flex-1" placeholder="1.2.3.4" value={unbanIp} onChange={e => setUnbanIp(e.target.value)} />
+                    <button className="btn-secondary text-sm" onClick={unban} disabled={!unbanIp.trim()}>Unban</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Jails */}
+              <div className="space-y-2">
+                {f2b.jails.map(jail => {
+                  const isExpanded = expandedJail === jail.name;
+                  const hasBanned = jail.banned.length > 0;
+                  return (
+                    <div key={jail.name} className="card">
+                      <div className="flex items-center justify-between gap-3">
+                        <button
+                          className="flex items-center gap-2 text-sm font-medium flex-1 text-left"
+                          onClick={() => toggleJailDetails(jail.name)}
+                          aria-expanded={isExpanded}
+                        >
+                          <span>{jail.name}</span>
+                          <span className="text-slate-400 text-xs">{isExpanded ? 'Hide details' : 'Show details'}</span>
+                        </button>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <span>{jail.current} current</span>
+                          <span>{jail.total} total</span>
+                        </div>
+                        <button
+                          onClick={() => toggleJail(jail.name, true)}
+                          disabled={togglingJail === jail.name}
+                          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100"
+                          title="Stop jail"
+                        >
+                          <Power size={11} />
+                          {togglingJail === jail.name ? '…' : 'Stop'}
+                        </button>
+                      </div>
+                      {isExpanded && (
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                          <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Currently Banned</p><p className="font-bold text-lg">{jail.current}</p></div>
+                          <div className="bg-slate-50 dark:bg-slate-800 rounded p-2"><p className="text-slate-500">Total Banned</p><p className="font-bold text-lg">{jail.total}</p></div>
+                          <div className="col-span-2">
+                            <p className="text-slate-500 mb-1">Banned IPs</p>
+                            {hasBanned ? (
+                              <div className="flex flex-wrap gap-1">
+                                {jail.banned.map(ip => (
+                                  <span key={ip} className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 px-2 py-0.5 rounded text-xs font-mono">{ip}</span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-slate-400">No banned IPs in this jail.</p>
+                            )}
                           </div>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+                {f2b.jails.length === 0 && <p className="card text-sm text-slate-500">No Fail2Ban jails are configured.</p>}
+              </div>
+            </>
+          ) : (
+            <p className="card text-sm text-slate-500">Install Fail2Ban to enable jail monitoring and ban/unban controls.</p>
+          )}
         </div>
       )}
       </>

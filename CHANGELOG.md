@@ -2,6 +2,13 @@
 
 All notable changes to HostPanel are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Cache Manager now uses the actual cache API response schema for OPcache, Redis, and Memcached status/details, and sends Redis start/stop requests to the implemented `/api/cache/redis/toggle` endpoint instead of non-existent placeholder action URLs.
+- WAF / Fail2Ban now renders jail objects returned by the API directly, expands real jail metrics and banned IPs without calling a non-existent detail endpoint, and disables ban/unban actions until required input is present.
+
 ## [1.1.0] — 2026-05-15
 
 ### Security
