@@ -58,6 +58,10 @@ import nodeAppsRoutes        from './routes/node-apps';
 import serverInfoRoutes      from './routes/server-info';
 import mailToolsRoutes       from './routes/mail-tools';
 import securityScannerRoutes from './routes/security-scanner';
+import featureListsRoutes    from './routes/feature-lists';
+import mailTraceRoutes       from './routes/mail-trace';
+import analyticsRoutes       from './routes/analytics';
+import extensionsRoutes      from './routes/extensions';
 import { authenticateToken, readonlyGuard } from './middleware/auth';
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
@@ -248,6 +252,12 @@ app.use('/api/node-apps',      authenticateToken, nodeAppsRoutes);
 app.use('/api/server-info',       authenticateToken, serverInfoRoutes);
 app.use('/api/mail-tools',        authenticateToken, mailToolsRoutes);
 app.use('/api/security-scanner',  authenticateToken, securityScannerRoutes);
+
+// cPanel/WHM parity foundations
+app.use('/api/feature-lists', authenticateToken, featureListsRoutes);
+app.use('/api/mail-trace',    authenticateToken, mailTraceRoutes);
+app.use('/api/analytics',     authenticateToken, analyticsRoutes);
+app.use('/api/extensions',    authenticateToken, extensionsRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.

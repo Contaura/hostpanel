@@ -7,7 +7,12 @@ All notable changes to HostPanel are documented in this file.
 ### Added
 
 - Added `docs/cpanel-comparison.md` comparing HostPanel with cPanel/WHM for end-user and administrator functionality, including a prioritized gap list.
+- Added `docs/plans/cpanel-whm-parity-roadmap.md` and `docs/cpanel-whm-parity-status.md` to track full cPanel/WHM parity implementation.
 - Added a cPanel-style Address Importer in Email Extras for bulk CSV import of email forwarders with duplicate skipping and row-level validation feedback.
+- Added WHM-style feature-list foundation APIs for package feature catalog, named feature lists, and effective plan features.
+- Added Track Delivery-style mail trace APIs for Postfix log search by sender, recipient, queue ID, and status.
+- Added visitor, error, bandwidth, raw-access, and Awstats/Webalizer-style analytics APIs backed by local web logs.
+- Added server update and plugin registry foundation APIs for git/audit status and controlled plugin manifest discovery.
 
 ### Fixed
 
