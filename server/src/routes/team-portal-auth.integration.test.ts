@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../utils/process-runner', () => ({ runFile: vi.fn(async () => ({ stdout: '', stderr: '' })) }));
@@ -136,6 +137,26 @@ describe('client portal team subaccount authentication', () => {
     expect([200, 500]).toContain(allowedDb.status); // 500 is acceptable in test env without MySQL after namespace authorization passes.
     const blockedDb = await fetch(`${server.url}/api/portal/databases`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'other_blog' }) });
     expect(blockedDb.status).toBe(403);
+  });
+
+  it('rejects team subaccount tokens whose team user no longer belongs to the token client', async () => {
+    const server = await appWithSeed(['files']); closeServer = server.close;
+    const db = (await import('../db')).default;
+    const intruderHash = await bcrypt.hash('intruder-password', 4);
+    const intruderClientId = Number(db.prepare("INSERT INTO clients (name,email,portal_enabled,password_hash) VALUES ('Intruder','intruder@example.com',1,?)").run(intruderHash).lastInsertRowid);
+
+    const forgedMismatchToken = jwt.sign({
+      clientId: intruderClientId,
+      email: 'helper@example.com',
+      role: 'client_team',
+      teamUserId: 1,
+      accountId: 1,
+      permissions: ['files'],
+    }, process.env.JWT_SECRET!, { expiresIn: '8h' });
+
+    const me = await fetch(`${server.url}/api/portal/me`, { headers: { authorization: `Bearer ${forgedMismatchToken}` } });
+    expect(me.status).toBe(403);
+    expect((await me.json()).error).toContain('Team subaccount client mismatch');
   });
 
   it('attributes audited portal mutations to the team subaccount id', async () => {

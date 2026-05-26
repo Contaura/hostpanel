@@ -152,8 +152,14 @@ function clientAuth(req: Request, res: Response, next: NextFunction) {
       };
     }
     if (payload.role === 'client_team') {
-      const team = db.prepare('SELECT id, status, permissions, account_id FROM team_users WHERE id = ?').get(payload.teamUserId) as any;
+      const team = db.prepare(`
+        SELECT tu.id, tu.status, tu.permissions, tu.account_id, COALESCE(tu.client_id, a.client_id) AS resolved_client_id
+        FROM team_users tu
+        LEFT JOIN accounts a ON a.id = tu.account_id
+        WHERE tu.id = ?
+      `).get(payload.teamUserId) as any;
       if (!team || team.status !== 'active') return res.status(403).json({ error: 'Team subaccount disabled' });
+      if (Number(team.resolved_client_id) !== Number(payload.clientId)) return res.status(403).json({ error: 'Team subaccount client mismatch' });
       const permissions = JSON.parse(team.permissions || '[]') as string[];
       const required = requiredTeamPermission(req);
       if (required && !permissions.includes(required)) return res.status(403).json({ error: `Team subaccount lacks ${required} permission` });
