@@ -1,11 +1,11 @@
 import { Router, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { existsSync } from 'fs';
+import fs from 'fs/promises';
+import path from 'path';
 import { AuthRequest } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 
 const LOG_FILES: Record<string, { label: string; path: string }> = {
   apache_access: { label: 'Apache Access', path: '/var/log/httpd/access_log' },
@@ -17,6 +17,11 @@ const LOG_FILES: Record<string, { label: string; path: string }> = {
   ftp:           { label: 'FTP',            path: '/var/log/vsftpd.log' },
   mail:          { label: 'Mail',           path: '/var/log/maillog' },
 };
+
+async function tailFile(filePath: string, lines: number) {
+  const { stdout } = await runFile('tail', ['-n', String(lines), '--', filePath], { timeout: 15000, maxBuffer: 5 * 1024 * 1024 });
+  return stdout;
+}
 
 router.get('/list', (_req: AuthRequest, res: Response) => {
   const list = Object.entries(LOG_FILES).map(([key, { label, path }]) => ({
@@ -35,7 +40,7 @@ router.get('/read/:key', async (req: AuthRequest, res: Response) => {
   if (!log) return res.status(400).json({ error: 'Unknown log key' });
   if (!existsSync(log.path)) return res.status(404).json({ error: 'Log file not found on this server' });
   try {
-    const { stdout } = await execAsync(`tail -n ${lines} "${log.path}" 2>&1`);
+    const stdout = await tailFile(log.path, lines);
     res.json({ content: stdout, path: log.path });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -49,7 +54,7 @@ router.get('/search/:key', async (req: AuthRequest, res: Response) => {
   const log = LOG_FILES[key];
   if (!log || !existsSync(log.path)) return res.status(404).json({ error: 'Log not found' });
   try {
-    const { stdout } = await execAsync(`tail -n 10000 "${log.path}" 2>/dev/null`);
+    const stdout = await tailFile(log.path, 10000);
     const lq = query.toLowerCase();
     const content = stdout.split('\n').filter(l => l.toLowerCase().includes(lq)).slice(-500).join('\n');
     res.json({ content, path: log.path });
@@ -64,9 +69,10 @@ const HTTPD_LOG_DIR = process.env.HTTPD_LOG_DIR || '/var/log/httpd';
 
 router.get('/domain-list', async (_req: AuthRequest, res: Response) => {
   try {
-    const { stdout } = await execAsync(`ls "${HTTPD_LOG_DIR}"/*-access.log 2>/dev/null || true`);
-    const domains = stdout.trim().split('\n').filter(Boolean)
-      .map(f => f.replace(/-access\.log$/, '').replace(/.*\//, ''));
+    const files = await fs.readdir(HTTPD_LOG_DIR);
+    const domains = files
+      .filter(f => f.endsWith('-access.log'))
+      .map(f => f.replace(/-access\.log$/, ''));
     res.json(domains);
   } catch { res.json([]); }
 });
@@ -77,10 +83,10 @@ router.get('/domain/:domain/:type', async (req: AuthRequest, res: Response) => {
   if (!['access', 'error'].includes(type)) return res.status(400).json({ error: 'type must be access or error' });
   const lines = Math.min(parseInt((req.query.lines as string) || '300'), 2000);
   const search = (req.query.q as string || '').trim();
-  const logPath = `${HTTPD_LOG_DIR}/${domain}-${type}.log`;
+  const logPath = path.join(HTTPD_LOG_DIR, `${domain}-${type}.log`);
   if (!existsSync(logPath)) return res.status(404).json({ error: `No ${type} log found for ${domain}`, path: logPath });
   try {
-    const { stdout } = await execAsync(`tail -n ${lines} "${logPath}" 2>/dev/null || true`);
+    const stdout = await tailFile(logPath, lines);
     const content = search
       ? stdout.split('\n').filter(l => l.toLowerCase().includes(search.toLowerCase())).join('\n')
       : stdout;

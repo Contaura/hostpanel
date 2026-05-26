@@ -27,7 +27,9 @@ All notable changes to HostPanel are documented in this file.
 - Added WebDAV prerequisite provisioning plus UI password handling so new Web Disk accounts create/update htpasswd entries and managed Apache DAV config from the parity hub.
 - Added guided backup restore controls in the parity hub for restore planning, dry-run execution, selective entries, and actual restore execution.
 - Added broad reseller privilege enforcement across existing HostPanel admin modules and expanded the WHM feature catalog beyond the original parity-only entries.
-- Added one-time phpMyAdmin Signon bridge generation and a credential-verified SSO launch endpoint for short-lived phpMyAdmin handoff URLs.
+- Added one-time phpMyAdmin Signon bridge generation, distro config registration for a dedicated Signon server entry, and a credential-verified SSO launch endpoint for short-lived phpMyAdmin handoff URLs.
+- Completed shell-execution hardening for the remaining legacy route modules (`node-apps`, `resource-limits`, `logs`, and `cache`) by replacing shell pipelines with `runFile` argv calls or Node primitives.
+- Expanded team-subaccount regression coverage for account, file, and database namespace scoping.
 
 ### Fixed
 

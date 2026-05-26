@@ -1,54 +1,44 @@
 # HostPanel vs. cPanel/WHM Functionality Comparison
 
-This comparison separates cPanel-style end-user features from WHM-style administrator features and tracks where HostPanel currently matches, partially matches, or still needs work.
+This comparison separates cPanel-style end-user features from WHM-style administrator features and reflects the current deployed HostPanel parity work.
 
 ## Summary
 
-HostPanel already covers the core shared-hosting control-plane areas: accounts, domains, DNS, files, FTP, databases, email accounts/forwarders/autoresponders, SSL, backups, cron, PHP, logs, resource limits, billing, reseller/client portal, security, WAF/Fail2Ban, and app installers. cPanel/WHM is still broader and deeper in several mature hosting areas: full DNS clustering, package/feature-list enforcement, transfer/migration tooling, per-account analytics depth, mail delivery tracing, web disk, team/subaccount delegation, and a wider set of Apache/site behavior tools.
+HostPanel now covers the main shared-hosting control-plane areas: accounts, packages/feature lists, reseller privileges, domains, DNS, files, FTP, databases, phpMyAdmin launch/Signon handoff, email accounts/forwarders/autoresponders, Track Delivery-style mail tracing, SSL, backups/restores, cron, PHP, logs, resource limits, billing, reseller/client portal, security, WAF/Fail2Ban, plugin controls, WebDAV, DNS clustering, and transfer/import tooling.
+
+cPanel/WHM is still broader and older, so the remaining gap is mostly production depth: richer analytics/report exports, field-validation of phpMyAdmin Signon against the installed distro package, a centralized background-job/progress subsystem, and ongoing hardening/regression coverage.
 
 ## End-user / cPanel-side comparison
 
 | Area | cPanel capability | HostPanel status | Notes / gaps |
 | --- | --- | --- | --- |
-| Files | File Manager, FTP Accounts, Directory Privacy, Disk Usage, Web Disk, Backup Wizard | Partial | File Manager, FTP, htpasswd/directory privacy, backups, and disk usage exist. Web Disk/WebDAV and guided backup wizard remain missing. |
-| Domains | Domains, Addon Domains, Subdomains, Aliases/Parked Domains, Redirects, Zone Editor | Strong | HostPanel has domain/subdomain/addon/parked/redirect/DNS screens. DNS zone editor depth should keep expanding toward cPanel parity. |
-| Email | Email Accounts, Forwarders, Autoresponders, Default Address, Spam Filters, Email Deliverability, Mail Routing, Track Delivery, Address Importer | Partial/Strong | Most creation/configuration tools exist. This change adds a CSV Address Importer for forwarders. Track Delivery-style per-message tracing is still missing. |
-| Databases | MySQL Databases, Database Users, phpMyAdmin | Partial | Database management exists. phpMyAdmin/one-click DB GUI integration and finer privilege workflows should be verified before parity claims. |
-| Metrics | Visitors, Errors, Bandwidth, Raw Access, Awstats/Webalizer, resource metrics | Partial | HostPanel has stats, logs, bandwidth, and monitor views. cPanel's visitor/error reports and Awstats/Webalizer depth are not fully matched. |
-| Security | SSL/TLS, SSH Keys, IP Blocker, Hotlink Protection, Leech Protection, ModSecurity, Two-Factor Authentication | Partial/Strong | Many security tools exist. User-level 2FA and richer IP blocker workflows should be completed for parity. |
-| Software | PHP selector/options, MultiPHP, app installers, WordPress, Node apps, Git deploy | Strong | HostPanel has PHP management, app/script installer, WordPress, Node apps, and Git deploy. Ruby/Perl tools remain outside current scope. |
-| Preferences | Password/contact info, language/style, user manager/team access | Partial | Profile/settings exist. cPanel-style User Manager/team delegation is still missing. |
+| Files | File Manager, FTP Accounts, Directory Privacy, Disk Usage, Web Disk, Backup Wizard | Strong foundation | File Manager, FTP, htpasswd/directory privacy, disk usage, WebDAV/Web Disk metadata/provisioning, backup creation, restore planning, dry-runs, selective restores, and execution are wired to real APIs. |
+| Domains | Domains, Addon Domains, Subdomains, Aliases/Parked Domains, Redirects, Zone Editor | Strong | HostPanel has domain/subdomain/addon/parked/redirect/DNS screens. DNS zone editor depth can keep expanding toward mature cPanel ergonomics. |
+| Email | Email Accounts, Forwarders, Autoresponders, Default Address, Spam Filters, Email Deliverability, Mail Routing, Track Delivery, Address Importer | Strong foundation | HostPanel has creation/configuration tools, CSV address importer, DKIM/mail routing/spam tooling, and Track Delivery-style log search. Remaining depth is richer filters, exports, and historical reporting. |
+| Databases | MySQL Databases, Database Users, phpMyAdmin | Strong foundation | Database management, phpMyAdmin install/detection, account-scoped links, and short-lived Signon handoff endpoint are implemented. Signon still needs live validation against the exact installed phpMyAdmin package/config. |
+| Metrics | Visitors, Errors, Bandwidth, Raw Access, Awstats/Webalizer, resource metrics | Functional foundation | Visitor, error, bandwidth, raw-access, and Awstats/Webalizer-style summaries exist. Remaining depth is charts, exports, retention controls, and more log-format coverage. |
+| Security | SSL/TLS, SSH Keys, IP Blocker, Hotlink Protection, Leech Protection, ModSecurity, Two-Factor Authentication | Strong | SSL/TLS, SSH keys, firewall/IP blocking, hotlink protection, WAF/Fail2Ban, scanner, API tokens, audit log, and client 2FA are present. Leech-protection-style UX remains a potential polish item. |
+| Software | PHP selector/options, MultiPHP, app installers, WordPress, Node apps, Git deploy | Strong | HostPanel has PHP management, app/script installer, WordPress, Node apps, Git deploy, and cache controls. Ruby/Perl tools remain outside current scope. |
+| Preferences | Password/contact info, language/style, user manager/team access | Strong foundation | Profile/settings and team subaccounts are implemented with hashed credentials, permissions, client-portal login, account scoping, and audit attribution. More regression tests should be added as portal modules expand. |
 
 ## Administrator / WHM-side comparison
 
 | Area | WHM capability | HostPanel status | Notes / gaps |
 | --- | --- | --- | --- |
-| Account lifecycle | Create/suspend/terminate accounts, packages, quotas, skeleton dir | Partial/Strong | Account and resource-limit tooling exists. Package/feature-list enforcement needs more WHM-like depth. |
-| Reseller management | Reseller ownership, limits, privileges | Partial | Reseller UI/routes exist. Fine-grained privilege enforcement should continue expanding. |
+| Account lifecycle | Create/suspend/terminate accounts, packages, quotas, skeleton dir | Strong foundation | Account and resource-limit tooling exists; WHM-style feature lists and broad reseller feature enforcement are now wired. Skeleton-dir/template depth can be expanded. |
+| Reseller management | Reseller ownership, limits, privileges | Strong foundation | Reseller UI/routes and broad fine-grained privilege gates are present. Continue adding regression coverage as new modules are added. |
 | Server status | Service status, process manager, server info, system monitor | Strong | HostPanel includes server info, stats, process manager, logs, alerts, and monitor views. |
-| DNS | Zone management, DNS clustering, nameserver setup | Partial | DNS management exists. DNS clustering/nameserver automation is a major missing WHM feature. |
-| Mail server admin | Queue manager, routing, DKIM, Rspamd/SpamAssassin, delivery reports | Partial/Strong | Queue/routing/DKIM/spam tooling exists. Deep delivery tracing and Exim-style reports remain gaps. |
+| DNS | Zone management, DNS clustering, nameserver setup | Strong foundation | DNS management, node registry, health checks, sync dry-runs, authenticated `rndc retransfer`, and nameserver planning are implemented. |
+| Mail server admin | Queue manager, routing, DKIM, Rspamd/SpamAssassin, delivery reports | Strong foundation | Queue/routing/DKIM/spam tooling and Track Delivery-style reports exist. Remaining depth is richer Exim-like views and exports. |
 | Security center | Firewall, WAF, Fail2Ban, malware scanner, API tokens, audit log | Strong | HostPanel has firewall, WAF, Fail2Ban, scanner, API tokens, audit logging, and admin users. |
-| Transfers/backups | Backup config, account restores, transfer tool | Partial | Backup management exists. Full cPanel account import/transfer tooling remains missing. |
-| Branding/billing/client portal | cPanel branding, packages, billing integrations | Strong for HostPanel's target | HostPanel includes branding/settings, billing, Stripe/PayPal, reseller/client portal. |
-| Updates/extensions | cPanel update channels, EasyApache, plugins | Partial | HostPanel has install/upgrade docs and app tooling, but not a WHM-grade update/plugin ecosystem yet. |
+| Transfers/backups | Backup config, account restores, transfer tool | Strong foundation | Backup management, restore plans/dry-runs/execution, and guarded cPanel archive transfer/import with rollback/progress are implemented. A centralized job system would improve UX for long tasks. |
+| Branding/billing/client portal | cPanel branding, packages, billing integrations | Strong for HostPanel's target | HostPanel includes branding/settings, billing, Stripe/PayPal, reseller/client portal, and team access. |
+| Updates/extensions | cPanel update channels, EasyApache, plugins | Functional foundation | HostPanel reports git/npm audit status and supports verified `.tgz` plugin install, enable/disable, snapshots, and rollback. WHM-grade update channels/EasyApache remain outside current scope. |
 
-## Prioritized missing features
+## Remaining priority work
 
-1. **Address Importer** — bulk import email forwarders/accounts from CSV. Implemented first for forwarders in this change because it is safe, useful, and maps directly to existing Postfix virtual alias storage.
-2. **Track Delivery** — mail delivery trace/search across logs by sender, recipient, status, and queue ID.
-3. **User Manager / team delegation** — user-level subaccounts with scoped access to email/FTP/Web Disk.
-4. **Web Disk/WebDAV** — cPanel-compatible Web Disk-style access for user file areas.
-5. **Metrics depth** — visitor report, 404/error report, raw access downloads, and Awstats/Webalizer-style summaries.
-6. **Transfer tool** — import from cPanel backup archives or remote accounts.
-7. **WHM feature lists/packages** — enforce feature visibility/permissions per plan/package, not just resource limits.
-8. **DNS clustering/nameserver automation** — multi-server DNS sync and nameserver health tooling.
-
-## Implemented in this pass
-
-- Added a cPanel-style **Address Importer** under Email Extras.
-- Added `POST /api/email-extras/import/forwarders`.
-- Supported CSV headers: `source,destination`, `from,to`, `email,forward_to`, and similar variants.
-- Skips duplicate source addresses.
-- Reports row-level validation errors without aborting the whole import.
-- Added integration tests for successful imports, duplicate skipping, and all-invalid payload rejection.
+1. Validate phpMyAdmin Signon end-to-end against the live installed phpMyAdmin package/config.
+2. Add centralized background-job/progress/log tracking for long-running transfers, restores, scans, syncs, and installs.
+3. Deepen metrics/mail reports with charts, exports, retention, and more filters.
+4. Continue adding account-scope/team-subaccount regression tests as portal modules grow.
+5. Keep hardening service-command routes to the safe argv/Node-primitive pattern and avoid shell pipelines.

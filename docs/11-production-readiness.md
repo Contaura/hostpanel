@@ -258,10 +258,5 @@ Added 3 integration tests covering: account suspend reloads httpd via argv; acco
 - `npm audit --omit=dev --audit-level=moderate` — 0 vulnerabilities
 - Grep `execAsync|promisify(exec)` across all 10 user-listed files (accounts, backup, client-portal, cron, email, scripts, ssl-advanced, wordpress, apps, reseller) plus email-extras — clean
 
-### Out of scope for this pass (additional `execAsync()` discovered)
-- `node-apps.ts` (pm2 jlist/startup, tail logs)
-- `resource-limits.ts` (du, nginx symlink+reload, repquota, setquota)
-- `logs.ts` (tail/ls log files)
-- `cache.ts` (php -r opcache, redis-cli, nc → memcached)
-
-These were not on the prioritized list and remain for a future pass.
+### Remaining
+No legacy `execAsync()` route sources remain in the previously identified modules (`node-apps.ts`, `resource-limits.ts`, `logs.ts`, `cache.ts`). Continue enforcing the `runFile` argv/Node-primitive pattern for any new service-command routes.

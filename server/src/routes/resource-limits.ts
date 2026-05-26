@@ -1,13 +1,21 @@
 import { Router, Request, Response } from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import fs from 'fs/promises';
 import path from 'path';
 import db from '../db';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 const CGROUP_BASE = '/sys/fs/cgroup';
+const WEBROOT = process.env.WEBROOT || '/var/www';
+
+function accountPath(username: string) { return path.join(WEBROOT, username); }
+async function duBytes(target: string) {
+  try {
+    const { stdout } = await runFile('du', ['-sb', '--', target], { timeout: 30000 });
+    return parseInt(stdout.trim().split(/\s+/)[0]) || 0;
+  } catch { return 0; }
+}
 
 /* ── List resource limits per account ───────────────────── */
 
@@ -32,8 +40,7 @@ router.post('/:username', async (req: Request, res: Response) => {
     mkdirSync(cgroupPath, { recursive: true });
 
     if (cpu_quota !== undefined) {
-      // cpu_quota in % (e.g. 50 = 50% of one CPU)
-      const period = 100000; // 100ms
+      const period = 100000;
       const quota  = Math.round((cpu_quota / 100) * period);
       writeFileSync(path.join(cgroupPath, 'cpu.max'), `${quota} ${period}`);
     }
@@ -61,10 +68,7 @@ router.get('/:username/usage', async (req: Request, res: Response) => {
     const cpuMax  = read('cpu.max');
     const memMax  = read('memory.max');
     const memCurr = read('memory.current');
-
-    // Disk usage via du
-    const { stdout: du } = await execAsync(`du -sb "/var/www/${username}" 2>/dev/null || echo "0"`).catch(() => ({ stdout: '0' }));
-    const diskBytes = parseInt(du.trim().split(/\s+/)[0]) || 0;
+    const diskBytes = await duBytes(accountPath(username));
 
     res.json({
       username,
@@ -83,8 +87,8 @@ const NGINX_EN  = process.env.NGINX_EN  || '/etc/nginx/sites-enabled';
 
 router.get('/nginx/vhosts', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync(`ls ${NGINX_DIR}/*.conf 2>/dev/null || echo ""`);
-    const files = stdout.trim().split('\n').filter(Boolean);
+    const names = await fs.readdir(NGINX_DIR);
+    const files = names.filter(n => n.endsWith('.conf')).map(n => path.join(NGINX_DIR, n));
     const vhosts = files.map(f => {
       const name = path.basename(f, '.conf');
       const conf = existsSync(f) ? readFileSync(f, 'utf8') : '';
@@ -111,19 +115,24 @@ router.post('/nginx/vhosts', async (req: Request, res: Response) => {
 
   location / { try_files $uri $uri/ /index.php?$query_string; }
 
-  location ~ \\.php$ {
+  location ~ \.php$ {
     fastcgi_pass unix:${socket};
     fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
     include fastcgi_params;
   }
 
-  location ~ /\\.ht { deny all; }
+  location ~ /\.ht { deny all; }
 }
 `;
   try {
-    writeFileSync(path.join(NGINX_DIR, `${domain}.conf`), conf);
-    await execAsync(`ln -sf "${NGINX_DIR}/${domain}.conf" "${NGINX_EN}/${domain}.conf"`).catch(() => {});
-    await execAsync('nginx -t && systemctl reload nginx').catch(() => {});
+    await fs.mkdir(NGINX_DIR, { recursive: true });
+    await fs.mkdir(NGINX_EN, { recursive: true });
+    const confPath = path.join(NGINX_DIR, `${domain}.conf`);
+    const enabledPath = path.join(NGINX_EN, `${domain}.conf`);
+    writeFileSync(confPath, conf);
+    await fs.rm(enabledPath, { force: true });
+    await fs.symlink(confPath, enabledPath).catch(() => {});
+    await runFile('nginx', ['-t'], { timeout: 30000 }).then(() => runFile('systemctl', ['reload', 'nginx'], { timeout: 30000 })).catch(() => {});
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -132,8 +141,9 @@ router.delete('/nginx/vhosts/:domain', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!/^[a-z0-9.-]+$/.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   try {
-    await execAsync(`rm -f "${NGINX_DIR}/${domain}.conf" "${NGINX_EN}/${domain}.conf"`);
-    await execAsync('systemctl reload nginx').catch(() => {});
+    await fs.rm(path.join(NGINX_DIR, `${domain}.conf`), { force: true });
+    await fs.rm(path.join(NGINX_EN, `${domain}.conf`), { force: true });
+    await runFile('systemctl', ['reload', 'nginx'], { timeout: 30000 }).catch(() => {});
     res.json({ success: true });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -160,10 +170,7 @@ router.get('/:username/io-stats', async (req: Request, res: Response) => {
       }
     }
 
-    // Also get real-time disk usage via du
-    const { stdout: du } = await execAsync(`du -sb "/var/www/${username}" 2>/dev/null || echo 0`).catch(() => ({ stdout: '0' }));
-    const diskBytes = parseInt(du.trim().split(/\s+/)[0]) || 0;
-
+    const diskBytes = await duBytes(accountPath(username));
     res.json({ username, io_stat: parsed, disk_used_bytes: diskBytes, cgroup_path: cgroupPath });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -172,7 +179,7 @@ router.get('/:username/io-stats', async (req: Request, res: Response) => {
 
 router.get('/disk-quotas', async (_req: Request, res: Response) => {
   try {
-    const { stdout } = await execAsync("repquota -a -s 2>/dev/null || echo ''");
+    const { stdout } = await runFile('repquota', ['-a', '-s'], { timeout: 30000, maxBuffer: 2 * 1024 * 1024 });
     const lines = stdout.split('\n').filter(l => /^\w/.test(l) && !l.startsWith('Block') && !l.startsWith('Disk'));
     const quotas = lines.map(l => {
       const parts = l.trim().split(/\s+/);
@@ -203,7 +210,7 @@ router.post('/disk-quotas/:username', async (req: Request, res: Response) => {
   const hard = Math.round((parseInt(block_hard_mb) || soft * 1.1) * 1024);
 
   try {
-    await execAsync(`setquota -u "${username}" ${soft} ${hard} 0 0 / 2>&1`);
+    await runFile('setquota', ['-u', username, String(soft), String(hard), '0', '0', '/'], { timeout: 30000 });
     res.json({ success: true, username, block_soft_kb: soft, block_hard_kb: hard });
   } catch (err: any) {
     res.status(500).json({ error: err.stderr || err.message });
@@ -211,4 +218,3 @@ router.post('/disk-quotas/:username', async (req: Request, res: Response) => {
 });
 
 export default router;
-

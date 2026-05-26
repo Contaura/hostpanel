@@ -1428,6 +1428,11 @@ function portalResolveOwnedPath(clientId: number, domain: string, sub: string, a
   return resolved;
 }
 
+function portalFileError(res: Response, e: any) {
+  const msg = e?.message || String(e);
+  return res.status(msg === 'Not your domain' ? 403 : 400).json({ error: msg });
+}
+
 router.get('/files/:domain/list', clientAuth, async (req: Request, res: Response) => {
   try {
     const dir = portalResolveOwnedPath((req as any).clientId, req.params.domain, (req.query.path as string) || '', teamAccountScope(req));
@@ -1440,7 +1445,7 @@ router.get('/files/:domain/list', clientAuth, async (req: Request, res: Response
     }));
     items.sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : (a.type === 'directory' ? -1 : 1));
     res.json({ path: dir.replace(path.resolve(path.join(PORTAL_WEBROOT, req.params.domain)), '') || '/', items });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 router.get('/files/:domain/read', clientAuth, async (req: Request, res: Response) => {
@@ -1449,7 +1454,7 @@ router.get('/files/:domain/read', clientAuth, async (req: Request, res: Response
     const st = await fs.stat(file);
     if (st.size > 2 * 1024 * 1024) return res.status(413).json({ error: 'File too large to edit (> 2 MB)' });
     res.json({ content: await fs.readFile(file, 'utf-8') });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 router.post('/files/:domain/write', clientAuth, async (req: Request, res: Response) => {
@@ -1457,7 +1462,7 @@ router.post('/files/:domain/write', clientAuth, async (req: Request, res: Respon
     const file = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '', teamAccountScope(req));
     await fs.writeFile(file, String(req.body.content ?? ''), 'utf-8');
     res.json({ message: 'File saved' });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 router.post('/files/:domain/mkdir', clientAuth, async (req: Request, res: Response) => {
@@ -1465,7 +1470,7 @@ router.post('/files/:domain/mkdir', clientAuth, async (req: Request, res: Respon
     const dir = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '', teamAccountScope(req));
     await fs.mkdir(dir, { recursive: true });
     res.json({ message: 'Directory created' });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 router.delete('/files/:domain/delete', clientAuth, async (req: Request, res: Response) => {
@@ -1473,7 +1478,7 @@ router.delete('/files/:domain/delete', clientAuth, async (req: Request, res: Res
     const target = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.path || '', teamAccountScope(req));
     await fs.rm(target, { recursive: true, force: true });
     res.json({ message: 'Deleted' });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 router.post('/files/:domain/rename', clientAuth, async (req: Request, res: Response) => {
@@ -1482,7 +1487,7 @@ router.post('/files/:domain/rename', clientAuth, async (req: Request, res: Respo
     const to   = portalResolveOwnedPath((req as any).clientId, req.params.domain, req.body.to   || '', teamAccountScope(req));
     await fs.rename(from, to);
     res.json({ message: 'Renamed' });
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 // Upload stamps req.portalTargetDomain before multer destination resolver
@@ -1505,7 +1510,7 @@ router.get('/files/:domain/download', clientAuth, async (req: Request, res: Resp
   try {
     const file = portalResolveOwnedPath((req as any).clientId, req.params.domain, (req.query.path as string) || '', teamAccountScope(req));
     res.download(file);
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) { portalFileError(res, e); }
 });
 
 /* ── htpasswd directory protection (scoped to public_html) ──── */

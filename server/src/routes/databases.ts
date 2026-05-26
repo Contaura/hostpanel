@@ -33,8 +33,10 @@ const DB_ROOT_USER = process.env.DB_ROOT_USER || 'root';
 const DB_ROOT_PASS = process.env.DB_ROOT_PASS || '';
 const PMA_ALIAS = process.env.PHPMYADMIN_ALIAS || '/phpMyAdmin';
 const PMA_CONF_FILE = process.env.PHPMYADMIN_CONF_FILE || '/etc/httpd/conf.d/hostpanel-phpmyadmin.conf';
+const PMA_CONFIG_FILE = process.env.PHPMYADMIN_CONFIG_FILE || '/etc/phpMyAdmin/config.inc.php';
 const PMA_CANDIDATES = (process.env.PHPMYADMIN_PATHS || '/usr/share/phpMyAdmin:/usr/share/phpmyadmin:/var/www/html/phpMyAdmin:/var/www/html/phpmyadmin').split(':').filter(Boolean);
 const PMA_SSO_TOKEN_DIR = process.env.PHPMYADMIN_SSO_TOKEN_DIR || '/var/lib/hostpanel/phpmyadmin-sso';
+const PMA_SSO_SERVER_ID = parseInt(process.env.PHPMYADMIN_SSO_SERVER_ID || '2', 10);
 const PMA_SSO_TTL_MS = 2 * 60 * 1000;
 
 async function getConn() {
@@ -216,6 +218,21 @@ router.post('/databases/:name/import', heavyLimit, sqlUpload.single('file'), asy
 
 function pmaPath() { return PMA_CANDIDATES.find(p => existsSync(p)); }
 function pmaBaseUrl() { return PMA_ALIAS.replace(/\/$/, ''); }
+function phpStringLiteral(value: string) { return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`; }
+function pmaConfigBlock() {
+  return `// BEGIN HostPanel phpMyAdmin Signon bridge\n$i = ${PMA_SSO_SERVER_ID - 1};\n$i++;\n$cfg['Servers'][$i]['verbose'] = 'HostPanel Signon';\n$cfg['Servers'][$i]['auth_type'] = 'signon';\n$cfg['Servers'][$i]['SignonSession'] = 'HOSTPANEL_PMA';\n$cfg['Servers'][$i]['SignonURL'] = ${phpStringLiteral(`${pmaBaseUrl()}/hostpanel-signon.php`)};\n$cfg['Servers'][$i]['host'] = ${phpStringLiteral(DB_HOST)};\n$cfg['Servers'][$i]['port'] = ${phpStringLiteral(String(DB_PORT))};\n$cfg['Servers'][$i]['compress'] = false;\n$cfg['Servers'][$i]['AllowNoPassword'] = false;\n// END HostPanel phpMyAdmin Signon bridge`;
+}
+async function writePmaConfig() {
+  await fs.mkdir(path.dirname(PMA_CONFIG_FILE), { recursive: true });
+  let existing = '';
+  try { existing = await fs.readFile(PMA_CONFIG_FILE, 'utf8'); } catch {}
+  const block = pmaConfigBlock();
+  const re = /\n?\/\/ BEGIN HostPanel phpMyAdmin Signon bridge[\s\S]*?\/\/ END HostPanel phpMyAdmin Signon bridge\n?/m;
+  const next = re.test(existing)
+    ? existing.replace(re, `\n${block}\n`)
+    : `${existing.replace(/\s*\?>\s*$/, '').trimEnd()}\n\n${block}\n`;
+  await fs.writeFile(PMA_CONFIG_FILE, next, { mode: 0o640 });
+}
 function pmaUrl(database?: string, user?: string) {
   const q = new URLSearchParams();
   if (database) q.set('db', database);
@@ -240,8 +257,8 @@ $_SESSION['PMA_single_signon_user'] = $data['username'];
 $_SESSION['PMA_single_signon_password'] = $data['password'];
 $_SESSION['PMA_single_signon_host'] = $data['host'] ?? '127.0.0.1';
 $_SESSION['PMA_single_signon_port'] = strval($data['port'] ?? 3306);
-$target = 'index.php';
-if (!empty($data['database'])) $target .= '?db='.rawurlencode($data['database']);
+$target = 'index.php?server=${PMA_SSO_SERVER_ID}';
+if (!empty($data['database'])) $target .= '&db='.rawurlencode($data['database']);
 header('Location: '.$target);
 exit;
 ?>`;
@@ -285,8 +302,9 @@ router.post('/phpmyadmin/install', enforceResellerPrivilege('phpmyadmin'), async
     }
     if (!found) return res.status(500).json({ error: 'phpMyAdmin package installed but no known install directory was found' });
     writePmaApacheConfig(found);
+    await writePmaConfig();
     await runFile('apachectl', ['graceful'], { timeout: 120000 }).catch(async () => { await runFile('systemctl', ['reload', 'httpd'], { timeout: 120000 }); });
-    res.json({ installed: true, path: found, url: pmaUrl(), config: PMA_CONF_FILE });
+    res.json({ installed: true, path: found, url: pmaUrl(), config: PMA_CONF_FILE, phpMyAdminConfig: PMA_CONFIG_FILE });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -317,6 +335,7 @@ router.post('/phpmyadmin/sso', enforceResellerPrivilege('phpmyadmin'), async (re
   if (!found) return res.status(404).json({ error: 'phpMyAdmin is not installed' });
   try {
     writePmaApacheConfig(found);
+    await writePmaConfig();
     const userConn = await mysql.createConnection({ host: DB_HOST, port: DB_PORT, user: username, password, database: database || undefined });
     await userConn.ping();
     await userConn.end();

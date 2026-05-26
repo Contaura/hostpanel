@@ -1,11 +1,11 @@
 import { Router, Response } from 'express';
-import { exec, execFile } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { existsSync } from 'fs';
 import { AuthRequest } from '../middleware/auth';
+import { runFile } from '../utils/process-runner';
 
 const router = Router();
-const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const WEBROOT = process.env.WEBROOT || '/var/www';
 
@@ -19,7 +19,7 @@ function isSafePath(p: string): boolean {
 
 async function pm2List() {
   try {
-    const { stdout } = await execAsync('pm2 jlist 2>/dev/null');
+    const { stdout } = await runFile('pm2', ['jlist'], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 });
     return JSON.parse(stdout || '[]');
   } catch { return []; }
 }
@@ -55,8 +55,6 @@ router.post('/node', async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Invalid interpreter' });
   }
   try {
-    // pm2 invocations use argv form so isSafePath's allowed-but-spaced paths
-    // can't break the command line. isSafePath() already blocks $`\!"…
     const args = ['start', script, '--name', name];
     if (interpreter !== 'node') args.push('--interpreter', interpreter);
     if (env) args.push('--env-file', env);
@@ -86,7 +84,7 @@ router.get('/node/:id/logs', async (req: AuthRequest, res: Response) => {
     if (!app) return res.status(404).json({ error: 'App not found' });
     const logPath = app.pm2_env?.pm_out_log_path;
     if (!logPath || !existsSync(logPath)) return res.json({ lines: [] });
-    const { stdout } = await execAsync(`tail -200 "${logPath}"`);
+    const { stdout } = await runFile('tail', ['-n', '200', '--', logPath], { timeout: 15000, maxBuffer: 2 * 1024 * 1024 });
     res.json({ lines: stdout.split('\n').filter(Boolean) });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -95,7 +93,6 @@ router.get('/node/:id/logs', async (req: AuthRequest, res: Response) => {
 
 router.get('/python', async (_req: AuthRequest, res: Response) => {
   try {
-    // List python apps running under pm2 with python interpreter
     const apps = await pm2List();
     const pyApps = apps.filter((a: any) => a.pm2_env?.exec_interpreter?.includes('python') || a.pm2_env?.pm_exec_path?.endsWith('.py'));
     res.json(pyApps.map((a: any) => ({
@@ -135,8 +132,8 @@ router.post('/python/create-venv', async (req: AuthRequest, res: Response) => {
 
 router.post('/pm2-startup', async (_req: AuthRequest, res: Response) => {
   try {
-    const { stdout } = await execAsync('pm2 startup systemd -u root --hp /root 2>&1 | tail -3');
-    res.json({ output: stdout });
+    const { stdout } = await runFile('pm2', ['startup', 'systemd', '-u', 'root', '--hp', '/root'], { timeout: 30000, maxBuffer: 2 * 1024 * 1024 });
+    res.json({ output: stdout.split('\n').slice(-3).join('\n') });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

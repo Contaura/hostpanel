@@ -25,6 +25,7 @@ describe('client portal team subaccount authentication', () => {
     process.env.DATA_DIR = tmp;
     process.env.JWT_SECRET = 'test-team-secret';
     process.env.NAMED_DIR = tmp;
+    process.env.WEBROOT = path.join(tmp, 'www');
     vi.resetModules();
   });
 
@@ -35,6 +36,7 @@ describe('client portal team subaccount authentication', () => {
     delete process.env.DATA_DIR;
     delete process.env.JWT_SECRET;
     delete process.env.NAMED_DIR;
+    delete process.env.WEBROOT;
     vi.resetModules();
   });
 
@@ -53,6 +55,10 @@ describe('client portal team subaccount authentication', () => {
     db.prepare('INSERT INTO team_users (client_id,account_id,username,email,password_hash,permissions,status) VALUES (?,?,?,?,?,?,\'active\')')
       .run(clientId, accountId, 'helper', 'helper@example.com', teamHash, JSON.stringify(permissions));
     await fs.writeFile(path.join(tmp, 'example.com.zone'), '; test zone\n');
+    await fs.mkdir(path.join(process.env.WEBROOT!, 'example.com', 'public_html'), { recursive: true });
+    await fs.mkdir(path.join(process.env.WEBROOT!, 'other.com', 'public_html'), { recursive: true });
+    await fs.writeFile(path.join(process.env.WEBROOT!, 'example.com', 'public_html', 'index.html'), 'own site');
+    await fs.writeFile(path.join(process.env.WEBROOT!, 'other.com', 'public_html', 'index.html'), 'other site');
     const app = express(); app.use(express.json()); app.use('/api', auditMiddleware); app.use('/api/portal', portal);
     return listen(app);
   }
@@ -110,6 +116,26 @@ describe('client portal team subaccount authentication', () => {
 
     const otherDomain = await fetch(`${server.url}/api/portal/domains/other.com/dns`, { headers: { authorization: `Bearer ${token}` } });
     expect(otherDomain.status).toBe(403);
+  });
+
+  it('narrows account, file, and database namespaces to the assigned hosting account', async () => {
+    const server = await appWithSeed(['files', 'databases']); closeServer = server.close;
+    const login = await fetch(`${server.url}/api/portal/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'helper@example.com', password: 'team-password' }) });
+    const { token } = await login.json();
+
+    const accounts = await fetch(`${server.url}/api/portal/accounts`, { headers: { authorization: `Bearer ${token}` } });
+    expect(accounts.status).toBe(200);
+    expect((await accounts.json()).map((row: any) => row.domain)).toEqual(['example.com']);
+
+    const ownFiles = await fetch(`${server.url}/api/portal/files/example.com/list`, { headers: { authorization: `Bearer ${token}` } });
+    expect(ownFiles.status).toBe(200);
+    const otherFiles = await fetch(`${server.url}/api/portal/files/other.com/list`, { headers: { authorization: `Bearer ${token}` } });
+    expect(otherFiles.status).toBe(403);
+
+    const allowedDb = await fetch(`${server.url}/api/portal/databases`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'acme_blog' }) });
+    expect([200, 500]).toContain(allowedDb.status); // 500 is acceptable in test env without MySQL after namespace authorization passes.
+    const blockedDb = await fetch(`${server.url}/api/portal/databases`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ name: 'other_blog' }) });
+    expect(blockedDb.status).toBe(403);
   });
 
   it('attributes audited portal mutations to the team subaccount id', async () => {

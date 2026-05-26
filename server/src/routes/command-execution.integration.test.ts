@@ -480,6 +480,7 @@ describe('high-risk route command execution integration', () => {
     const pmaDir = path.join(tmp, 'phpMyAdmin');
     process.env.PHPMYADMIN_PATHS = pmaDir;
     process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
+    process.env.PHPMYADMIN_CONFIG_FILE = path.join(tmp, 'phpMyAdmin', 'config.inc.php');
     process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
     const server = await appFor('/api/databases', './databases');
     closeServer = server.close;
@@ -493,13 +494,19 @@ describe('high-risk route command execution integration', () => {
     expect(runFileMock).toHaveBeenCalledWith('apachectl', ['graceful'], expect.objectContaining({ timeout: 120000 }));
     await expect(fs.readFile(process.env.PHPMYADMIN_CONF_FILE, 'utf8')).resolves.toContain(`Alias /phpMyAdmin ${pmaDir}`);
     await expect(fs.readFile(path.join(pmaDir, 'hostpanel-signon.php'), 'utf8')).resolves.toContain('PMA_single_signon_user');
+    const pmaConfig = await fs.readFile(process.env.PHPMYADMIN_CONFIG_FILE, 'utf8');
+    expect(pmaConfig).toContain("$cfg['Servers'][$i]['auth_type'] = 'signon'");
+    expect(pmaConfig).toContain("$cfg['Servers'][$i]['SignonSession'] = 'HOSTPANEL_PMA'");
+    expect(pmaConfig).toContain("$cfg['Servers'][$i]['SignonURL'] = '/phpMyAdmin/hostpanel-signon.php'");
   });
 
-  it('removes promisify(exec) from reseller route source', async () => {
-    const src = await fs.readFile(path.resolve(__dirname, 'reseller.ts'), 'utf8');
-    expect(src).not.toMatch(/promisify\s*\(\s*exec\s*\)/);
-    expect(src).not.toMatch(/require\(['"]child_process['"]\)/);
-    expect(src).not.toMatch(/\bexecAsync\b/);
+  it('removes promisify(exec) from hardened route sources', async () => {
+    for (const file of ['reseller.ts', 'logs.ts', 'cache.ts', 'resource-limits.ts', 'node-apps.ts']) {
+      const src = await fs.readFile(path.resolve(__dirname, file), 'utf8');
+      expect(src, file).not.toMatch(/promisify\s*\(\s*exec\s*\)/);
+      expect(src, file).not.toMatch(/\bexecAsync\b/);
+      expect(src, file).not.toMatch(/exec\s*\(/);
+    }
   });
 
   it('reloads httpd via argv when suspending an account', async () => {
