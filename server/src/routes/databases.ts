@@ -283,8 +283,11 @@ async function readIfPresent(file: string) {
 
 async function commandOk(command: string, args: string[]) {
   try {
-    const result = await runFile(command, args, { timeout: 60000 });
-    return { ok: true, output: `${result.stdout || ''}${result.stderr || ''}`.trim() };
+    const result = await runFile(command, args, { timeout: 60000 }) as any;
+    const output = typeof result === 'string'
+      ? result
+      : `${result?.stdout || ''}${result?.stderr || ''}`;
+    return { ok: true, output: output.trim() };
   } catch (err: any) {
     return { ok: false, output: String(err?.message || err) };
   }
