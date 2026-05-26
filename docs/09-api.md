@@ -126,7 +126,7 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | `DELETE` | `/api/dns-cluster/nodes/:id` | Remove node |
 | `POST` | `/api/dns-cluster/health-check` | Probe enabled nodes with `dig` |
 | `POST` | `/api/dns-cluster/sync-preview` | Preview `rndc retransfer` actions without secrets |
-| `POST` | `/api/dns-cluster/sync` | Execute authenticated `rndc retransfer` against enabled/selected nodes |
+| `POST` | `/api/dns-cluster/sync` | Execute authenticated `rndc retransfer`; pass `async: true` to enqueue `dns.sync` |
 | `POST` | `/api/dns-cluster/nameserver-plan` | Generate NS/A record and registrar glue plan |
 
 ---
@@ -215,7 +215,7 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | `GET` | `/api/backup/list` | List local backups |
 | `POST` | `/api/backup/create` | Create file or database backup; pass `async: true` to enqueue a background job and poll `/api/jobs/:id` |
 | `GET` | `/api/backup/restore/:name/plan` | Inspect restore plan/dry-run metadata |
-| `POST` | `/api/backup/restore/:name` | Run dry-run or execute full/selective restore |
+| `POST` | `/api/backup/restore/:name` | Run dry-run or execute full/selective restore; pass `async: true` for non-dry-run restore jobs |
 
 ---
 
@@ -234,9 +234,9 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 |---|---|---|
 | `GET` | `/api/webdav` | List WebDAV accounts |
 | `POST` | `/api/webdav` | Create/update WebDAV account, password file, and Apache config |
-| `POST` | `/api/webdav/provision` | Install/enable Apache DAV prerequisites, render config, reload httpd |
+| `POST` | `/api/webdav/provision` | Install/enable Apache DAV prerequisites, render config, reload httpd; supports `async: true` |
 | `GET` | `/api/webdav/config-preview` | Preview generated Apache DAV config |
-| `POST` | `/api/webdav/reload` | Re-render config and reload httpd |
+| `POST` | `/api/webdav/reload` | Re-render config and reload httpd; supports `async: true` |
 | `DELETE` | `/api/webdav/:id` | Remove WebDAV account/password entry and reload config |
 
 ---
@@ -248,10 +248,10 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | `GET` | `/api/extensions/updates` | Git and npm-audit update status |
 | `GET` | `/api/extensions/plugins` | List plugin manifests and available rollback snapshots |
 | `POST` | `/api/extensions/plugins/refresh` | Re-read plugin manifests |
-| `POST` | `/api/extensions/plugins/install` | Verify sha256 and install `.tgz` plugin package with rollback snapshot |
+| `POST` | `/api/extensions/plugins/install` | Verify sha256 and install `.tgz` plugin package with rollback snapshot; supports `async: true` |
 | `POST` | `/api/extensions/plugins/:id/enable` | Enable plugin with rollback snapshot |
 | `POST` | `/api/extensions/plugins/:id/disable` | Disable plugin with rollback snapshot |
-| `POST` | `/api/extensions/plugins/:id/rollback` | Restore latest or requested rollback snapshot |
+| `POST` | `/api/extensions/plugins/:id/rollback` | Restore latest or requested rollback snapshot; supports `async: true` |
 
 ---
 
@@ -262,7 +262,7 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | `GET` | `/api/transfer-import` | List inspected/executed transfer imports and progress reports |
 | `POST` | `/api/transfer-import/inspect` | Inspect cPanel archive and build executable import report |
 | `GET` | `/api/transfer-import/:id` | Read one import status/progress report |
-| `POST` | `/api/transfer-import/:id/execute` | Execute guarded import with `confirm=true`, file rollback point, account upsert, and SQL import |
+| `POST` | `/api/transfer-import/:id/execute` | Execute guarded import with `confirm=true`, file rollback point, account upsert, and SQL import; supports `async: true` |
 
 ---
 

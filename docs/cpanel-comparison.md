@@ -6,7 +6,7 @@ This comparison separates cPanel-style end-user features from WHM-style administ
 
 HostPanel now covers the main shared-hosting control-plane areas: accounts, packages/feature lists, reseller privileges, domains, DNS, files, FTP, databases, phpMyAdmin launch/Signon handoff, email accounts/forwarders/autoresponders, Track Delivery-style mail tracing, SSL, backups/restores, cron, PHP, logs, resource limits, billing, reseller/client portal, security, WAF/Fail2Ban, plugin controls, WebDAV, DNS clustering, and transfer/import tooling.
 
-cPanel/WHM is still broader and older, so the remaining gap is mostly production depth: richer analytics/report exports, extending the new background-job/progress subsystem across every long-running module, field-validating phpMyAdmin Signon after distro package updates, and ongoing hardening/regression coverage.
+cPanel/WHM is still broader and older, so the remaining gap is mostly production depth: richer analytics/report exports, extending the centralized background-job/progress subsystem into the remaining scans/app installs/edge operations, field-validating phpMyAdmin Signon after distro package updates, and ongoing hardening/regression coverage.
 
 ## End-user / cPanel-side comparison
 
@@ -31,14 +31,14 @@ cPanel/WHM is still broader and older, so the remaining gap is mostly production
 | DNS | Zone management, DNS clustering, nameserver setup | Strong foundation | DNS management, node registry, health checks, sync dry-runs, authenticated `rndc retransfer`, and nameserver planning are implemented. |
 | Mail server admin | Queue manager, routing, DKIM, Rspamd/SpamAssassin, delivery reports | Strong foundation | Queue/routing/DKIM/spam tooling and Track Delivery-style reports exist. Remaining depth is richer Exim-like views and exports. |
 | Security center | Firewall, WAF, Fail2Ban, malware scanner, API tokens, audit log | Strong | HostPanel has firewall, WAF, Fail2Ban, scanner, API tokens, audit logging, and admin users. |
-| Transfers/backups | Backup config, account restores, transfer tool | Strong foundation | Backup management, restore plans/dry-runs/execution, and guarded cPanel archive transfer/import with rollback/progress are implemented. A centralized job system would improve UX for long tasks. |
+| Transfers/backups | Backup config, account restores, transfer tool | Strong foundation | Backup management, restore plans/dry-runs/execution, guarded cPanel archive transfer/import with rollback/progress, and centralized background jobs for backup creation/restores and transfer execution are implemented. |
 | Branding/billing/client portal | cPanel branding, packages, billing integrations | Strong for HostPanel's target | HostPanel includes branding/settings, billing, Stripe/PayPal, reseller/client portal, and team access. |
 | Updates/extensions | cPanel update channels, EasyApache, plugins | Functional foundation | HostPanel reports git/npm audit status and supports verified `.tgz` plugin install, enable/disable, snapshots, and rollback. WHM-grade update channels/EasyApache remain outside current scope. |
 
 ## Remaining priority work
 
 1. Validate phpMyAdmin Signon end-to-end against the live installed phpMyAdmin package/config.
-2. Extend centralized background-job/progress/log tracking from backup creation into transfers, restores, scans, syncs, and installs.
+2. Extend centralized background-job/progress/log tracking into the remaining scans, app installs, and smaller edge operations; backup create/restore, transfer execution, DNS sync, WebDAV provision/reload, and plugin install/rollback are already wired.
 3. Deepen metrics/mail reports with charts, exports, retention, and more filters.
 4. Continue adding account-scope/team-subaccount regression tests as portal modules grow.
 5. Keep hardening service-command routes to the safe argv/Node-primitive pattern and avoid shell pipelines.

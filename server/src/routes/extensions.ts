@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import os from 'os';
 import path from 'path';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob, JobContext } from '../background-jobs';
 
 const router = Router();
 const PLUGIN_DIR = () => process.env.PLUGIN_DIR || path.join(process.cwd(), 'plugins');
@@ -91,22 +92,36 @@ router.get('/updates', async (_req: Request, res: Response) => {
 router.get('/plugins', (_req: Request, res: Response) => res.json({ directory: PLUGIN_DIR(), rollbackDirectory: ROLLBACK_DIR(), plugins: readPlugins(), rollbacks: readRollbacks() }));
 router.post('/plugins/refresh', (_req: Request, res: Response) => res.json({ directory: PLUGIN_DIR(), plugins: readPlugins(), rollbacks: readRollbacks(), refreshed: true }));
 
-router.post('/plugins/install', async (req: Request, res: Response) => {
-  const packagePath = String(req.body?.packagePath || '');
-  const expectedSha256 = req.body?.sha256 ? String(req.body.sha256) : undefined;
+async function installPluginPackage(packagePath: string, expectedSha256?: string, ctx?: JobContext) {
   let extracted: Awaited<ReturnType<typeof verifiedExtract>> | null = null;
   try {
+    ctx?.progress(15, 'Verifying plugin package');
     extracted = await verifiedExtract(packagePath, expectedSha256);
     await fs.mkdir(PLUGIN_DIR(), { recursive: true });
     const target = pluginPath(extracted.id);
+    ctx?.progress(45, `Creating rollback for ${extracted.id}`);
     const rollback = await createRollback(extracted.id);
     await fs.rm(target, { recursive: true, force: true });
     const manifest = { ...extracted.manifest, enabled: extracted.manifest.enabled !== false, installed_at: new Date().toISOString(), package_sha256: extracted.actualSha256 };
+    ctx?.progress(70, `Installing plugin ${extracted.id}`);
     await fs.cp(extracted.candidate, target, { recursive: true, force: true, preserveTimestamps: true });
     await writeManifest(target, manifest);
-    res.json({ installed: true, plugin: publicManifest(extracted.id, manifest), rollback });
-  } catch (err: any) { res.status(400).json({ error: err.message }); }
-  finally { if (extracted?.staging) await fs.rm(extracted.staging, { recursive: true, force: true }).catch(() => {}); }
+    ctx?.progress(95, `Plugin ${extracted.id} installed`);
+    return { installed: true, plugin: publicManifest(extracted.id, manifest), rollback };
+  } finally {
+    if (extracted?.staging) await fs.rm(extracted.staging, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+router.post('/plugins/install', async (req: Request, res: Response) => {
+  const packagePath = String(req.body?.packagePath || '');
+  const expectedSha256 = req.body?.sha256 ? String(req.body.sha256) : undefined;
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'plugin.install', resource: path.basename(packagePath), metadata: { packagePath, sha256: expectedSha256 } }, (ctx) => installPluginPackage(packagePath, expectedSha256, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try { res.json(await installPluginPackage(packagePath, expectedSha256)); }
+  catch (err: any) { res.status(400).json({ error: err.message }); }
 });
 
 async function updatePluginState(id: string, enabled: boolean | undefined) {
@@ -133,18 +148,29 @@ router.post('/plugins/:id/disable', async (req: Request, res: Response) => {
   catch (err: any) { res.status(err.status || (/Invalid/.test(err.message) ? 400 : 500)).json({ error: err.message }); }
 });
 
+async function rollbackPlugin(id: string, rollbackId?: string, ctx?: JobContext) {
+  if (!safeId(id)) { const e: any = new Error('Invalid plugin id'); e.status = 400; throw e; }
+  const selected = rollbackId ? readRollbacks(id).find(r => r.id === rollbackId) : readRollbacks(id)[0];
+  if (!selected) { const e: any = new Error('No rollback available for plugin'); e.status = 404; throw e; }
+  ctx?.progress(30, `Creating rollback before restoring ${id}`);
+  await createRollback(id);
+  const target = pluginPath(id);
+  ctx?.progress(60, `Restoring plugin ${id}`);
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.cp(selected.path, target, { recursive: true, force: true, preserveTimestamps: true });
+  ctx?.progress(95, `Plugin ${id} rolled back`);
+  return { rolledBack: true, plugin: publicManifest(id, readManifest(target)), rollback: selected.id };
+}
+
 router.post('/plugins/:id/rollback', async (req: Request, res: Response) => {
   const id = String(req.params.id || '');
   if (!safeId(id)) return res.status(400).json({ error: 'Invalid plugin id' });
-  const selected = req.body?.rollbackId ? readRollbacks(id).find(r => r.id === req.body.rollbackId) : readRollbacks(id)[0];
-  if (!selected) return res.status(404).json({ error: 'No rollback available for plugin' });
-  try {
-    await createRollback(id);
-    const target = pluginPath(id);
-    await fs.rm(target, { recursive: true, force: true });
-    await fs.cp(selected.path, target, { recursive: true, force: true, preserveTimestamps: true });
-    res.json({ rolledBack: true, plugin: publicManifest(id, readManifest(target)), rollback: selected.id });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'plugin.rollback', resource: id, metadata: { id, rollbackId: req.body?.rollbackId || '' } }, (ctx) => rollbackPlugin(id, req.body?.rollbackId, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try { res.json(await rollbackPlugin(id, req.body?.rollbackId)); }
+  catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 export default router;

@@ -192,49 +192,59 @@ router.get('/restore/:name/plan', async (req: AuthRequest, res: Response) => {
   }
 });
 
+async function restoreBackupFile(name: string, body: any, ctx?: JobContext) {
+  const file = path.join(getBackupDir(), name);
+  if (!existsSync(file)) { const e: any = new Error('Backup file not found'); e.status = 404; throw e; }
+  const dryRun = Boolean(body?.dryRun);
+  if (name.endsWith('.sql.gz')) {
+    const dbName = name.replace(/^db_/, '').replace(/_\d{4}-.*\.sql\.gz$/, '');
+    if (!/^[a-zA-Z0-9_]+$/.test(dbName)) { const e: any = new Error('Cannot determine database name from filename'); e.status = 400; throw e; }
+    if (dryRun) return { success: true, dryRun: true, type: 'database', database: dbName, actions: [`Would restore database ${dbName}`] };
+    ctx?.progress(20, `Restoring database ${dbName}`);
+    const user = process.env.DB_ROOT_USER || 'root';
+    const pass = process.env.DB_ROOT_PASS || '';
+    const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
+    const host = process.env.DB_HOST || '127.0.0.1';
+    await gunzipFileIntoStdin(file, 'mysql', [`-u${user}`, `-h${host}`, dbName], dbEnv);
+    ctx?.progress(90, `Database ${dbName} restored`);
+    return { success: true, message: `Database ${dbName} restored`, database: dbName };
+  }
+  if (name.endsWith('.tar.gz')) {
+    const webroot = process.env.WEBROOT || '/var/www';
+    const restoreTarget = body?.target ? path.resolve(path.join(webroot, String(body.target))) : path.resolve(webroot);
+    if (!restoreTarget.startsWith(path.resolve(webroot))) { const e: any = new Error('Invalid restore target'); e.status = 400; throw e; }
+    ctx?.progress(10, 'Reading archive entries');
+    const entries = await tarEntries(file);
+    const selected = entries.length ? selectedEntries(entries, body?.entries) : [];
+    if (!entries.length && !Array.isArray(body?.entries) && !dryRun) {
+      ctx?.progress(35, `Extracting archive to ${webroot}`);
+      await runFile('tar', ['-xzf', file, '-C', webroot], { timeout: 300000 });
+      return { success: true, message: `Files restored to ${webroot}`, restored: [] };
+    }
+    if (!selected.length) { const e: any = new Error('No matching entries selected'); e.status = 400; throw e; }
+    if (dryRun) return { success: true, dryRun: true, type: 'files', target: restoreTarget, selected, count: selected.length, actions: selected.map(e => `Would restore ${e}`) };
+    ctx?.progress(35, `Restoring ${selected.length} archive entries`);
+    if (selected.length === entries.length && !Array.isArray(body?.entries) && !body?.target) {
+      await runFile('tar', ['-xzf', file, '-C', webroot], { timeout: 300000 });
+    } else {
+      await runFile('tar', ['-xzf', file, '-C', restoreTarget, ...selected], { timeout: 300000 });
+    }
+    ctx?.progress(90, `Files restored to ${restoreTarget}`);
+    return { success: true, message: `Files restored to ${restoreTarget}`, restored: selected, target: restoreTarget };
+  }
+  const e: any = new Error('Unknown backup format'); e.status = 400; throw e;
+}
+
 router.post('/restore/:name', async (req: AuthRequest, res: Response) => {
   const name = safeFileName(req.params.name);
   const file = path.join(getBackupDir(), name);
   if (!existsSync(file)) return res.status(404).json({ error: 'Backup file not found' });
-
-  try {
-    const dryRun = Boolean(req.body?.dryRun);
-    if (name.endsWith('.sql.gz')) {
-      // Database restore
-      const dbName = name.replace(/^db_/, '').replace(/_\d{4}-.*\.sql\.gz$/, '');
-      if (!/^[a-zA-Z0-9_]+$/.test(dbName)) return res.status(400).json({ error: 'Cannot determine database name from filename' });
-      if (dryRun) return res.json({ success: true, dryRun: true, type: 'database', database: dbName, actions: [`Would restore database ${dbName}`] });
-      const user = process.env.DB_ROOT_USER || 'root';
-      const pass = process.env.DB_ROOT_PASS || '';
-      const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
-      const host = process.env.DB_HOST || '127.0.0.1';
-      await gunzipFileIntoStdin(file, 'mysql', [`-u${user}`, `-h${host}`, dbName], dbEnv);
-      res.json({ success: true, message: `Database ${dbName} restored` });
-    } else if (name.endsWith('.tar.gz')) {
-      // Files restore — extract back to webroot, optionally narrowed to selected archive entries.
-      const webroot = process.env.WEBROOT || '/var/www';
-      const restoreTarget = req.body?.target ? path.resolve(path.join(webroot, String(req.body.target))) : path.resolve(webroot);
-      if (!restoreTarget.startsWith(path.resolve(webroot))) return res.status(400).json({ error: 'Invalid restore target' });
-      const entries = await tarEntries(file);
-      const selected = entries.length ? selectedEntries(entries, req.body?.entries) : [];
-      if (!entries.length && !Array.isArray(req.body?.entries) && !dryRun) {
-        await runFile('tar', ['-xzf', file, '-C', webroot], { timeout: 300000 });
-        return res.json({ success: true, message: `Files restored to ${webroot}`, restored: [] });
-      }
-      if (!selected.length) return res.status(400).json({ error: 'No matching entries selected' });
-      if (dryRun) return res.json({ success: true, dryRun: true, type: 'files', target: restoreTarget, selected, count: selected.length, actions: selected.map(e => `Would restore ${e}`) });
-      if (selected.length === entries.length && !Array.isArray(req.body?.entries) && !req.body?.target) {
-        await runFile('tar', ['-xzf', file, '-C', webroot], { timeout: 300000 });
-      } else {
-        await runFile('tar', ['-xzf', file, '-C', restoreTarget, ...selected], { timeout: 300000 });
-      }
-      res.json({ success: true, message: `Files restored to ${restoreTarget}`, restored: selected });
-    } else {
-      res.status(400).json({ error: 'Unknown backup format' });
-    }
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  if (req.body?.async && !req.body?.dryRun) {
+    const jobId = createBackgroundJob({ type: 'backup.restore', resource: name, metadata: { name, ...req.body }, createdBy: req.user?.username || 'system' }, (ctx) => restoreBackupFile(name, req.body || {}, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
   }
+  try { res.json(await restoreBackupFile(name, req.body || {})); }
+  catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 router.delete('/:name', (req: AuthRequest, res: Response) => {

@@ -6,6 +6,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import db from '../db';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob, JobContext } from '../background-jobs';
 
 const router = Router();
 db.exec(`CREATE TABLE IF NOT EXISTS transfer_imports (
@@ -157,43 +158,44 @@ router.post('/inspect', async (req: Request, res: Response) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:id/execute', async (req: Request, res: Response) => {
-  const row = db.prepare('SELECT * FROM transfer_imports WHERE id=?').get(req.params.id) as any;
-  if (!row) return res.status(404).json({ error: 'Import not found' });
-  if (req.body?.confirm !== true) return res.status(400).json({ error: 'confirm=true is required before import execution' });
+async function executeTransferImport(row: any, body: any = {}, ctx?: JobContext) {
+  if (body?.confirm !== true) { const e: any = new Error('confirm=true is required before import execution'); e.status = 400; throw e; }
   const archivePath = row.archive_path;
-  if (!safeArchive(archivePath) || !existsSync(archivePath)) return res.status(400).json({ error: 'Stored archive path is no longer valid or accessible' });
+  if (!safeArchive(archivePath) || !existsSync(archivePath)) { const e: any = new Error('Stored archive path is no longer valid or accessible'); e.status = 400; throw e; }
 
   const report = { ...parseReport(row.report), startedAt: new Date().toISOString(), steps: parseReport(row.report).steps || [] };
   writeReport(row.id, 'running', report);
   const staging = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-transfer-'));
   let fileRollback: { target: string; backup: string | null } | null = null;
   try {
+    ctx?.progress(10, 'Extracting transfer archive');
     appendStep(report, 'extract-started', { staging }); writeReport(row.id, 'running', report);
     await runFile('tar', ['-xf', archivePath, '-C', staging], { timeout: 300000 });
     const files = await listArchive(archivePath);
     const root = inferRoot(files);
-    const requestedDomain = String(req.body?.domain || '').trim();
+    const requestedDomain = String(body?.domain || '').trim();
     const domain = requestedDomain || inferDomains(files)[0];
-    const requestedUsername = String(req.body?.username || '').trim();
+    const requestedUsername = String(body?.username || '').trim();
     const username = requestedUsername || inferUsername(files, archivePath) || (domain ? domain.split('.')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16) : '');
     if (!domainOk(domain)) throw new Error('Cannot infer valid account domain; pass domain explicitly');
     if (!usernameOk(username)) throw new Error('Cannot infer valid account username; pass username explicitly');
     appendStep(report, 'metadata-resolved', { root, domain, username }); writeReport(row.id, 'running', report);
 
-    const sections = req.body?.sections || {};
+    const sections = body?.sections || {};
     const doFiles = sections.files !== false;
     const doDatabases = sections.databases !== false;
     const doAccount = sections.account !== false;
 
-    if (doFiles) { fileRollback = await restoreFiles(staging, root, domain, report); writeReport(row.id, 'running', report); }
+    if (doFiles) { ctx?.progress(35, `Restoring files for ${domain}`); fileRollback = await restoreFiles(staging, root, domain, report); writeReport(row.id, 'running', report); }
     if (doAccount) {
+      ctx?.progress(55, `Upserting account ${username}`);
       const existing = db.prepare('SELECT id FROM accounts WHERE username=? OR domain=?').get(username, domain) as any;
       if (existing) db.prepare("UPDATE accounts SET username=?, domain=?, status='active', notes=? WHERE id=?").run(username, domain, `Imported from ${archivePath}`, existing.id);
       else db.prepare('INSERT INTO accounts (username, domain, notes) VALUES (?, ?, ?)').run(username, domain, `Imported from ${archivePath}`);
       appendStep(report, 'account-record-upserted', { username, domain }); writeReport(row.id, 'running', report);
     }
     if (doDatabases) {
+      ctx?.progress(70, 'Restoring databases');
       const sqlFiles = inferSqlFiles(files);
       report.databasesRestored = await restoreDatabases(staging, sqlFiles, report);
       writeReport(row.id, 'running', report);
@@ -202,7 +204,8 @@ router.post('/:id/execute', async (req: Request, res: Response) => {
     report.completedAt = new Date().toISOString();
     report.success = true;
     writeReport(row.id, 'completed', report);
-    res.json({ id: row.id, status: 'completed', report });
+    ctx?.progress(95, 'Transfer import completed');
+    return { id: row.id, status: 'completed', report };
   } catch (err: any) {
     appendStep(report, 'failed', { error: err.message });
     if (fileRollback?.backup) {
@@ -212,9 +215,24 @@ router.post('/:id/execute', async (req: Request, res: Response) => {
     report.failedAt = new Date().toISOString();
     report.success = false;
     writeReport(row.id, 'failed', report);
-    res.status(500).json({ id: row.id, status: 'failed', error: err.message, report });
+    throw err;
   } finally {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+router.post('/:id/execute', async (req: Request, res: Response) => {
+  const row = db.prepare('SELECT * FROM transfer_imports WHERE id=?').get(req.params.id) as any;
+  if (!row) return res.status(404).json({ error: 'Import not found' });
+  if (req.body?.confirm !== true) return res.status(400).json({ error: 'confirm=true is required before import execution' });
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'transfer.execute', resource: String(row.id), metadata: { importId: row.id, archivePath: row.archive_path } }, (ctx) => executeTransferImport(row, req.body || {}, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try { res.json(await executeTransferImport(row, req.body || {})); }
+  catch (err: any) {
+    const latest = db.prepare('SELECT * FROM transfer_imports WHERE id=?').get(row.id) as any;
+    res.status(err.status || 500).json({ id: row.id, status: 'failed', error: err.message, report: latest ? parseReport(latest.report) : {} });
   }
 });
 export default router;

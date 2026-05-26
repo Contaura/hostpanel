@@ -30,7 +30,7 @@ All notable changes to HostPanel are documented in this file.
 - Added one-time phpMyAdmin Signon bridge generation, distro config registration for a dedicated Signon server entry, and a credential-verified SSO launch endpoint for short-lived phpMyAdmin handoff URLs.
 - Completed shell-execution hardening for the remaining legacy route modules (`node-apps`, `resource-limits`, `logs`, and `cache`) by replacing shell pipelines with `runFile` argv calls or Node primitives.
 - Expanded team-subaccount regression coverage for account, file, and database namespace scoping.
-- Added a centralized background jobs API (`/api/jobs`) with persisted status, progress, result/error, and structured logs; backup creation can now enqueue asynchronous jobs and the Backup Manager UI polls live progress.
+- Added a centralized background jobs API (`/api/jobs`) with persisted status, progress, result/error, and structured logs; backup creation now has Backup Manager UI polling, and backup restore, transfer execution, DNS sync, WebDAV provision/reload, and plugin install/rollback can enqueue asynchronous jobs.
 
 ### Fixed
 

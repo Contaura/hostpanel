@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import db from '../db';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob, JobContext } from '../background-jobs';
 
 const router = Router();
 db.exec(`CREATE TABLE IF NOT EXISTS dns_cluster_nodes (
@@ -115,20 +116,32 @@ router.post('/sync-preview', (req: Request, res: Response) => {
   res.json({ domain, dryRun: true, actions: nodes.map(n => syncAction(n, domain, true)) });
 });
 
-router.post('/sync', async (req: Request, res: Response) => {
-  const { domain, nodeIds } = req.body || {};
-  if (!domainOk(domain)) return res.status(400).json({ error: 'Valid domain required' });
+async function runDnsSync(domain: string, nodeIds?: any[], ctx?: JobContext) {
   const allNodes = db.prepare('SELECT * FROM dns_cluster_nodes WHERE enabled=1').all() as DnsNode[];
   const allow = Array.isArray(nodeIds) && nodeIds.length ? new Set(nodeIds.map((id: any) => Number(id))) : null;
   const nodes = allow ? allNodes.filter(n => allow.has(n.id)) : allNodes;
-  if (!nodes.length) return res.status(400).json({ error: 'No enabled DNS cluster nodes selected' });
-
+  if (!nodes.length) { const e: any = new Error('No enabled DNS cluster nodes selected'); e.status = 400; throw e; }
   const results = [];
+  let done = 0;
   for (const node of nodes) {
+    ctx?.progress(Math.max(5, Math.round((done / nodes.length) * 90)), `Requesting DNS retransfer on ${node.name}`);
     try { results.push(await triggerRetransfer(node, domain)); }
     catch (e: any) { results.push({ id: node.id, node: node.name, host: node.host, ok: false, error: e.message }); }
+    done += 1;
   }
-  res.status(results.some(r => !r.ok) ? 207 : 200).json({ domain, dryRun: false, actions: nodes.map(n => syncAction(n, domain, false)), results });
+  ctx?.progress(95, `DNS sync completed for ${domain}`);
+  return { domain, dryRun: false, actions: nodes.map(n => syncAction(n, domain, false)), results };
+}
+
+router.post('/sync', async (req: Request, res: Response) => {
+  const { domain, nodeIds } = req.body || {};
+  if (!domainOk(domain)) return res.status(400).json({ error: 'Valid domain required' });
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'dns.sync', resource: domain, metadata: { domain, nodeIds } }, (ctx) => runDnsSync(domain, nodeIds, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  const result = await runDnsSync(domain, nodeIds);
+  res.status(result.results.some(r => !r.ok) ? 207 : 200).json(result);
 });
 
 router.post('/nameserver-plan', (req: Request, res: Response) => {

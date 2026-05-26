@@ -43,6 +43,12 @@ describe('central background jobs API', () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-jobs-'));
     process.env.BACKUP_DIR = path.join(tmp, 'backups');
     process.env.WEBROOT = path.join(tmp, 'www');
+    process.env.WEBDAV_CONF_FILE = path.join(tmp, 'httpd', 'webdav.conf');
+    process.env.WEBDAV_PASSWD_FILE = path.join(tmp, 'httpd', '.webdav-passwd');
+    process.env.WEBDAV_ALLOWED_ROOT = path.join(tmp, 'www') + path.sep;
+    process.env.PLUGIN_DIR = path.join(tmp, 'plugins');
+    process.env.PLUGIN_ROLLBACK_DIR = path.join(tmp, 'plugin-rollbacks');
+    process.env.TRANSFER_ROLLBACK_DIR = path.join(tmp, 'transfer-rollbacks');
     await fs.mkdir(path.join(process.env.WEBROOT, 'example.com'), { recursive: true });
     await fs.writeFile(path.join(process.env.WEBROOT, 'example.com', 'index.html'), 'ok');
   });
@@ -53,6 +59,12 @@ describe('central background jobs API', () => {
     await fs.rm(tmp, { recursive: true, force: true });
     delete process.env.BACKUP_DIR;
     delete process.env.WEBROOT;
+    delete process.env.WEBDAV_CONF_FILE;
+    delete process.env.WEBDAV_PASSWD_FILE;
+    delete process.env.WEBDAV_ALLOWED_ROOT;
+    delete process.env.PLUGIN_DIR;
+    delete process.env.PLUGIN_ROLLBACK_DIR;
+    delete process.env.TRANSFER_ROLLBACK_DIR;
     vi.resetModules();
   });
 
@@ -96,4 +108,95 @@ describe('central background jobs API', () => {
     const rows = await list.json();
     expect(rows.some((r: any) => r.id === body.jobId && r.status === 'completed')).toBe(true);
   });
+
+  it('enqueues restore, transfer, DNS, WebDAV, and plugin operations as central jobs', async () => {
+    const backup = (await import('./backup')).default;
+    const transfers = (await import('./transfer-import')).default;
+    const dns = (await import('./dns-cluster')).default;
+    const webdav = (await import('./webdav')).default;
+    const extensions = (await import('./extensions')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/backup', backup);
+    app.use('/api/transfer', transfers);
+    app.use('/api/dns', dns);
+    app.use('/api/webdav', webdav);
+    app.use('/api/extensions', extensions);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const archive = path.join(process.env.BACKUP_DIR!, 'files_all_2024-01-01T00-00-00.tar.gz');
+    await fs.mkdir(path.dirname(archive), { recursive: true });
+    await fs.writeFile(archive, 'archive');
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tf') return { stdout: 'example.com/index.html\n', stderr: '' };
+      if (cmd === 'tar' && args[0] === '-xzf') return { stdout: '', stderr: '' };
+      if (cmd === 'rndc') return { stdout: 'queued', stderr: '' };
+      return { stdout: '', stderr: '' };
+    });
+    const restore = await fetch(`${server.url}/api/backup/restore/${path.basename(archive)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ async: true }) });
+    expect(restore.status).toBe(202);
+    const restoreJob = await restore.json();
+    const restoreDone = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${restoreJob.jobId}`)).json(), j => j.status === 'completed');
+    expect(restoreDone.type).toBe('backup.restore');
+
+    const node = await fetch(`${server.url}/api/dns/nodes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'ns2', host: '192.0.2.2' }) });
+    expect(node.status).toBe(200);
+    const sync = await fetch(`${server.url}/api/dns/sync`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ domain: 'example.com', async: true }) });
+    expect(sync.status).toBe(202);
+    const syncJob = await sync.json();
+    const syncDone = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${syncJob.jobId}`)).json(), j => j.status === 'completed');
+    expect(syncDone.type).toBe('dns.sync');
+    expect(syncDone.result.results[0].ok).toBe(true);
+
+    const provision = await fetch(`${server.url}/api/webdav/provision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ async: true }) });
+    expect(provision.status).toBe(202);
+    const provisionJob = await provision.json();
+    const provisionDone = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${provisionJob.jobId}`)).json(), j => j.status === 'completed');
+    expect(provisionDone.type).toBe('webdav.provision');
+
+    const archivePath = `/var/backups/hostpanel-jobs-${Date.now()}.tar.gz`;
+    await fs.mkdir('/var/backups', { recursive: true });
+    await fs.writeFile(archivePath, 'fake');
+    const entries = ['cpmove-demo/userdata/example.com', 'cpmove-demo/homedir/public_html/index.html'];
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tf') return { stdout: entries.join('\n') + '\n', stderr: '' };
+      if (cmd === 'tar' && args[0] === '-xf') {
+        const staging = args[args.indexOf('-C') + 1];
+        await fs.mkdir(path.join(staging, 'cpmove-demo', 'homedir', 'public_html'), { recursive: true });
+        await fs.writeFile(path.join(staging, 'cpmove-demo', 'homedir', 'public_html', 'index.html'), 'imported');
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const inspect = await fetch(`${server.url}/api/transfer/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ archivePath }) });
+    expect(inspect.status).toBe(200);
+    const inspected = await inspect.json();
+    const exec = await fetch(`${server.url}/api/transfer/${inspected.id}/execute`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true, async: true, sections: { databases: false } }) });
+    expect(exec.status).toBe(202);
+    const execJob = await exec.json();
+    const execDone = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${execJob.jobId}`)).json(), j => j.status === 'completed');
+    expect(execDone.type).toBe('transfer.execute');
+    await fs.rm(archivePath, { force: true });
+
+    const pluginRoot = path.join(tmp, 'sample-plugin');
+    await fs.mkdir(pluginRoot, { recursive: true });
+    await fs.writeFile(path.join(pluginRoot, 'plugin.json'), JSON.stringify({ id: 'sample-plugin', name: 'Sample Plugin' }));
+    const pkg = path.join(tmp, 'sample-plugin.tgz');
+    await import('child_process').then(({ execFileSync }) => execFileSync('tar', ['-czf', pkg, '-C', tmp, 'sample-plugin']));
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-xzf') {
+        await import('child_process').then(({ execFileSync }) => execFileSync('tar', args));
+      }
+      return { stdout: '', stderr: '' };
+    });
+    const install = await fetch(`${server.url}/api/extensions/plugins/install`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ packagePath: pkg, async: true }) });
+    expect(install.status).toBe(202);
+    const installJob = await install.json();
+    const installDone = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${installJob.jobId}`)).json(), j => j.status === 'completed');
+    expect(installDone.type).toBe('plugin.install');
+    expect(installDone.result.installed).toBe(true);
+  });
+
 });

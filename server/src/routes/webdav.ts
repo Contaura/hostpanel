@@ -5,6 +5,7 @@ import path from 'path';
 import { spawn } from 'child_process';
 import db from '../db';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob, JobContext } from '../background-jobs';
 
 const router = Router();
 db.exec(`CREATE TABLE IF NOT EXISTS webdav_accounts (
@@ -86,8 +87,9 @@ async function reloadHttpd() {
   return { reloaded: !result.stderr, output: result.stdout || result.stderr };
 }
 
-async function provisionWebdavPackages() {
+async function provisionWebdavPackages(ctx?: JobContext) {
   const actions: any[] = [];
+  ctx?.progress(10, 'Installing WebDAV prerequisites');
   const installs = [
     ['dnf', ['install', '-y', 'httpd', 'httpd-tools'], 'Install Apache/httpd-tools for DAV and htpasswd'],
     ['systemctl', ['enable', '--now', 'httpd'], 'Enable and start httpd'],
@@ -96,15 +98,22 @@ async function provisionWebdavPackages() {
     const result = await runFile(cmd, args, { timeout: 300000 }).catch((e: any) => ({ stdout: '', stderr: e.message || String(e) }));
     actions.push({ command: `${cmd} ${args.join(' ')}`, description, success: !result.stderr, output: result.stdout || result.stderr });
   }
+  ctx?.progress(65, 'Rendering WebDAV Apache config');
   await renderConfig();
   actions.push({ command: `write ${WEBDAV_CONF_FILE}`, description: 'Render managed WebDAV Apache config', success: true });
+  ctx?.progress(80, 'Reloading httpd');
   actions.push({ command: 'systemctl reload httpd', description: 'Reload httpd', ...(await reloadHttpd()) });
+  ctx?.progress(95, 'WebDAV provisioning completed');
   return actions;
 }
 
 router.get('/', (_req: Request, res: Response) => res.json(db.prepare('SELECT id, username, home, domain, enabled, permissions, created_at, updated_at FROM webdav_accounts ORDER BY username').all()));
 
-router.post('/provision', async (_req: Request, res: Response) => {
+router.post('/provision', async (req: Request, res: Response) => {
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'webdav.provision', resource: 'webdav', metadata: {} }, async (ctx) => ({ provisioned: true, actions: await provisionWebdavPackages(ctx) }));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
   try { res.json({ provisioned: true, actions: await provisionWebdavPackages() }); }
   catch (err: any) { res.status(500).json({ error: err.message }); }
 });
@@ -144,9 +153,19 @@ router.get('/config-preview', (_req: Request, res: Response) => {
   res.type('text/plain').send(rows.map(config).join('\n'));
 });
 
-router.post('/reload', async (_req: Request, res: Response) => {
+async function reloadWebdav(ctx?: JobContext) {
+  ctx?.progress(45, 'Rendering WebDAV Apache config');
   await renderConfig();
-  res.json(await reloadHttpd());
+  ctx?.progress(80, 'Reloading httpd');
+  return reloadHttpd();
+}
+
+router.post('/reload', async (req: Request, res: Response) => {
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'webdav.reload', resource: 'webdav', metadata: {} }, (ctx) => reloadWebdav(ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  res.json(await reloadWebdav());
 });
 
 export default router;
