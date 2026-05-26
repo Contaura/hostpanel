@@ -500,6 +500,41 @@ describe('high-risk route command execution integration', () => {
     expect(pmaConfig).toContain("$cfg['Servers'][$i]['SignonURL'] = '/phpMyAdmin/hostpanel-signon.php'");
   });
 
+  it('validates phpMyAdmin Signon field configuration without exposing token secrets', async () => {
+    const pmaDir = path.join(tmp, 'phpMyAdmin');
+    process.env.PHPMYADMIN_PATHS = pmaDir;
+    process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
+    process.env.PHPMYADMIN_CONFIG_FILE = path.join(tmp, 'phpMyAdmin', 'config.inc.php');
+    process.env.PHPMYADMIN_SSO_TOKEN_DIR = path.join(tmp, 'tokens');
+    process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
+    await fs.mkdir(pmaDir, { recursive: true });
+    const server = await appFor('/api/databases', './databases');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: 'Syntax OK\nactive\n', stderr: '' });
+
+    await fetch(`${server.url}/api/databases/phpmyadmin/install`, { method: 'POST' });
+    await fs.writeFile(path.join(process.env.PHPMYADMIN_SSO_TOKEN_DIR, 'abcdef.json'), '{"password":"do-not-leak"}');
+    const res = await fetch(`${server.url}/api/databases/phpmyadmin/validation`);
+    const body: any = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.ready).toBe(true);
+    expect(body.checks).toEqual(expect.objectContaining({
+      installed: true,
+      apacheAlias: true,
+      signonBridge: true,
+      signonConfig: true,
+      phpSyntax: true,
+      apacheConfig: true,
+      httpdActive: true,
+      tokenDirectory: true,
+    }));
+    expect(JSON.stringify(body)).not.toContain('do-not-leak');
+    expect(runFileMock).toHaveBeenCalledWith('php', ['-l', path.join(pmaDir, 'hostpanel-signon.php')], expect.objectContaining({ timeout: 60000 }));
+    expect(runFileMock).toHaveBeenCalledWith('apachectl', ['configtest'], expect.objectContaining({ timeout: 60000 }));
+    expect(runFileMock).toHaveBeenCalledWith('systemctl', ['is-active', 'httpd'], expect.objectContaining({ timeout: 60000 }));
+  });
+
   it('removes promisify(exec) from hardened route sources', async () => {
     for (const file of ['reseller.ts', 'logs.ts', 'cache.ts', 'resource-limits.ts', 'node-apps.ts']) {
       const src = await fs.readFile(path.resolve(__dirname, file), 'utf8');

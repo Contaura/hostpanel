@@ -277,6 +277,19 @@ async function createPmaSsoToken(username: string, password: string, database?: 
   return token;
 }
 
+async function readIfPresent(file: string) {
+  try { return await fs.readFile(file, 'utf8'); } catch { return ''; }
+}
+
+async function commandOk(command: string, args: string[]) {
+  try {
+    const result = await runFile(command, args, { timeout: 60000 });
+    return { ok: true, output: `${result.stdout || ''}${result.stderr || ''}`.trim() };
+  } catch (err: any) {
+    return { ok: false, output: String(err?.message || err) };
+  }
+}
+
 router.get('/phpmyadmin', enforceResellerPrivilege('phpmyadmin'), async (_req: AuthRequest, res: Response) => {
   const found = pmaPath();
   if (found) return res.json({ installed: true, path: found, url: pmaUrl(), config: existsSync(PMA_CONF_FILE) ? PMA_CONF_FILE : null });
@@ -306,6 +319,39 @@ router.post('/phpmyadmin/install', enforceResellerPrivilege('phpmyadmin'), async
     await runFile('apachectl', ['graceful'], { timeout: 120000 }).catch(async () => { await runFile('systemctl', ['reload', 'httpd'], { timeout: 120000 }); });
     res.json({ installed: true, path: found, url: pmaUrl(), config: PMA_CONF_FILE, phpMyAdminConfig: PMA_CONFIG_FILE });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
+});
+
+router.get('/phpmyadmin/validation', enforceResellerPrivilege('phpmyadmin'), async (_req: AuthRequest, res: Response) => {
+  const found = pmaPath();
+  const bridgeFile = found ? path.join(found, 'hostpanel-signon.php') : '';
+  const [apacheConfig, pmaConfig, bridge] = await Promise.all([
+    readIfPresent(PMA_CONF_FILE),
+    readIfPresent(PMA_CONFIG_FILE),
+    bridgeFile ? readIfPresent(bridgeFile) : Promise.resolve(''),
+  ]);
+  const phpSyntax = bridgeFile ? await commandOk('php', ['-l', bridgeFile]) : { ok: false, output: 'phpMyAdmin Signon bridge missing' };
+  const apacheSyntax = await commandOk('apachectl', ['configtest']);
+  const httpd = await commandOk('systemctl', ['is-active', 'httpd']);
+  let tokenDirectory = false;
+  try {
+    const st = await fs.stat(PMA_SSO_TOKEN_DIR);
+    tokenDirectory = st.isDirectory();
+  } catch {}
+  const checks = {
+    installed: !!found,
+    apacheAlias: !!found && apacheConfig.includes(`Alias ${PMA_ALIAS} ${found}`) && apacheConfig.includes(`SetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR ${PMA_SSO_TOKEN_DIR}`),
+    signonBridge: bridge.includes('PMA_single_signon_user') && bridge.includes('PMA_single_signon_password') && bridge.includes(`index.php?server=${PMA_SSO_SERVER_ID}`),
+    signonConfig: pmaConfig.includes("$cfg['Servers'][$i]['auth_type'] = 'signon'") && pmaConfig.includes("$cfg['Servers'][$i]['SignonSession'] = 'HOSTPANEL_PMA'") && pmaConfig.includes(`$cfg['Servers'][$i]['SignonURL'] = ${phpStringLiteral(`${pmaBaseUrl()}/hostpanel-signon.php`)}`),
+    phpSyntax: phpSyntax.ok,
+    apacheConfig: apacheSyntax.ok && !/syntax error/i.test(apacheSyntax.output),
+    httpdActive: httpd.ok && httpd.output.includes('active'),
+    tokenDirectory,
+  };
+  res.json({
+    ready: Object.values(checks).every(Boolean),
+    checks,
+    paths: { phpMyAdmin: found || null, apacheConfig: PMA_CONF_FILE, phpMyAdminConfig: PMA_CONFIG_FILE, signonBridge: bridgeFile || null, tokenDirectory: PMA_SSO_TOKEN_DIR },
+  });
 });
 
 router.get('/phpmyadmin/account-scope', enforceResellerPrivilege('phpmyadmin'), async (req: AuthRequest, res: Response) => {
