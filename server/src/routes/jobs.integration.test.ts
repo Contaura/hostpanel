@@ -109,6 +109,43 @@ describe('central background jobs API', () => {
     expect(rows.some((r: any) => r.id === body.jobId && r.status === 'completed')).toBe(true);
   });
 
+  it('enqueues a disaster-recovery restore drill and persists verification evidence', async () => {
+    const backup = (await import('./backup')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/backup', backup);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const archive = path.join(process.env.BACKUP_DIR!, 'files_all_2024-01-01T00-00-00.tar.gz');
+    await fs.mkdir(path.dirname(archive), { recursive: true });
+    await fs.writeFile(archive, 'archive');
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tzf') return { stdout: 'example.com/index.html\n', stderr: '' };
+      throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+    });
+
+    const started = await fetch(`${server.url}/api/backup/drill/${path.basename(archive)}`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ async: true }),
+    });
+
+    expect(started.status).toBe(202);
+    const body = await started.json();
+    const done = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(), j => j.status === 'completed');
+    expect(done.type).toBe('backup.drill');
+    expect(done.result.drill).toBe(true);
+    expect(done.result.backup).toBe(path.basename(archive));
+    expect(done.result.restorePlan.dryRun).toBe(true);
+    expect(done.result.restorePlan.actions).toEqual(['Would restore example.com/index.html']);
+    expect(done.result.reportPath).toMatch(/drills\/files_all_2024-01-01T00-00-00\.tar\.gz-.*\.json$/);
+    const report = JSON.parse(await fs.readFile(done.result.reportPath, 'utf8'));
+    expect(report.success).toBe(true);
+    expect(report.restorePlan.count).toBe(1);
+    expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', archive], expect.objectContaining({ timeout: 120000 }));
+  });
+
   it('enqueues restore, transfer, DNS, WebDAV, and plugin operations as central jobs', async () => {
     const backup = (await import('./backup')).default;
     const transfers = (await import('./transfer-import')).default;

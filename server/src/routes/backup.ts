@@ -27,6 +27,12 @@ function getBackupDir(): string {
   return dir;
 }
 
+function getDrillReportDir(): string {
+  const dir = process.env.DRILL_REPORT_DIR || path.join(getBackupDir(), 'drills');
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 function safeFileName(name: string): string {
   return path.basename(name).replace(/[^a-zA-Z0-9._-]/g, '');
 }
@@ -171,6 +177,36 @@ router.get('/download/:name', (req: AuthRequest, res: Response) => {
   const file = path.join(getBackupDir(), name);
   if (!existsSync(file)) return res.status(404).json({ error: 'File not found' });
   res.download(file);
+});
+
+async function runRestoreDrill(name: string, body: any, ctx?: JobContext) {
+  ctx?.progress(10, 'Starting restore dry-run drill');
+  const restorePlan = await restoreBackupFile(name, { ...(body || {}), dryRun: true }, ctx);
+  const report = {
+    success: true,
+    drill: true,
+    backup: name,
+    verifiedAt: new Date().toISOString(),
+    restorePlan,
+  };
+  const stamp = report.verifiedAt.replace(/[:.]/g, '-');
+  const reportPath = path.join(getDrillReportDir(), `${name}-${stamp}.json`);
+  writeFileSync(reportPath, JSON.stringify(report, null, 2), { mode: 0o640 });
+  ctx?.progress(90, 'Restore drill verification report written');
+  ctx?.log('Disaster-recovery restore drill completed', { backup: name, reportPath });
+  return { ...report, reportPath };
+}
+
+router.post('/drill/:name', async (req: AuthRequest, res: Response) => {
+  const name = safeFileName(req.params.name);
+  const file = path.join(getBackupDir(), name);
+  if (!existsSync(file)) return res.status(404).json({ error: 'Backup file not found' });
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob({ type: 'backup.drill', resource: name, metadata: { name, ...req.body }, createdBy: req.user?.username || 'system' }, (ctx) => runRestoreDrill(name, req.body || {}, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try { res.json(await runRestoreDrill(name, req.body || {})); }
+  catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
 });
 
 router.get('/restore/:name/plan', async (req: AuthRequest, res: Response) => {
