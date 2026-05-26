@@ -66,6 +66,7 @@ import teamUsersRoutes       from './routes/team-users';
 import webdavRoutes          from './routes/webdav';
 import dnsClusterRoutes      from './routes/dns-cluster';
 import transferImportRoutes  from './routes/transfer-import';
+import jobsRoutes            from './routes/jobs';
 import { authenticateToken, readonlyGuard } from './middleware/auth';
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
@@ -266,6 +267,7 @@ app.use('/api/team-users',    authenticateToken, enforceResellerPrivilege('team-
 app.use('/api/webdav',        authenticateToken, enforceResellerPrivilege('webdav'), webdavRoutes);
 app.use('/api/dns-cluster',   authenticateToken, enforceResellerPrivilege('dns-clustering'), dnsClusterRoutes);
 app.use('/api/transfer-import', authenticateToken, enforceResellerPrivilege('transfer-tool'), transferImportRoutes);
+app.use('/api/jobs', authenticateToken, jobsRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.

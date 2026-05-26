@@ -7,6 +7,7 @@ import os from 'os';
 import { AuthRequest } from '../middleware/auth';
 import db from '../db';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob, JobContext } from '../background-jobs';
 
 const router = Router();
 
@@ -107,44 +108,61 @@ router.get('/list', (_req: AuthRequest, res: Response) => {
   }
 });
 
-router.post('/create', async (req: AuthRequest, res: Response) => {
-  const { type, target } = req.body;
+async function createBackup(type: string, target: string | undefined, ctx?: JobContext) {
   const dir = getBackupDir();
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  let filename: string;
+  if (type === 'files') {
+    const webroot = process.env.WEBROOT || '/var/www';
+    const srcDir = target
+      ? path.resolve(path.join(webroot, target))
+      : path.resolve(webroot);
+    if (!srcDir.startsWith(path.resolve(webroot))) throw new Error('Invalid target path');
+    const label = target ? target.replace(/[^a-zA-Z0-9]/g, '_') : 'all';
+    filename = `files_${label}_${ts}.tar.gz`;
+    const out = path.join(dir, filename);
+    ctx?.progress(25, `Archiving files from ${srcDir}`);
+    await runFile('tar', ['-czf', out, '-C', srcDir, '.'], { timeout: 300000 });
+  } else if (type === 'database') {
+    if (!target || !/^[a-zA-Z0-9_]+$/.test(target)) throw new Error('Invalid database name');
+    filename = `db_${target}_${ts}.sql.gz`;
+    const out = path.join(dir, filename);
+    const user = process.env.DB_ROOT_USER || 'root';
+    const pass = process.env.DB_ROOT_PASS || '';
+    const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
+    const host = process.env.DB_HOST || '127.0.0.1';
+    ctx?.progress(25, `Dumping database ${target}`);
+    await spawnDumpToGzipFile('mysqldump', [`-u${user}`, `-h${host}`, target], out, dbEnv);
+  } else {
+    throw new Error('type must be files or database');
+  }
+  const st = statSync(path.join(dir, filename));
+  const result = { name: filename, size: st.size, created: new Date().toISOString() };
+  ctx?.progress(90, 'Backup archive written');
+  ctx?.log('Backup completed', result);
+  return result;
+}
+
+router.post('/create', async (req: AuthRequest, res: Response) => {
+  const { type, target } = req.body;
+
+  if (req.body?.async === true) {
+    try {
+      if (!['files', 'database'].includes(type)) return res.status(400).json({ error: 'type must be files or database' });
+      if (type === 'database' && (!target || !/^[a-zA-Z0-9_]+$/.test(target))) return res.status(400).json({ error: 'Invalid database name' });
+      const jobId = createBackgroundJob({ type: 'backup.create', resource: String(target || type), metadata: { type, target } }, ctx => createBackup(type, target, ctx));
+      return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
 
   try {
-    let filename: string;
-    if (type === 'files') {
-      const webroot = process.env.WEBROOT || '/var/www';
-      const srcDir = target
-        ? path.resolve(path.join(webroot, target))
-        : path.resolve(webroot);
-      if (!srcDir.startsWith(path.resolve(webroot))) {
-        return res.status(400).json({ error: 'Invalid target path' });
-      }
-      const label = target ? target.replace(/[^a-zA-Z0-9]/g, '_') : 'all';
-      filename = `files_${label}_${ts}.tar.gz`;
-      const out = path.join(dir, filename);
-      await runFile('tar', ['-czf', out, '-C', srcDir, '.'], { timeout: 300000 });
-    } else if (type === 'database') {
-      if (!target || !/^[a-zA-Z0-9_]+$/.test(target)) {
-        return res.status(400).json({ error: 'Invalid database name' });
-      }
-      filename = `db_${target}_${ts}.sql.gz`;
-      const out = path.join(dir, filename);
-      const user = process.env.DB_ROOT_USER || 'root';
-      const pass = process.env.DB_ROOT_PASS || '';
-      const dbEnv: NodeJS.ProcessEnv = pass ? { ...process.env, MYSQL_PWD: pass } : process.env;
-      const host = process.env.DB_HOST || '127.0.0.1';
-      await spawnDumpToGzipFile('mysqldump', [`-u${user}`, `-h${host}`, target], out, dbEnv);
-    } else {
-      return res.status(400).json({ error: 'type must be files or database' });
-    }
-
-    const st = statSync(path.join(dir, filename));
-    res.json({ name: filename, size: st.size, created: new Date().toISOString() });
+    const result = await createBackup(type, target);
+    res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    const status = /Invalid|type must/.test(err.message) ? 400 : 500;
+    res.status(status).json({ error: err.message });
   }
 });
 

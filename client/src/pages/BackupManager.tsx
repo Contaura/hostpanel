@@ -20,6 +20,16 @@ interface RestorePlan {
   selectable: boolean;
 }
 
+interface JobStatus {
+  id: number;
+  type: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  progress: number;
+  result?: Backup;
+  error?: string;
+  logs?: { at: string; message: string }[];
+}
+
 const theadCls = 'bg-slate-50 dark:bg-slate-700/40 border-b border-slate-100 dark:border-slate-700';
 const rowCls   = 'border-b border-slate-50 dark:border-slate-700/40 last:border-0 hover:bg-slate-50 dark:hover:bg-slate-700/30 group';
 
@@ -56,6 +66,7 @@ export default function BackupManager() {
   const [restoreDryRun, setRestoreDryRun] = useState<any | null>(null);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [deletingSchedule, setDeletingSchedule] = useState<number | null>(null);
+  const [activeJob, setActiveJob] = useState<JobStatus | null>(null);
 
   async function load() {
     try {
@@ -116,15 +127,28 @@ export default function BackupManager() {
 
   useEffect(() => { load(); }, []);
 
+  async function waitForJob(jobId: number) {
+    for (;;) {
+      const { data } = await axios.get<JobStatus>(`/api/jobs/${jobId}`);
+      setActiveJob(data);
+      if (data.status === 'completed') return data;
+      if (data.status === 'failed') throw new Error(data.error || 'Background job failed');
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  }
+
   async function createBackup() {
     setLoading(true);
     try {
-      const { data } = await axios.post<Backup>('/api/backup/create', form);
-      toast.success(`Backup created: ${data.name}`);
+      const { data } = await axios.post<{ jobId: number; statusUrl: string }>('/api/backup/create', { ...form, async: true });
+      toast.success(`Backup job #${data.jobId} started`);
+      const job = await waitForJob(data.jobId);
+      toast.success(`Backup created: ${job.result?.name || 'completed'}`);
       setShowForm(false);
       setForm({ type: 'files', target: '' });
+      setActiveJob(null);
       load();
-    } catch (err: any) { toast.error(err.response?.data?.error || 'Backup failed'); }
+    } catch (err: any) { toast.error(err.response?.data?.error || err.message || 'Backup failed'); }
     finally { setLoading(false); }
   }
 
@@ -253,6 +277,18 @@ export default function BackupManager() {
               {targets.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+          {activeJob && (
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm dark:border-indigo-800 dark:bg-indigo-950/30">
+              <div className="flex items-center justify-between text-indigo-900 dark:text-indigo-100">
+                <span className="font-semibold">Background job #{activeJob.id}: {activeJob.status}</span>
+                <span>{activeJob.progress}%</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded bg-indigo-100 dark:bg-indigo-900">
+                <div className="h-full bg-indigo-600 transition-all" style={{ width: `${activeJob.progress}%` }} />
+              </div>
+              {activeJob.logs?.length ? <p className="mt-2 text-xs text-indigo-700 dark:text-indigo-300">{activeJob.logs[activeJob.logs.length - 1].message}</p> : null}
+            </div>
+          )}
           <div className="flex gap-2">
             <button onClick={createBackup} disabled={loading} className="btn-primary">
               {loading ? (

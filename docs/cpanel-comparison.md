@@ -6,7 +6,7 @@ This comparison separates cPanel-style end-user features from WHM-style administ
 
 HostPanel now covers the main shared-hosting control-plane areas: accounts, packages/feature lists, reseller privileges, domains, DNS, files, FTP, databases, phpMyAdmin launch/Signon handoff, email accounts/forwarders/autoresponders, Track Delivery-style mail tracing, SSL, backups/restores, cron, PHP, logs, resource limits, billing, reseller/client portal, security, WAF/Fail2Ban, plugin controls, WebDAV, DNS clustering, and transfer/import tooling.
 
-cPanel/WHM is still broader and older, so the remaining gap is mostly production depth: richer analytics/report exports, field-validation of phpMyAdmin Signon against the installed distro package, a centralized background-job/progress subsystem, and ongoing hardening/regression coverage.
+cPanel/WHM is still broader and older, so the remaining gap is mostly production depth: richer analytics/report exports, extending the new background-job/progress subsystem across every long-running module, field-validating phpMyAdmin Signon after distro package updates, and ongoing hardening/regression coverage.
 
 ## End-user / cPanel-side comparison
 
@@ -38,7 +38,7 @@ cPanel/WHM is still broader and older, so the remaining gap is mostly production
 ## Remaining priority work
 
 1. Validate phpMyAdmin Signon end-to-end against the live installed phpMyAdmin package/config.
-2. Add centralized background-job/progress/log tracking for long-running transfers, restores, scans, syncs, and installs.
+2. Extend centralized background-job/progress/log tracking from backup creation into transfers, restores, scans, syncs, and installs.
 3. Deepen metrics/mail reports with charts, exports, retention, and more filters.
 4. Continue adding account-scope/team-subaccount regression tests as portal modules grow.
 5. Keep hardening service-command routes to the safe argv/Node-primitive pattern and avoid shell pipelines.

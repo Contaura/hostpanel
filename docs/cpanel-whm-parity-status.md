@@ -58,7 +58,7 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 
 These areas need deeper production hardening beyond the new API/UI foundations:
 
-- Operational hardening still recommended after field use: add a centralized background-job/progress subsystem, deepen analytics/mail-report exports and charts, continue adding account-specific team-scope regression coverage as portal modules grow, and validate phpMyAdmin Signon behavior against the exact distro package config on production.
+- Operational hardening still recommended after field use: extend the new centralized background-job/progress subsystem to more long-running modules beyond backup creation, deepen analytics/mail-report exports and charts, continue adding account-specific team-scope regression coverage as portal modules grow, and keep phpMyAdmin Signon validation in the deployment checklist after distro package changes.
 
 ## Verification
 

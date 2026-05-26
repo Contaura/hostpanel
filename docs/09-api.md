@@ -213,9 +213,18 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/backup/list` | List local backups |
-| `POST` | `/api/backup/create` | Create file or database backup |
+| `POST` | `/api/backup/create` | Create file or database backup; pass `async: true` to enqueue a background job and poll `/api/jobs/:id` |
 | `GET` | `/api/backup/restore/:name/plan` | Inspect restore plan/dry-run metadata |
 | `POST` | `/api/backup/restore/:name` | Run dry-run or execute full/selective restore |
+
+---
+
+## Background Jobs
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/jobs` | List recent background jobs; optional `status` and `type` filters |
+| `GET` | `/api/jobs/:id` | Fetch job status, progress percentage, result, error, and structured log entries |
 
 ---
 
