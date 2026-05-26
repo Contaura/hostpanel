@@ -228,6 +228,16 @@ Incoming webhook requests must include an `X-Hub-Signature-256` header containin
 
 ---
 
+## Health / Monitoring
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Public minimal liveness check for load balancers/uptime monitors; does not expose internal readiness details |
+| `GET` | `/api/health/live` | Authenticated liveness check |
+| `GET` | `/api/health/readiness` | Authenticated production readiness checks for database, disk, memory, and recent failed background jobs; returns `503` when any check fails |
+
+---
+
 ## WebDAV
 
 | Method | Path | Description |

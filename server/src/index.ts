@@ -67,6 +67,7 @@ import webdavRoutes          from './routes/webdav';
 import dnsClusterRoutes      from './routes/dns-cluster';
 import transferImportRoutes  from './routes/transfer-import';
 import jobsRoutes            from './routes/jobs';
+import healthRoutes, { publicHealth } from './routes/health';
 import { authenticateToken, readonlyGuard } from './middleware/auth';
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
@@ -114,6 +115,7 @@ function publicBranding(_req: express.Request, res: express.Response) {
 app.set('trust proxy', 'loopback');
 
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
+app.get('/healthz', publicHealth);
 
 // Security response headers (X-Content-Type-Options, X-Frame-Options,
 // Referrer-Policy, Strict-Transport-Security) are emitted by Apache via
@@ -268,6 +270,7 @@ app.use('/api/webdav',        authenticateToken, enforceResellerPrivilege('webda
 app.use('/api/dns-cluster',   authenticateToken, enforceResellerPrivilege('dns-clustering'), dnsClusterRoutes);
 app.use('/api/transfer-import', authenticateToken, enforceResellerPrivilege('transfer-tool'), transferImportRoutes);
 app.use('/api/jobs', authenticateToken, jobsRoutes);
+app.use('/api/health', authenticateToken, healthRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.
