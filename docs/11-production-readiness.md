@@ -260,3 +260,50 @@ Added 3 integration tests covering: account suspend reloads httpd via argv; acco
 
 ### Remaining
 No legacy `execAsync()` route sources remain in the previously identified modules (`node-apps.ts`, `resource-limits.ts`, `logs.ts`, `cache.ts`). Continue enforcing the `runFile` argv/Node-primitive pattern for any new service-command routes.
+
+## 2026-05-27 — Production docs and operations runbook
+
+### Risk addressed
+
+HostPanel lacked a comprehensive operations runbook and formal launch checklist. Without these, on-call engineers have no authoritative reference for incident response, rollback procedures, or launch-day verification — increasing MTTR and the risk of a failed launch.
+
+### Changes made
+
+- Added `docs/12-operations-runbook.md` covering:
+  - Service overview (ports, paths, systemd unit, database, .env)
+  - Health check commands (public `/healthz`, readiness, systemd, port)
+  - Service management (restart, update, rollback, enable/disable)
+  - Log access (journalctl, audit log SQL query, Apache logs)
+  - Deployment procedure (pull → install → build → test → restart → verify)
+  - Rollback to a previous git commit
+  - Database operations (backup, restore, SQLite shell, schema migrations)
+  - Common incident playbooks: service down, /healthz connection refused, high disk, admin lockout, password reset, stuck background job
+  - Security procedures: SSH auth check, JWT rotation, audit log review, firewall check
+  - Monitoring and alerting: built-in watchdog, webhook notifications, external uptime monitor, disk alert threshold
+  - Disaster recovery: full server loss restore steps, automated DR drill reference
+  - Useful one-liners for operations
+
+- Added `docs/13-launch-checklist.md` covering:
+  - Security hardening checklist (20 items)
+  - Reliability and availability checklist (11 items)
+  - Performance checklist (5 items)
+  - Code quality and tests checklist (6 items)
+  - Monitoring and alerting checklist (5 items)
+  - Documentation checklist (6 items)
+  - Access and credentials checklist (7 items)
+  - Launch-day 10-command verification sequence
+  - Launch report template
+
+### Validation performed
+
+Documentation only — no production code changes in this slice. All existing server tests remain green:
+
+```bash
+npm run test --workspace=server   # 20 files / 99 tests passed
+npm run build                     # passed
+```
+
+### Follow-up
+
+- Item 7 (final production readiness verification and launch report) — fill in the launch checklist completely, run the 10-command verification sequence, and file the formal launch report by 2026-06-09.
+- Complete launch checklist items that require live verification (external uptime monitor, Stripe webhook secrets, 2FA enrollment) before the final report.
