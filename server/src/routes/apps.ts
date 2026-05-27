@@ -6,6 +6,7 @@ import path from 'path';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob } from '../background-jobs';
 
 // Every mutating endpoint here shells out to pm2 via execFile. If pm2 isn't
 // installed (fresh box that hasn't run the install.sh npm step yet) the
@@ -204,11 +205,12 @@ router.get('/:name/staging', (req: Request, res: Response) => {
 router.post('/:name/stage', adminOnly, async (req: Request, res: Response) => {
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
-  const { port, branch = 'staging' } = req.body;
+  const { port, branch = 'staging', async: isAsync } = req.body;
   if (!port) return res.status(400).json({ error: 'port required' });
   const stagingName = `${app.name}-staging`;
   const stagingDir = app.working_dir.replace(/\/?$/, '-staging');
-  try {
+
+  const doStage = async () => {
     if (!existsSync(stagingDir)) {
       await execFileAsync('cp', ['-r', app.working_dir, stagingDir]);
     }
@@ -219,7 +221,21 @@ router.post('/:name/stage', adminOnly, async (req: Request, res: Response) => {
       '--cwd', stagingDir,
     ]).catch(() => {});
     const r = db.prepare('INSERT OR REPLACE INTO app_staging (app_name, staging_name, staging_port, staging_dir, branch, status) VALUES (?, ?, ?, ?, ?, ?)').run(app.name, stagingName, parseInt(port), stagingDir, branch, 'running');
-    res.json(db.prepare('SELECT * FROM app_staging WHERE id = ?').get(r.lastInsertRowid));
+    return db.prepare('SELECT * FROM app_staging WHERE id = ?').get(r.lastInsertRowid) as any;
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'app.stage', resource: app.name }, async (ctx) => {
+      ctx.progress(10, `Creating staging environment for ${app.name}`);
+      const staged = await doStage();
+      ctx.progress(90, `Staging environment ${stagingName} ready`);
+      return { stagingName: staged.staging_name, stagingPort: staged.staging_port, stagingDir: staged.staging_dir };
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doStage());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -228,12 +244,28 @@ router.post('/:name/promote', adminOnly, async (req: Request, res: Response) => 
   if (!app) return res.status(404).json({ error: 'App not found' });
   const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(app.name) as any;
   if (!staging) return res.status(404).json({ error: 'No staging environment found' });
-  try {
+  const { async: isAsync } = req.body || {};
+
+  const doPromote = async () => {
     await execFileAsync('pm2', ['stop', app.name]).catch(() => {});
-    await execFileAsync('rsync', ['-a', '--delete', `${staging.staging_dir}/`, `${app.working_dir}/`]);
+    await runFile('rsync', ['-a', '--delete', `${staging.staging_dir}/`, `${app.working_dir}/`]);
     await execFileAsync('pm2', ['restart', app.name]);
     db.prepare("UPDATE managed_apps SET status='running' WHERE name=?").run(app.name);
-    res.json({ success: true, message: `Staging promoted to production for ${app.name}` });
+    return { success: true, appName: app.name, message: `Staging promoted to production for ${app.name}` };
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'app.promote', resource: app.name }, async (ctx) => {
+      ctx.progress(10, `Promoting staging to production for ${app.name}`);
+      const result = await doPromote();
+      ctx.progress(90, result.message);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doPromote());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

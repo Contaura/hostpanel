@@ -5,6 +5,7 @@ import { runFile } from '../utils/process-runner';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import db from '../db';
+import { createBackgroundJob } from '../background-jobs';
 
 const router = Router();
 const WEBROOT = process.env.WEBROOT || '/var/www';
@@ -61,7 +62,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS file_hashes (
 /* ── ClamAV malware scan ─────────────────────────────────────── */
 
 router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
-  const { target = WEBROOT } = req.body;
+  const { target = WEBROOT, async: isAsync } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
   // Reject shell metacharacters before interpolation. The previous form
   // resolved the path and prefix-checked it against WEBROOT, but the
@@ -77,11 +78,11 @@ router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Path outside webroot' });
   }
 
-  try {
+  const doScan = async () => {
     // Check if clamav is available
     const which = await runFile('which', ['clamscan']).catch(() => ({ stdout: '', stderr: '' }));
     if (!which.stdout.trim()) {
-      return res.status(503).json({ error: 'ClamAV not installed. Install with: yum install clamav clamav-update' });
+      throw new Error('ClamAV not installed. Install with: yum install clamav clamav-update');
     }
 
     const { stdout, stderr } = await runFile('clamscan', ['-r', '--infected', '--no-summary', safePath], { timeout: 300000 }).catch((e: any) => ({ stdout: e.stdout || '', stderr: e.stderr || '' }));
@@ -91,9 +92,25 @@ router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
     for (const line of lines) {
       if (line.includes('FOUND')) infected.push(line.trim());
     }
+    return { target: safePath, infected_count: infected.length, infected, raw: lines.slice(-50) };
+  };
 
-    res.json({ target: safePath, infected_count: infected.length, infected, raw: lines.slice(-50) });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'scanner.scan', resource: safePath }, async (ctx) => {
+      ctx.progress(10, `Starting ClamAV scan of ${safePath}`);
+      const result = await doScan();
+      ctx.progress(90, `Scan complete: ${result.infected_count} infected file(s)`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doScan());
+  } catch (err: any) {
+    if (err.message?.includes('ClamAV not installed')) return res.status(503).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/update-definitions', heavyLimit, async (_req: Request, res: Response) => {
@@ -106,7 +123,7 @@ router.post('/update-definitions', heavyLimit, async (_req: Request, res: Respon
 /* ── File integrity baseline ─────────────────────────────────── */
 
 router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Response) => {
-  const { target = WEBROOT } = req.body;
+  const { target = WEBROOT, async: isAsync } = req.body;
   const safePath = path.resolve(target.replace(/\.\./g, ''));
   // Reject shell metacharacters before interpolation. The previous form
   // resolved the path and prefix-checked it against WEBROOT, but the
@@ -121,7 +138,8 @@ router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Respons
   if (!safePath.startsWith(path.resolve(WEBROOT))) {
     return res.status(400).json({ error: 'Path outside webroot' });
   }
-  try {
+
+  const doBaseline = () => {
     const hashes = hashFiles(safePath);
     // datetime("now") with double quotes is interpreted as an identifier
     // ("now" treated as a column name) — SQLite returns "no such column:
@@ -132,7 +150,21 @@ router.post('/integrity/baseline', heavyLimit, async (req: Request, res: Respons
     });
     tx();
     const count = (db.prepare('SELECT COUNT(*) as n FROM file_hashes WHERE file_path LIKE ?').get(`${safePath}%`) as any).n;
-    res.json({ success: true, files_indexed: count });
+    return { success: true, files_indexed: count };
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'scanner.integrity_baseline', resource: safePath }, async (ctx) => {
+      ctx.progress(10, `Building integrity baseline for ${safePath}`);
+      const result = doBaseline();
+      ctx.progress(90, `Indexed ${result.files_indexed} file(s)`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(doBaseline());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
