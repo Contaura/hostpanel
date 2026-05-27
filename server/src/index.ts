@@ -4,6 +4,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
+import { runFile } from './utils/process-runner';
+import { dispatchNotification } from './routes/notifications';
 
 import authRoutes        from './routes/auth';
 import fileRoutes        from './routes/files';
@@ -301,6 +303,27 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 const httpServer = createServer(app);
 setupTerminal(httpServer);
+
+// ── Silent service watchdog ────────────────────────────────────────────────
+// Checks critical services every 5 minutes and dispatches system.service_down
+// webhook events when a service is found stopped. Errors are swallowed so the
+// watchdog never crashes the process.
+const WATCHDOG_SERVICES = ['httpd', 'mariadb', 'postfix'];
+const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
+function startWatchdog() {
+  const check = async () => {
+    for (const svc of WATCHDOG_SERVICES) {
+      try {
+        const { stdout } = await runFile('systemctl', ['is-active', svc]).catch(() => ({ stdout: 'unknown', stderr: '' }));
+        if (stdout.trim() !== 'active') {
+          void Promise.resolve(dispatchNotification('system.service_down', { service: svc, status: stdout.trim(), checkedAt: new Date().toISOString() })).catch(() => {});
+        }
+      } catch { /* swallow */ }
+    }
+  };
+  setInterval(() => { void check(); }, WATCHDOG_INTERVAL_MS);
+}
+startWatchdog();
 
 httpServer.listen(PORT, () => {
   console.log(`HostPanel API running on port ${PORT}`);

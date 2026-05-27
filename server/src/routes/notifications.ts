@@ -21,7 +21,7 @@ function scrubHook(row: any) {
 const ALL_EVENTS = [
   'invoice.created', 'invoice.paid', 'invoice.overdue',
   'account.created', 'account.suspended', 'account.terminated',
-  'system.disk_alert', 'system.cpu_alert', 'system.service_down',
+  'system.disk_alert', 'system.cpu_alert', 'system.memory_alert', 'system.service_down',
   'deploy.success', 'deploy.failed',
   'login.success', 'login.failed',
 ];

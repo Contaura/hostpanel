@@ -3,6 +3,7 @@ import { runFile } from '../utils/process-runner';
 import nodemailer from 'nodemailer';
 import si from 'systeminformation';
 import db from '../db';
+import { dispatchNotification } from './notifications';
 
 const router = Router();
 
@@ -75,16 +76,25 @@ router.get('/current', async (_req: Request, res: Response) => {
 
     for (const rule of rules) {
       if (rule.metric === 'cpu' && cpuPct >= rule.threshold) {
-        alerts.push({ id: rule.id, severity: cpuPct >= 95 ? 'critical' : 'warning', metric: 'CPU', value: cpuPct, threshold: rule.threshold, message: `CPU usage is ${cpuPct}%` });
+        const severity = cpuPct >= 95 ? 'critical' : 'warning';
+        const alertObj = { id: rule.id, severity, metric: 'CPU', value: cpuPct, threshold: rule.threshold, message: `CPU usage is ${cpuPct}%` };
+        alerts.push(alertObj);
+        void Promise.resolve(dispatchNotification('system.cpu_alert', { value: cpuPct, threshold: rule.threshold, severity, message: alertObj.message })).catch(() => {});
       }
       if (rule.metric === 'memory' && memPct >= rule.threshold) {
-        alerts.push({ id: rule.id, severity: memPct >= 95 ? 'critical' : 'warning', metric: 'Memory', value: memPct, threshold: rule.threshold, message: `Memory usage is ${memPct}%` });
+        const severity = memPct >= 95 ? 'critical' : 'warning';
+        const alertObj = { id: rule.id, severity, metric: 'Memory', value: memPct, threshold: rule.threshold, message: `Memory usage is ${memPct}%` };
+        alerts.push(alertObj);
+        void Promise.resolve(dispatchNotification('system.memory_alert', { value: memPct, threshold: rule.threshold, severity, message: alertObj.message })).catch(() => {});
       }
       if (rule.metric === 'disk') {
         for (const disk of disks) {
           const pct = Math.round(disk.use);
           if (pct >= rule.threshold) {
-            alerts.push({ id: rule.id, severity: pct >= 95 ? 'critical' : 'warning', metric: 'Disk', value: pct, threshold: rule.threshold, message: `Disk ${disk.mount} usage is ${pct}%` });
+            const severity = pct >= 95 ? 'critical' : 'warning';
+            const alertObj = { id: rule.id, severity, metric: 'Disk', value: pct, threshold: rule.threshold, mount: disk.mount, message: `Disk ${disk.mount} usage is ${pct}%` };
+            alerts.push(alertObj);
+            void Promise.resolve(dispatchNotification('system.disk_alert', { mount: disk.mount, value: pct, threshold: rule.threshold, severity, message: alertObj.message })).catch(() => {});
           }
         }
       }
