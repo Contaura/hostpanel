@@ -41,6 +41,19 @@ export function requireRole(...roles: string[]) {
   };
 }
 
+// Blocks portal-role JWTs (role: client, client_team) from reaching admin API
+// routes. authenticateToken runs first and populates req.user; this guard then
+// refuses portal roles before any admin handler can be called. Mounting order
+// in index.ts must be: authenticateToken → blockPortalRoles → route handler.
+export function blockPortalRoles(req: AuthRequest, res: Response, next: NextFunction): void {
+  const role = req.user?.role;
+  if (role === 'client' || role === 'client_team' || role === 'client_pending_2fa') {
+    res.status(403).json({ error: 'Portal role tokens are not permitted on admin API routes' });
+    return;
+  }
+  next();
+}
+
 // Decodes JWT without requiring req.user to already be set — used as a global pre-route guard
 export function readonlyGuard(req: Request, res: Response, next: NextFunction): void {
   if (req.method === 'GET') { next(); return; }

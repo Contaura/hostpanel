@@ -68,7 +68,11 @@ import dnsClusterRoutes      from './routes/dns-cluster';
 import transferImportRoutes  from './routes/transfer-import';
 import jobsRoutes            from './routes/jobs';
 import healthRoutes, { publicHealth } from './routes/health';
-import { authenticateToken, readonlyGuard } from './middleware/auth';
+import { authenticateToken, blockPortalRoles, readonlyGuard } from './middleware/auth';
+
+// adminAuth chains authenticateToken → blockPortalRoles so portal-role JWTs
+// (client, client_team) are rejected before reaching any admin handler.
+const adminAuth = [authenticateToken, blockPortalRoles] as const;
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist';
 import { setupTerminal } from './terminal';
 
@@ -164,54 +168,54 @@ app.use('/api/', auditMiddleware);
 app.use('/api/auth', authRoutes);
 
 // Stats
-app.use('/api/stats', authenticateToken, statsRoutes);
+app.use('/api/stats', ...adminAuth, statsRoutes);
 
 // Files & Storage
-app.use('/api/files',  authenticateToken, enforceResellerPrivilege('file-manager'), fileRoutes);
-app.use('/api/backup', authenticateToken, enforceResellerPrivilege('backup-wizard'), backupRoutes);
+app.use('/api/files',  ...adminAuth, enforceResellerPrivilege('file-manager'), fileRoutes);
+app.use('/api/backup', ...adminAuth, enforceResellerPrivilege('backup-wizard'), backupRoutes);
 
 // Domains & Web
-app.use('/api/domains',     authenticateToken, enforceResellerPrivilege('domains'), domainRoutes);
-app.use('/api/subdomains',  authenticateToken, enforceResellerPrivilege('subdomains'), subdomainRoutes);
-app.use('/api/redirects',   authenticateToken, enforceResellerPrivilege('redirects'), redirectRoutes);
-app.use('/api/errpages',    authenticateToken, enforceResellerPrivilege('error-pages'), errpageRoutes);
-app.use('/api/web',         authenticateToken, enforceResellerPrivilege('web-extras'), webExtrasRoutes);
+app.use('/api/domains',     ...adminAuth, enforceResellerPrivilege('domains'), domainRoutes);
+app.use('/api/subdomains',  ...adminAuth, enforceResellerPrivilege('subdomains'), subdomainRoutes);
+app.use('/api/redirects',   ...adminAuth, enforceResellerPrivilege('redirects'), redirectRoutes);
+app.use('/api/errpages',    ...adminAuth, enforceResellerPrivilege('error-pages'), errpageRoutes);
+app.use('/api/web',         ...adminAuth, enforceResellerPrivilege('web-extras'), webExtrasRoutes);
 
 // Databases
-app.use('/api/databases', authenticateToken, enforceResellerPrivilege('databases'), databaseRoutes);
+app.use('/api/databases', ...adminAuth, enforceResellerPrivilege('databases'), databaseRoutes);
 
 // Email
-app.use('/api/email',       authenticateToken, enforceResellerPrivilege('email-accounts'), emailRoutes);
-app.use('/api/email-extras', authenticateToken, enforceResellerPrivilege('address-importer'), emailExtrasRoutes);
+app.use('/api/email',       ...adminAuth, enforceResellerPrivilege('email-accounts'), emailRoutes);
+app.use('/api/email-extras', ...adminAuth, enforceResellerPrivilege('address-importer'), emailExtrasRoutes);
 
 // Security
-app.use('/api/ssh-keys',        authenticateToken, enforceResellerPrivilege('ssh-keys'), sshkeyRoutes);
-app.use('/api/firewall',        authenticateToken, enforceResellerPrivilege('firewall'), firewallRoutes);
-app.use('/api/htpasswd',        authenticateToken, enforceResellerPrivilege('htpasswd'), htpasswdRoutes);
-app.use('/api/security-extra',  authenticateToken, enforceResellerPrivilege('security-extra'), securityExtraRoutes);
+app.use('/api/ssh-keys',        ...adminAuth, enforceResellerPrivilege('ssh-keys'), sshkeyRoutes);
+app.use('/api/firewall',        ...adminAuth, enforceResellerPrivilege('firewall'), firewallRoutes);
+app.use('/api/htpasswd',        ...adminAuth, enforceResellerPrivilege('htpasswd'), htpasswdRoutes);
+app.use('/api/security-extra',  ...adminAuth, enforceResellerPrivilege('security-extra'), securityExtraRoutes);
 
 // Server management
-app.use('/api/cron',      authenticateToken, enforceResellerPrivilege('cron'), cronRoutes);
-app.use('/api/php',       authenticateToken, enforceResellerPrivilege('php'), phpRoutes);
-app.use('/api/processes', authenticateToken, enforceResellerPrivilege('processes'), processRoutes);
-app.use('/api/logs',      authenticateToken, enforceResellerPrivilege('logs'), logsRoutes);
-app.use('/api/ftp',       authenticateToken, enforceResellerPrivilege('ftp'), ftpRoutes);
-app.use('/api/scripts',   authenticateToken, enforceResellerPrivilege('scripts'), scriptRoutes);
-app.use('/api/apps',      authenticateToken, enforceResellerPrivilege('apps'), appsRoutes);
-app.use('/api/alerts',    authenticateToken, enforceResellerPrivilege('alerts'), alertsRoutes);
+app.use('/api/cron',      ...adminAuth, enforceResellerPrivilege('cron'), cronRoutes);
+app.use('/api/php',       ...adminAuth, enforceResellerPrivilege('php'), phpRoutes);
+app.use('/api/processes', ...adminAuth, enforceResellerPrivilege('processes'), processRoutes);
+app.use('/api/logs',      ...adminAuth, enforceResellerPrivilege('logs'), logsRoutes);
+app.use('/api/ftp',       ...adminAuth, enforceResellerPrivilege('ftp'), ftpRoutes);
+app.use('/api/scripts',   ...adminAuth, enforceResellerPrivilege('scripts'), scriptRoutes);
+app.use('/api/apps',      ...adminAuth, enforceResellerPrivilege('apps'), appsRoutes);
+app.use('/api/alerts',    ...adminAuth, enforceResellerPrivilege('alerts'), alertsRoutes);
 
 // Admin config — settings/branding is public so the unauth'd portal sidebar
 // can fetch the panel name + logo without prompting login. Tiny inline
 // handler instead of the mounted settings router so it isn't shadowed by
 // authenticateToken below.
 app.get('/api/settings/branding', publicBranding);
-app.use('/api/settings',     authenticateToken, enforceResellerPrivilege('settings'), settingsRoutes);
-app.use('/api/admin-users',  authenticateToken, enforceResellerPrivilege('admin-users'), adminUsersRoutes);
-app.use('/api/api-tokens',   authenticateToken, enforceResellerPrivilege('api-tokens'), apiTokensRoutes);
+app.use('/api/settings',     ...adminAuth, enforceResellerPrivilege('settings'), settingsRoutes);
+app.use('/api/admin-users',  ...adminAuth, enforceResellerPrivilege('admin-users'), adminUsersRoutes);
+app.use('/api/api-tokens',   ...adminAuth, enforceResellerPrivilege('api-tokens'), apiTokensRoutes);
 
 // Hosting & Billing
-app.use('/api/accounts', authenticateToken, enforceResellerPrivilege('accounts'), accountRoutes);
-app.use('/api/billing',  authenticateToken, enforceResellerPrivilege('billing'), billingRoutes);
+app.use('/api/accounts', ...adminAuth, enforceResellerPrivilege('accounts'), accountRoutes);
+app.use('/api/billing',  ...adminAuth, enforceResellerPrivilege('billing'), billingRoutes);
 
 // Client portal — public routes (login uses clientAuth internally; me/invoices use clientAuth inside the router)
 app.use('/api/portal', clientPortalRoutes);
@@ -219,58 +223,58 @@ app.use('/api/portal', clientPortalRoutes);
 // Stripe — POST /webhook is public (Stripe-signature authenticated); all other routes require JWT
 app.use('/api/stripe', (req, res, next) => {
   if (req.path === '/webhook' && req.method === 'POST') return next();
-  return (authenticateToken as any)(req, res, next);
+  return (authenticateToken as any)(req, res, (err?: any) => err ? next(err) : (blockPortalRoles as any)(req, res, next));
 }, stripeRoutes);
 
 // PayPal
-app.use('/api/paypal', authenticateToken, paypalRoutes);
+app.use('/api/paypal', ...adminAuth, paypalRoutes);
 
 // Email extras
-app.use('/api/dkim',         authenticateToken, enforceResellerPrivilege('dkim'), dkimRoutes);
-app.use('/api/mail-queue',   authenticateToken, enforceResellerPrivilege('mail-queue'), mailQueueRoutes);
-app.use('/api/rspamd',       authenticateToken, enforceResellerPrivilege('rspamd'), rspamdRoutes);
-app.use('/api/mail-routing', authenticateToken, enforceResellerPrivilege('mail-routing'), mailRoutingRoutes);
+app.use('/api/dkim',         ...adminAuth, enforceResellerPrivilege('dkim'), dkimRoutes);
+app.use('/api/mail-queue',   ...adminAuth, enforceResellerPrivilege('mail-queue'), mailQueueRoutes);
+app.use('/api/rspamd',       ...adminAuth, enforceResellerPrivilege('rspamd'), rspamdRoutes);
+app.use('/api/mail-routing', ...adminAuth, enforceResellerPrivilege('mail-routing'), mailRoutingRoutes);
 
 // Web / CDN / Deploy
-app.use('/api/cloudflare',      authenticateToken, enforceResellerPrivilege('cloudflare'), cloudflareRoutes);
+app.use('/api/cloudflare',      ...adminAuth, enforceResellerPrivilege('cloudflare'), cloudflareRoutes);
 // Git deploy — POST /webhook/* is public (HMAC authenticated); all other routes require JWT
 app.use('/api/git-deploy', (req, res, next) => {
   if (req.method === 'POST' && req.path.startsWith('/webhook/')) return next();
-  return (authenticateToken as any)(req, res, (err?: any) => err ? next(err) : enforceResellerPrivilege('git-deploy')(req, res, next));
+  return (authenticateToken as any)(req, res, (err?: any) => err ? next(err) : (blockPortalRoles as any)(req, res, (err2?: any) => err2 ? next(err2) : enforceResellerPrivilege('git-deploy')(req, res, next)));
 }, gitDeployRoutes);
-app.use('/api/cache',           authenticateToken, enforceResellerPrivilege('cache'), cacheRoutes);
+app.use('/api/cache',           ...adminAuth, enforceResellerPrivilege('cache'), cacheRoutes);
 
 // Security extras
-app.use('/api/waf',         authenticateToken, enforceResellerPrivilege('waf'), wafRoutes);
-app.use('/api/audit-log',   authenticateToken, auditLogRoutes);
-app.use('/api/ssl-advanced', authenticateToken, enforceResellerPrivilege('ssl-advanced'), sslAdvancedRoutes);
+app.use('/api/waf',         ...adminAuth, enforceResellerPrivilege('waf'), wafRoutes);
+app.use('/api/audit-log', ...adminAuth, auditLogRoutes);
+app.use('/api/ssl-advanced', ...adminAuth, enforceResellerPrivilege('ssl-advanced'), sslAdvancedRoutes);
 
 // Server / Runtime
-app.use('/api/php-domains',      authenticateToken, enforceResellerPrivilege('php'), phpDomainsRoutes);
-app.use('/api/resource-limits',  authenticateToken, enforceResellerPrivilege('resource-limits'), resourceLimitsRoutes);
+app.use('/api/php-domains',      ...adminAuth, enforceResellerPrivilege('php'), phpDomainsRoutes);
+app.use('/api/resource-limits',  ...adminAuth, enforceResellerPrivilege('resource-limits'), resourceLimitsRoutes);
 
 // Notifications / Resellers
-app.use('/api/notifications',  authenticateToken, enforceResellerPrivilege('notifications'), notificationsRoutes);
-app.use('/api/resellers',      authenticateToken, enforceResellerPrivilege('resellers'), resellerRoutes);
-app.use('/api/addon-domains',  authenticateToken, enforceResellerPrivilege('addon-domains'), addonDomainsRoutes);
-app.use('/api/wordpress',      authenticateToken, enforceResellerPrivilege('wordpress'), wordpressRoutes);
-app.use('/api/parked-domains', authenticateToken, enforceResellerPrivilege('parked-domains'), parkedDomainsRoutes);
-app.use('/api/node-apps',      authenticateToken, enforceResellerPrivilege('node-apps'), nodeAppsRoutes);
-app.use('/api/server-info',       authenticateToken, enforceResellerPrivilege('server-info'), serverInfoRoutes);
-app.use('/api/mail-tools',        authenticateToken, enforceResellerPrivilege('mail-tools'), mailToolsRoutes);
-app.use('/api/security-scanner',  authenticateToken, enforceResellerPrivilege('security-scanner'), securityScannerRoutes);
+app.use('/api/notifications',  ...adminAuth, enforceResellerPrivilege('notifications'), notificationsRoutes);
+app.use('/api/resellers',      ...adminAuth, enforceResellerPrivilege('resellers'), resellerRoutes);
+app.use('/api/addon-domains',  ...adminAuth, enforceResellerPrivilege('addon-domains'), addonDomainsRoutes);
+app.use('/api/wordpress',      ...adminAuth, enforceResellerPrivilege('wordpress'), wordpressRoutes);
+app.use('/api/parked-domains', ...adminAuth, enforceResellerPrivilege('parked-domains'), parkedDomainsRoutes);
+app.use('/api/node-apps',      ...adminAuth, enforceResellerPrivilege('node-apps'), nodeAppsRoutes);
+app.use('/api/server-info',       ...adminAuth, enforceResellerPrivilege('server-info'), serverInfoRoutes);
+app.use('/api/mail-tools',        ...adminAuth, enforceResellerPrivilege('mail-tools'), mailToolsRoutes);
+app.use('/api/security-scanner',  ...adminAuth, enforceResellerPrivilege('security-scanner'), securityScannerRoutes);
 
 // cPanel/WHM parity foundations
-app.use('/api/feature-lists', authenticateToken, enforceResellerPrivilege('feature-lists'), featureListsRoutes);
-app.use('/api/mail-trace',    authenticateToken, enforceResellerPrivilege('mail-trace'), mailTraceRoutes);
-app.use('/api/analytics',     authenticateToken, enforceResellerPrivilege('analytics'), analyticsRoutes);
-app.use('/api/extensions',    authenticateToken, enforceResellerPrivilege('plugins'), extensionsRoutes);
-app.use('/api/team-users',    authenticateToken, enforceResellerPrivilege('team-users'), teamUsersRoutes);
-app.use('/api/webdav',        authenticateToken, enforceResellerPrivilege('webdav'), webdavRoutes);
-app.use('/api/dns-cluster',   authenticateToken, enforceResellerPrivilege('dns-clustering'), dnsClusterRoutes);
-app.use('/api/transfer-import', authenticateToken, enforceResellerPrivilege('transfer-tool'), transferImportRoutes);
-app.use('/api/jobs', authenticateToken, jobsRoutes);
-app.use('/api/health', authenticateToken, healthRoutes);
+app.use('/api/feature-lists', ...adminAuth, enforceResellerPrivilege('feature-lists'), featureListsRoutes);
+app.use('/api/mail-trace',    ...adminAuth, enforceResellerPrivilege('mail-trace'), mailTraceRoutes);
+app.use('/api/analytics',     ...adminAuth, enforceResellerPrivilege('analytics'), analyticsRoutes);
+app.use('/api/extensions',    ...adminAuth, enforceResellerPrivilege('plugins'), extensionsRoutes);
+app.use('/api/team-users',    ...adminAuth, enforceResellerPrivilege('team-users'), teamUsersRoutes);
+app.use('/api/webdav',        ...adminAuth, enforceResellerPrivilege('webdav'), webdavRoutes);
+app.use('/api/dns-cluster',   ...adminAuth, enforceResellerPrivilege('dns-clustering'), dnsClusterRoutes);
+app.use('/api/transfer-import', ...adminAuth, enforceResellerPrivilege('transfer-tool'), transferImportRoutes);
+app.use('/api/jobs', ...adminAuth, jobsRoutes);
+app.use('/api/health', ...adminAuth, healthRoutes);
 
 if (process.env.NODE_ENV === 'production') {
   // Unmatched /api/* requests must return JSON 404, not the SPA HTML.
