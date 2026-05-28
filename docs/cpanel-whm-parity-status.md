@@ -20,13 +20,16 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
   - Purpose: package/feature-list enforcement for plans, reseller privileges, client portal visibility, and reseller API access across protected HostPanel modules.
 
 - **Track Delivery / deep mail delivery reporting foundation**
-  - API: `/api/mail-trace/search`
+  - API: `/api/mail-trace/search`, `/api/mail-trace/stats`, `/api/mail-trace/export`
   - Parses Postfix-style logs without shelling out.
-  - Filters by sender, recipient, queue ID, status, and limit.
+  - Filters by sender, recipient, queue ID, status, date range, and limit.
+  - `/api/mail-trace/stats` aggregates delivery counts by status, top senders, top recipients, and top domains.
+  - `/api/mail-trace/export` exports filtered events as CSV.
 
 - **Detailed visitor/error/bandwidth analytics foundation**
-  - API: `/api/analytics/visitors`, `/api/analytics/errors`, `/api/analytics/bandwidth`, `/api/analytics/raw-access`, `/api/analytics/awstats`
+  - API: `/api/analytics/visitors`, `/api/analytics/errors`, `/api/analytics/bandwidth`, `/api/analytics/raw-access`, `/api/analytics/awstats`, `/api/analytics/timeseries`, `/api/analytics/top-paths`, `/api/analytics/export`
   - Provides visitor, HTTP error, raw access, bandwidth, and Awstats/Webalizer-style summaries from local web logs.
+  - Supports date-range filtering (`from`/`to`), domain-prefix filtering, chart-ready time-series by day or hour, top-paths with limit, and CSV export of filtered access log entries.
 
 - **Server update/plugin ecosystem foundation**
   - API: `/api/extensions/updates`, `/api/extensions/plugins`, `/api/extensions/plugins/refresh`, `/api/extensions/plugins/install`, `/api/extensions/plugins/:id/enable`, `/api/extensions/plugins/:id/disable`, `/api/extensions/plugins/:id/rollback`
@@ -58,7 +61,9 @@ This document tracks implementation of the requested cPanel/WHM parity areas.
 
 These areas need deeper production hardening beyond the new API/UI foundations:
 
-- Operational hardening still recommended after field use: extend the centralized background-job/progress subsystem beyond the newly wired backup create/restore, transfer execution, DNS sync, WebDAV provision/reload, and plugin install/rollback jobs, deepen analytics/mail-report exports and charts, continue adding account-specific team-scope regression coverage as portal modules grow, and keep phpMyAdmin Signon validation in the deployment checklist after distro package changes.
+- Operational hardening still in progress: extend background jobs to WordPress/app installs (long wp-cli operations), add deeper mail/analytics charts on the frontend, continue adding account-specific team-scope regression coverage as portal modules grow, and maintain phpMyAdmin Signon in the deployment checklist after distro package changes.
+- phpMyAdmin SSO bootstrap is now included in `install.sh` (idempotent, runs on fresh install and re-runs).
+- Analytics and mail-trace now have date-range filtering, CSV export, time-series, delivery stats, and top-paths — frontend charts are the next layer to wire.
 
 ## Verification
 

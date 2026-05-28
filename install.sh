@@ -56,6 +56,99 @@ fi
 
 systemctl enable --now httpd mariadb postfix dovecot named vsftpd php-fpm
 
+# ── 2b/9  phpMyAdmin SSO bootstrap ──────────────────────────────────────────
+# Install phpMyAdmin (if not present) and bootstrap the HostPanel SSO bridge
+# so database SSO works on a fresh install without manual setup.
+if ! rpm -q phpMyAdmin &>/dev/null; then
+  echo "[2b/9] Installing phpMyAdmin..."
+  dnf install -y phpMyAdmin 2>/dev/null || true
+fi
+
+# Detect install path (RHEL packages land at /usr/share/phpMyAdmin)
+PMA_DIR=""
+for _d in /usr/share/phpMyAdmin /usr/share/phpmyadmin; do
+  if [[ -d "$_d" ]]; then PMA_DIR="$_d"; break; fi
+done
+
+if [[ -n "$PMA_DIR" ]]; then
+  echo "[2b/9] Configuring phpMyAdmin SSO bridge at ${PMA_DIR}..."
+  SSO_TOKEN_DIR=/var/lib/hostpanel/phpmyadmin-sso
+  mkdir -p "$SSO_TOKEN_DIR"
+  chmod 700 "$SSO_TOKEN_DIR"
+
+  # Write the Signon bridge (idempotent — always overwrites with canonical version)
+  cat >"${PMA_DIR}/hostpanel-signon.php" <<'SIGNON_PHP'
+<?php
+// Managed by HostPanel. One-time phpMyAdmin Signon bridge.
+$tokenDir = getenv('HOSTPANEL_PMA_SSO_TOKEN_DIR') ?: '/var/lib/hostpanel/phpmyadmin-sso';
+$token = preg_replace('/[^a-f0-9]/', '', $_GET['token'] ?? $_POST['token'] ?? '');
+if (!$token) { http_response_code(400); exit('Missing token'); }
+$file = rtrim($tokenDir, '/').'/'.$token.'.json';
+if (!is_readable($file)) { http_response_code(403); exit('Invalid or expired token'); }
+$data = json_decode(file_get_contents($file), true);
+@unlink($file);
+if (!$data || empty($data['expires']) || $data['expires'] < time()) { http_response_code(403); exit('Expired token'); }
+session_name('HOSTPANEL_PMA');
+session_start();
+$_SESSION['PMA_single_signon_user'] = $data['username'];
+$_SESSION['PMA_single_signon_password'] = $data['password'];
+$_SESSION['PMA_single_signon_host'] = $data['host'] ?? '127.0.0.1';
+$_SESSION['PMA_single_signon_port'] = strval($data['port'] ?? 3306);
+$target = 'index.php?server=2';
+if (!empty($data['database'])) $target .= '&db='.rawurlencode($data['database']);
+header('Location: '.$target);
+exit;
+?>
+SIGNON_PHP
+
+  # Determine phpMyAdmin config path
+  PMA_CFG=""
+  for _c in /etc/phpMyAdmin/config.inc.php /etc/phpmyadmin/config.inc.php; do
+    if [[ -f "$_c" ]]; then PMA_CFG="$_c"; break; fi
+  done
+
+  # Add managed Signon server entry if not already present (idempotent)
+  if [[ -n "$PMA_CFG" ]] && ! grep -q 'HostPanel phpMyAdmin Signon bridge' "$PMA_CFG"; then
+    cat >>"$PMA_CFG" <<'SIGNON_CFG'
+
+// BEGIN HostPanel phpMyAdmin Signon bridge
+$i = 1;
+$i++;
+$cfg['Servers'][$i]['verbose'] = 'HostPanel Signon';
+$cfg['Servers'][$i]['auth_type'] = 'signon';
+$cfg['Servers'][$i]['SignonSession'] = 'HOSTPANEL_PMA';
+$cfg['Servers'][$i]['SignonURL'] = '/phpMyAdmin/hostpanel-signon.php';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
+$cfg['Servers'][$i]['port'] = '3306';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = false;
+// END HostPanel phpMyAdmin Signon bridge
+SIGNON_CFG
+    echo "  Added HostPanel Signon server entry to ${PMA_CFG}."
+  fi
+
+  # Apache config for phpMyAdmin alias + SSO token dir env (idempotent)
+  if [[ ! -f /etc/httpd/conf.d/hostpanel-phpmyadmin.conf ]]; then
+    cat >/etc/httpd/conf.d/hostpanel-phpmyadmin.conf <<PMACNF
+# Managed by HostPanel. Exposes phpMyAdmin through Apache.
+SetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR /var/lib/hostpanel/phpmyadmin-sso
+Alias /phpMyAdmin ${PMA_DIR}
+Alias /phpMyAdmin/ ${PMA_DIR}/
+<Directory ${PMA_DIR}>
+  Options FollowSymLinks
+  DirectoryIndex index.php
+  AllowOverride None
+  Require all granted
+</Directory>
+PMACNF
+  fi
+
+  php -l "${PMA_DIR}/hostpanel-signon.php" &>/dev/null && echo "[2b/9] phpMyAdmin SSO bridge syntax OK." || echo "[2b/9] WARNING: hostpanel-signon.php has PHP syntax errors."
+else
+  echo "[2b/9] phpMyAdmin install path not found — skipping SSO bridge setup."
+fi
+
+
 # ── 3/9  MariaDB ─────────────────────────────────────────────────────────────
 echo "[3/9] Configuring MariaDB..."
 
