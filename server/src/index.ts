@@ -71,6 +71,7 @@ import transferImportRoutes  from './routes/transfer-import';
 import jobsRoutes            from './routes/jobs';
 import healthRoutes, { publicHealth } from './routes/health';
 import { authenticateToken, blockPortalRoles, readonlyGuard } from './middleware/auth';
+import { startSelfHealthWatchdog } from './utils/self-health-watchdog';
 
 // adminAuth chains authenticateToken → blockPortalRoles so portal-role JWTs
 // (client, client_team) are rejected before reaching any admin handler.
@@ -324,6 +325,17 @@ function startWatchdog() {
   setInterval(() => { void check(); }, WATCHDOG_INTERVAL_MS);
 }
 startWatchdog();
+
+// ── Self-health watchdog ───────────────────────────────────────────────────
+// Polls /healthz every 60 seconds and dispatches system.healthz_down after
+// 3 consecutive failures. Resets on success. Never crashes the process.
+const SELF_HEALTH_URL = `http://localhost:${PORT}/healthz`;
+startSelfHealthWatchdog({
+  url: SELF_HEALTH_URL,
+  intervalMs: 60 * 1000,
+  failureThreshold: 3,
+  dispatch: (event, payload) => dispatchNotification(event as any, payload).catch(() => {}),
+});
 
 httpServer.listen(PORT, () => {
   console.log(`HostPanel API running on port ${PORT}`);
