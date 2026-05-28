@@ -43,7 +43,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] `hostpanel.service` enabled in systemd (`systemctl is-enabled hostpanel` → `enabled` — **verified 2026-05-28**)
 - [x] `Restart=on-failure` in systemd unit (service auto-recovers from crashes — **verified 2026-05-28**)
 - [x] `After=network.target mariadb.service` in unit (correct startup ordering — **verified 2026-05-28**)
-- [x] Built-in watchdog polls `/healthz` every 60 seconds and dispatches alerts on 3 consecutive failures (**verified** by monitoring/alerting hardening pass)
+- [x] Built-in watchdog polls `/healthz` every 60 seconds and dispatches alerts on 3 consecutive failures (**verified** by self-health-watchdog TDD: 6 tests, 23 files / 121 tests green — `server/src/utils/self-health-watchdog.ts` wired in `index.ts` — **2026-05-28**)
 - [ ] External uptime monitor configured (UptimeRobot / BetterStack) pointing at `https://panel.contaura.com/healthz` (**manual step** — requires Marcos to configure)
 - [x] SQLite database on persistent volume (`/root/hostpanel/data/hostpanel.db` on root filesystem, not tmpfs — **verified 2026-05-28**)
 - [ ] Automated nightly database backup scheduled (cron or panel backup wizard — **manual step**)

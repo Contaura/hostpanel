@@ -377,3 +377,62 @@ npm audit --omit=dev --audit-level=moderate  # 0 vulnerabilities ✓
 4. **Stripe/PayPal webhook secrets** — if payment integrations are live, configure and validate secrets in the panel Settings.
 5. **Staging upgrade test** — perform a test upgrade on a staging server before the next major release.
 
+
+---
+
+## Hardening Pass 9 — Self-health watchdog implementation (2026-05-28)
+
+**Goal:** Close the gap between the checklist claim ("watchdog polls /healthz every 60s, dispatches on 3 consecutive failures") and the actual code (which only had a systemd service watchdog for httpd/mariadb/postfix, no self-health polling).
+
+### Changes
+
+**1. New utility: `server/src/utils/self-health-watchdog.ts`**
+- `startSelfHealthWatchdog(opts)` — polls a URL on a fixed interval, tracks consecutive failures, dispatches a `system.healthz_down` notification after N consecutive failures (configurable, default 3).
+- Resets failure counter on any successful response.
+- Swallows fetch errors, counts them as failures (ECONNREFUSED triggers alert).
+- Returns `stop()` function that clears the interval.
+- Fully injectable: accepts `fetch` override for deterministic testing.
+
+**2. Tests: `server/src/utils/self-health-watchdog.test.ts`** (6 new tests)
+- dispatches after 3 consecutive failures
+- does not dispatch below threshold
+- dispatches exactly once per burst (no repeat on ticks 4-N)
+- resets counter after success
+- stop() clears interval
+- swallows fetch errors and counts them as failures
+
+**3. `server/src/index.ts`**
+- Imports and starts `startSelfHealthWatchdog` on server startup.
+- Polls `http://localhost:<PORT>/healthz` every 60 seconds.
+- Threshold: 3 consecutive failures.
+- Dispatches via `dispatchNotification` (existing webhook channel).
+
+### Verification performed
+
+```bash
+# TDD cycle — RED
+npm run test --workspace=server -- src/utils/self-health-watchdog.test.ts
+# → 1 test file failed (module not found) ✓ confirmed RED
+
+# GREEN — implemented self-health-watchdog.ts
+npm run test --workspace=server -- src/utils/self-health-watchdog.test.ts
+# → 6 tests passed ✓ confirmed GREEN
+
+# Full suite
+npm run test --workspace=server   # 23 files / 121 tests passed (was 22 / 115)
+npm run build                     # passed (client + server, no errors)
+
+# Production deployment (server: root@45.79.189.4)
+git push origin master            # 67a5db3..97876a8 ✓
+systemctl restart hostpanel       # active ✓
+curl -sf http://localhost:3001/healthz  # {"ok":true,...} ✓
+curl -sI https://panel.contaura.com/healthz | grep -E "HTTP/|Strict-Transport|X-Content|X-Frame|Content-Security"
+# HTTP/1.1 200 OK ✓ + all 4 security headers present ✓
+sshd -T | grep passwordauthentication  # passwordauthentication no ✓
+grep -rn 'execAsync|promisify(exec)' /root/hostpanel/server/src/routes/ | grep -v .test.ts
+# → CLEAN ✓
+git status --short  # (empty — working tree clean) ✓
+```
+
+### Commit
+`97876a8` — "Add self-health watchdog: /healthz polling, 3-failure threshold, system.healthz_down alert"
