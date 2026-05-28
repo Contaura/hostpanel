@@ -307,3 +307,73 @@ npm run build                     # passed
 
 - Item 7 (final production readiness verification and launch report) — fill in the launch checklist completely, run the 10-command verification sequence, and file the formal launch report by 2026-06-09.
 - Complete launch checklist items that require live verification (external uptime monitor, Stripe webhook secrets, 2FA enrollment) before the final report.
+
+---
+
+## 2026-05-28 — Final Production Verification, 2FA Advisory, CSP Header, Checklist Evidence
+
+### Risk addressed
+
+Production was running without a Content-Security-Policy header and without a machine-verifiable signal that admin 2FA is not yet enabled. Both gaps were identified during the final launch-readiness audit.
+
+### Changes made
+
+**1. Health endpoint 2FA advisory** (`server/src/routes/health.ts`):
+- In `production` mode, the `/api/health/readiness` endpoint now runs an additional `security` check.
+- If no admin user has `totp_enabled = 1`, a warning string is included in `checks.security.warnings`.
+- The advisory is non-blocking (does not flip `ok` to `false`) but makes the gap visible to any monitoring system consuming the readiness endpoint.
+- `ok` calculation changed from `every c.ok === true` to `every c.ok !== false` so that checks without an `ok` field (e.g. the advisory `security` block) do not contribute to failure.
+
+**2. Test coverage** (`server/src/routes/health.integration.test.ts`):
+- Added test: `includes a security advisory when no admin has 2FA enabled in production`.
+- Follows strict TDD: test written and confirmed to fail before implementation (expected `undefined` for `checks.security`), then implementation added to make it pass.
+- Test count: 22 files / **115 tests** (was 114).
+
+**3. Content-Security-Policy header** (`/etc/httpd/conf.d/zz-hostpanel-headers.conf` on production server):
+- Added `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' wss:; frame-ancestors 'none';`
+- Production HTML has no inline scripts (verified: only `<script type="module" src="...">` elements).
+- `unsafe-inline` in `style-src` is required for Vite's CSS-in-JS runtime style injection.
+
+**4. Launch checklist evidence** (`docs/13-launch-checklist.md`):
+- Marked ✅ all items with direct verification evidence gathered during this audit.
+- Identified remaining manual steps for Marcos: external uptime monitor, nightly backup destination, admin 2FA enrollment, Stripe webhook secrets.
+
+### Verification performed
+
+```bash
+# TDD cycle — RED
+npm run test --workspace=server -- src/routes/health.integration.test.ts
+# → 1 failed (checks.security undefined) ✓ confirmed RED
+
+# GREEN — implemented security advisory block in health.ts
+npm run test --workspace=server -- src/routes/health.integration.test.ts
+# → 3 passed ✓ confirmed GREEN
+
+# Full suite
+npm run test --workspace=server   # 22 files / 115 tests passed
+npm run build                     # passed (client + server, no errors)
+npm audit --omit=dev --audit-level=moderate  # 0 vulnerabilities
+
+# Production verification (server: root@45.79.189.4)
+sshd -T | grep passwordauthentication  # passwordauthentication no ✓
+sshd -T | grep permitrootlogin         # permitrootlogin without-password ✓
+systemctl is-active hostpanel          # active ✓
+systemctl is-enabled hostpanel         # enabled ✓
+curl -sf http://localhost:3001/healthz  # {"ok":true,...} ✓
+curl -sf https://panel.contaura.com/healthz  # {"ok":true,...} ✓
+curl -sI https://panel.contaura.com/healthz | grep -E "X-Content-Type|X-Frame|Strict-Transport|Content-Security"
+# Strict-Transport-Security, X-Content-Type-Options, X-Frame-Options,
+# Content-Security-Policy all present ✓
+grep -rn 'execAsync\|promisify(exec)' /root/hostpanel/server/src/routes/ --include="*.ts" | grep -v '\.test\.ts'
+# → CLEAN ✓
+npm audit --omit=dev --audit-level=moderate  # 0 vulnerabilities ✓
+```
+
+### Follow-up (manual, requires Marcos)
+
+1. **Admin 2FA enrollment** — log into the panel at `/admin-users`, enable TOTP for the `admin` account. The readiness endpoint will warn until this is done.
+2. **External uptime monitor** — configure UptimeRobot or BetterStack to monitor `https://panel.contaura.com/healthz`.
+3. **Nightly backup** — configure a backup schedule in the panel or a cron job; store backups off-server (S3, B2, or equivalent).
+4. **Stripe/PayPal webhook secrets** — if payment integrations are live, configure and validate secrets in the panel Settings.
+5. **Staging upgrade test** — perform a test upgrade on a staging server before the next major release.
+

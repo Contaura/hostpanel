@@ -49,8 +49,7 @@ describe('production health and readiness checks', () => {
   it('reports readiness checks and recent background job failures', async () => {
     await import('../background-jobs');
     const db = (await import('../db')).default;
-    db.prepare("INSERT INTO background_jobs (type,status,resource,error,created_at,updated_at,completed_at) VALUES (?,?,?,?,datetime('now'),datetime('now'),datetime('now'))")
-      .run('backup.restore', 'failed', 'bad-backup.tar.gz', 'restore failed');
+    db.prepare("INSERT INTO background_jobs (type,status,resource,error,created_at,updated_at,completed_at) VALUES (?,?,?,?,datetime('now'),datetime('now'),datetime('now'))").run('backup.restore', 'failed', 'bad-backup.tar.gz', 'restore failed');
     const health = (await import('./health')).default;
     const app = express();
     app.use('/api/health', health);
@@ -65,6 +64,33 @@ describe('production health and readiness checks', () => {
       expect(body.checks.recentFailedJobs.failures[0]).toMatchObject({ type: 'backup.restore', resource: 'bad-backup.tar.gz' });
     } finally {
       await server.close();
+    }
+  });
+
+  it('includes a security advisory when no admin has 2FA enabled in production', async () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    // Ensure admin_users has at least one user without TOTP enabled
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 0);
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      // 2FA warning should not flip ok=false — it's an advisory, not a hard failure
+      expect(body.checks.security).toBeDefined();
+      expect(body.checks.security.warnings).toEqual(
+        expect.arrayContaining([expect.stringMatching(/2FA/i)])
+      );
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prev;
     }
   });
 });

@@ -60,7 +60,21 @@ async function buildReadiness() {
     checks.recentFailedJobs = { ok: false, error: err.message, failures: [] };
   }
 
-  const ok = Object.values(checks).every((c: any) => c.ok === true);
+  // Security advisory (non-blocking): warn if no admin has 2FA enabled in production
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const warnings: string[] = [];
+      const anyTotp = db.prepare('SELECT COUNT(*) AS c FROM admin_users WHERE totp_enabled = 1').get() as { c: number };
+      if (!anyTotp || anyTotp.c === 0) {
+        warnings.push('No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.');
+      }
+      checks.security = { warnings };
+    } catch (err: any) {
+      checks.security = { warnings: [], error: err.message };
+    }
+  }
+
+  const ok = Object.values(checks).every((c: any) => c.ok !== false);
   return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), checks };
 }
 
