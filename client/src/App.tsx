@@ -91,6 +91,8 @@ const SecurityScanner = lazy(() => import('./pages/SecurityScanner'));
 const MailTools = lazy(() => import('./pages/MailTools'));
 const Webmail = lazy(() => import('./pages/Webmail'));
 const CpanelParity = lazy(() => import('./pages/CpanelParity'));
+const Analytics    = lazy(() => import('./pages/Analytics'));
+const MailTrace    = lazy(() => import('./pages/MailTrace'));
 
 function PrivateRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -216,6 +218,8 @@ function AppRoutes() {
         <Route path="mail-tools"        element={<MailTools />} />
         <Route path="webmail"           element={<Webmail />} />
         <Route path="cpanel-parity"      element={<CpanelParity />} />
+        <Route path="analytics"          element={<Analytics />} />
+        <Route path="mail-trace"         element={<MailTrace />} />
 
         {/* Admin Config */}
         <Route path="settings"    element={<Settings />} />

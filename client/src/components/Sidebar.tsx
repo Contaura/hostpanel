@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { fetchApi } from '../lib/api';
 import {
-  LayoutDashboard, FolderOpen, Archive,
+  LayoutDashboard, BarChart2, FolderOpen, Archive,
   Globe, Network, ArrowRightLeft, AlertTriangle, Globe2,
   Database,
   Mail, MailPlus, MailSearch, ListOrdered, MailOpen, PlusSquare, BrainCircuit, ServerCog,
@@ -106,6 +106,8 @@ const sections: Section[] = [
       { to: '/node-apps',       icon: ServerCog,      label: 'Node.js / Python' },
       { to: '/server-info',     icon: Info,           label: 'Server Info' },
       { to: '/mail-tools',      icon: MailSearch,     label: 'Mail Tools' },
+      { to: '/analytics',       icon: BarChart2,      label: 'Analytics' },
+      { to: '/mail-trace',      icon: MailSearch,     label: 'Mail Trace' },
       { to: '/cpanel-parity',   icon: ServerCog,      label: 'cPanel / WHM Parity' },
     ],
   },

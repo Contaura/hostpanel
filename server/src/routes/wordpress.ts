@@ -7,6 +7,7 @@ import { existsSync, unlinkSync, readFileSync, promises as fsp } from 'fs';
 import db from '../db';
 import { requireRole } from '../middleware/auth';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob } from '../background-jobs';
 
 const router = Router();
 const execFileAsync = promisify(execFile);
@@ -48,6 +49,56 @@ router.get('/sites', async (_req: Request, res: Response) => {
     });
     res.json(sites);
   } catch { res.json([]); }
+});
+
+/* ── Install WordPress on a domain ──────────────────────── */
+
+router.post('/:domain/install', async (req: Request, res: Response) => {
+  const { domain } = req.params;
+  if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+  const {
+    url, adminEmail, adminUser = 'admin', adminPass,
+    title = 'My Site', dbName, dbUser, dbPass,
+    async: runAsync,
+  } = req.body;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  if (!adminEmail || !adminPass) return res.status(400).json({ error: 'adminEmail and adminPass required' });
+  if (!dbName || !dbUser || !dbPass) return res.status(400).json({ error: 'dbName, dbUser, dbPass required' });
+  if (!/^[a-zA-Z0-9_]+$/.test(dbName)) return res.status(400).json({ error: 'Invalid dbName' });
+  if (!/^[a-zA-Z0-9_]+$/.test(dbUser))  return res.status(400).json({ error: 'Invalid dbUser' });
+
+  async function doInstall(ctx?: import('../background-jobs').JobContext) {
+    ctx?.progress(5, 'Downloading WordPress core…');
+    await wp(domain, ['core', 'download', '--skip-content']);
+    ctx?.progress(30, 'Creating wp-config.php…');
+    await wp(domain, [
+      'config', 'create',
+      `--dbname=${dbName}`, `--dbuser=${dbUser}`, `--dbpass=${dbPass}`,
+      '--dbhost=127.0.0.1', '--skip-check',
+    ]);
+    ctx?.progress(50, 'Running database install…');
+    await wp(domain, [
+      'core', 'install',
+      `--url=${url}`, `--title=${title}`,
+      `--admin_user=${adminUser}`, `--admin_password=${adminPass}`,
+      `--admin_email=${adminEmail}`, '--skip-email',
+    ]);
+    ctx?.progress(90, 'Verifying install…');
+    const { stdout: ver } = await wp(domain, ['core', 'version']);
+    return { domain, version: ver.trim(), url };
+  }
+
+  if (runAsync) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.install', resource: domain, metadata: { domain, url }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doInstall(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try {
+    const result = await doInstall();
+    res.json(result);
+  } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 /* ── Core info ───────────────────────────────────────────────── */

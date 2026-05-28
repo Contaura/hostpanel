@@ -57,7 +57,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 
 - [ ] Frontend shipped as lazy-loaded per-route chunks (no single massive initial bundle)
 - [ ] API response times acceptable under normal load (< 200ms for common endpoints)
-- [ ] Long-running operations (backups, scans, app installs) run as background jobs with `/api/jobs` polling
+- [ ] Long-running operations (backups, scans, app installs, WordPress install) run as background jobs with `/api/jobs` polling
 - [ ] Background job table does not have a runaway accumulation of failed rows
 - [ ] No memory leak observed after 24h uptime (check `systemctl status hostpanel` memory field)
 
@@ -65,7 +65,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 
 ## 4. Code Quality & Tests
 
-- [ ] All server tests pass: `npm run test --workspace=server` → 20 files, 99 tests (or more), 0 failures
+- [ ] All server tests pass: `npm run test --workspace=server` → 22 files, 114 tests (or more), 0 failures
 - [ ] Full build passes: `npm run build` → no TypeScript errors, no build failures
 - [ ] No npm audit vulnerabilities at moderate or higher: `npm audit --omit=dev --audit-level=moderate` → 0
 - [ ] No legacy `execAsync()`/`promisify(exec)` call sites in route source files (grep check clean)
