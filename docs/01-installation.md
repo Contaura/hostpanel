@@ -17,15 +17,17 @@ Supported distributions: **RHEL 8/9 · Rocky Linux 8/9 · AlmaLinux 8/9**
 
 ---
 
-## Option A — Automated Installer
+## Option A — Automated Installer (recommended)
 
 ```bash
-git clone https://github.com/Contaura/hostpanel.git /opt/hostpanel
-cd /opt/hostpanel
-sudo bash install.sh
+git clone https://github.com/Contaura/hostpanel.git /root/hostpanel
+cd /root/hostpanel
+bash install.sh
 ```
 
-The script handles everything end-to-end. When it finishes, the panel is available at `http://<server-ip>:3001`.
+The script handles everything end-to-end (Node.js, system packages, Apache, MariaDB, Postfix, named, systemd unit, phpMyAdmin Signon, security headers). When it finishes, the panel is available at `http://<server-ip>:3001`.
+
+> **Install path:** The installer uses the directory it runs from (`PANEL_DIR=$(dirname install.sh)`). The examples in this guide use `/root/hostpanel`; adjust if you clone elsewhere.
 
 ---
 
@@ -34,16 +36,16 @@ The script handles everything end-to-end. When it finishes, the panel is availab
 ### 1. Install Node.js 20
 
 ```bash
-curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-sudo dnf install -y nodejs
+curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+dnf install -y nodejs
 node -v   # should print v20.x.x
 ```
 
 ### 2. Install system packages
 
 ```bash
-sudo dnf install -y epel-release
-sudo dnf install -y \
+dnf install -y epel-release
+dnf install -y \
   httpd mod_ssl \
   mariadb-server \
   postfix dovecot \
@@ -59,14 +61,14 @@ sudo dnf install -y \
 Enable and start core services:
 
 ```bash
-sudo systemctl enable --now httpd mariadb postfix named vsftpd
+systemctl enable --now httpd mariadb postfix named vsftpd
 ```
 
 ### 3. Clone the repository
 
 ```bash
-sudo git clone https://github.com/Contaura/hostpanel.git /opt/hostpanel
-cd /opt/hostpanel
+git clone https://github.com/Contaura/hostpanel.git /root/hostpanel
+cd /root/hostpanel
 ```
 
 ### 4. Install Node dependencies
@@ -109,7 +111,7 @@ See [Configuration Reference](02-configuration.md) for all available keys.
 ### 6. Configure MariaDB
 
 ```bash
-sudo mysql_secure_installation
+mysql_secure_installation
 ```
 
 HostPanel uses SQLite for its own data (no MariaDB setup needed for the panel itself). MariaDB is used only when you create hosting-account databases through the panel.
@@ -117,7 +119,7 @@ HostPanel uses SQLite for its own data (no MariaDB setup needed for the panel it
 ### 7. Build the frontend
 
 ```bash
-npm run build --workspace=client
+npm run build
 ```
 
 The built assets land in `client/dist/` and are served automatically by Express in production mode.
@@ -125,7 +127,8 @@ The built assets land in `client/dist/` and are served automatically by Express 
 ### 8. Create the systemd service
 
 ```bash
-sudo tee /etc/systemd/system/hostpanel.service > /dev/null <<EOF
+PANEL_DIR=/root/hostpanel   # adjust if you cloned elsewhere
+tee /etc/systemd/system/hostpanel.service > /dev/null <<EOF
 [Unit]
 Description=HostPanel Control Panel
 After=network.target mariadb.service
@@ -133,8 +136,8 @@ After=network.target mariadb.service
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/hostpanel/server
-ExecStart=/usr/bin/node /opt/hostpanel/server/dist/index.js
+WorkingDirectory=${PANEL_DIR}/server
+ExecStart=/usr/bin/node ${PANEL_DIR}/server/dist/index.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -143,22 +146,22 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now hostpanel
-sudo systemctl status hostpanel
+systemctl daemon-reload
+systemctl enable --now hostpanel
+systemctl status hostpanel
 ```
 
 ### 9. Open firewall ports
 
 ```bash
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --add-service=https
-sudo firewall-cmd --permanent --add-port=3001/tcp
-sudo firewall-cmd --permanent --add-service=ftp
-sudo firewall-cmd --permanent --add-service=smtp
-sudo firewall-cmd --permanent --add-service=pop3s
-sudo firewall-cmd --permanent --add-service=imaps
-sudo firewall-cmd --reload
+firewall-cmd --permanent --add-service=http
+firewall-cmd --permanent --add-service=https
+firewall-cmd --permanent --add-port=3001/tcp
+firewall-cmd --permanent --add-service=ftp
+firewall-cmd --permanent --add-service=smtp
+firewall-cmd --permanent --add-service=pop3s
+firewall-cmd --permanent --add-service=imaps
+firewall-cmd --reload
 ```
 
 ### 10. (Optional) Reverse-proxy behind Apache
@@ -178,14 +181,14 @@ To serve the panel on port 80/443 instead of 3001, create an Apache vhost:
 ```
 
 ```bash
-sudo dnf install -y mod_proxy mod_proxy_http mod_proxy_wstunnel
-sudo systemctl reload httpd
+dnf install -y mod_proxy mod_proxy_http mod_proxy_wstunnel
+systemctl reload httpd
 ```
 
 Then obtain SSL with Certbot:
 
 ```bash
-sudo certbot --apache -d panel.yourdomain.com
+certbot --apache -d panel.yourdomain.com
 ```
 
 ---
@@ -193,9 +196,9 @@ sudo certbot --apache -d panel.yourdomain.com
 ## Verifying the Installation
 
 ```bash
-sudo systemctl status hostpanel        # service running
-sudo journalctl -u hostpanel -n 50     # last 50 log lines
-curl -s http://localhost:3001/api/auth/status | python3 -m json.tool
+systemctl status hostpanel              # service running
+journalctl -u hostpanel -n 50          # last 50 log lines
+curl -sf http://localhost:3001/healthz  # → {"ok":true,...}
 ```
 
 Open `http://<server-ip>:3001` in a browser and log in with the admin credentials you set in `.env`.
@@ -205,8 +208,8 @@ Open `http://<server-ip>:3001` in a browser and log in with the admin credential
 ## Uninstall
 
 ```bash
-sudo systemctl disable --now hostpanel
-sudo rm /etc/systemd/system/hostpanel.service
-sudo systemctl daemon-reload
-sudo rm -rf /opt/hostpanel
+systemctl disable --now hostpanel
+rm /etc/systemd/system/hostpanel.service
+systemctl daemon-reload
+rm -rf /root/hostpanel
 ```

@@ -23,7 +23,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] Rate limiting active: 300 req/min global `/api/`, 20 req/min on `/api/auth/` and portal login paths (**verified 2026-05-28** via server/src/index.ts)
 - [x] IP whitelist feature documented; empty whitelist = open to all (expected for SaaS; intentional — panel manages trusted IPs at runtime)
 - [x] All admin routes protected by `authenticateToken + blockPortalRoles` middleware (**verified** by security-authorization integration tests)
-- [x] Portal-role JWTs (`client`, `client_team`) cannot reach admin routes (verified by security auth integration tests — **115 tests green 2026-05-28**)
+- [x] Portal-role JWTs (`client`, `client_team`) cannot reach admin routes (verified by security auth integration tests — **121 tests green 2026-05-29**)
 - [x] Readonly-role guard blocks write operations for readonly tokens (**verified** by auth integration test)
 - [x] File manager symlink escape hardening in place (`assertSafeFileTarget()` on all file ops — **verified** by file-path unit tests)
 - [x] Archive path traversal validation in place (`assertSafeArchiveName()` — **verified** by archive-path unit tests)
@@ -66,7 +66,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 
 ## 4. Code Quality & Tests
 
-- [x] All server tests pass: `npm run test --workspace=server` → 22 files, **115 tests**, 0 failures (**verified 2026-05-28**)
+- [x] All server tests pass: `npm run test --workspace=server` → 23 files, **121 tests**, 0 failures (**verified 2026-05-29** — `97876a8` watchdog TDD added 6 more tests)
 - [x] Full build passes: `npm run build` → no TypeScript errors, no build failures (**verified 2026-05-28**)
 - [x] No npm audit vulnerabilities at moderate or higher: `npm audit --omit=dev --audit-level=moderate` → 0 (**verified 2026-05-28**)
 - [x] No legacy `execAsync()`/`promisify(exec)` call sites in route source files (grep check: **CLEAN 2026-05-28**)
@@ -89,7 +89,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 
 - [x] Installation guide (`docs/01-installation.md`) reflects current install path (**verified** — install.sh updated throughout hardening)
 - [x] Operations runbook (`docs/12-operations-runbook.md`) complete and accurate (**verified** — created in runbook pass)
-- [ ] Upgrade procedure documented (`docs/10-upgrade.md`) and tested on a staging host (**partial** — upgrade guide exists; staging test is manual)
+- [x] Upgrade procedure documented (`docs/10-upgrade.md`) — updated 2026-05-29: all `/opt/hostpanel` paths corrected to `/root/hostpanel`, upgrade steps now match the operations runbook (git pull → npm ci → build → test → restart → healthz), backup script updated with 14-day prune and correct paths (**staging deploy test is manual** — verify on Marcos's staging host before 2026-06-09)
 - [x] Disaster recovery procedure documented in runbook and tested via DR drill (**verified** — DR drill automation pass)
 - [ ] This launch checklist (`docs/13-launch-checklist.md`) fully checked off (**in progress** — see manual steps above)
 - [x] `docs/11-production-readiness.md` log updated with all hardening passes (**verified** — updated through all 7 hardening slices)
@@ -165,7 +165,7 @@ All 10 commands must succeed with no errors before filing the launch report.
 - SSH password auth: disabled
 - Security headers: present
 - Shell-string grep: CLEAN
-- Tests: 20 files / 99 tests PASSED
+- Tests: 23 files / 121 tests PASSED
 - npm audit: 0 vulnerabilities (omit=dev, moderate+)
 
 ## Remaining Known Issues / Non-Blockers

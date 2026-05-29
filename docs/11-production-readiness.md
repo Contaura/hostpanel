@@ -436,3 +436,44 @@ git status --short  # (empty — working tree clean) ✓
 
 ### Commit
 `97876a8` — "Add self-health watchdog: /healthz polling, 3-failure threshold, system.healthz_down alert"
+
+## 2026-05-29 — Documentation hardening: fix stale install paths and update counts
+
+### Risk addressed
+
+`docs/10-upgrade.md` and `docs/01-installation.md` referenced `/opt/hostpanel` throughout — the old install path. Production runs from `/root/hostpanel`. Operators following the stale upgrade guide would run commands in the wrong directory, potentially breaking the service. The launch checklist also listed 22 files / 115 tests (the count before the watchdog TDD cycle) instead of the verified 23 files / 121 tests.
+
+### Changes made
+
+- **`docs/10-upgrade.md`** — complete rewrite:
+  - All `/opt/hostpanel` → `/root/hostpanel` (11 occurrences).
+  - Upgrade procedure now matches the operations runbook: `git pull → npm ci → npm run build → npm test → systemctl restart → healthz`.
+  - Backup script updated with 14-day prune (`find ... -mtime +14`), correct paths, and `set -euo pipefail`.
+  - Rollback and restore procedures use correct paths.
+  - SQLite commands use `/usr/bin/sqlite3` (full path, required on this host).
+- **`docs/01-installation.md`** — manual install section updated:
+  - Clone target changed to `/root/hostpanel`.
+  - Systemd service template uses `PANEL_DIR=/root/hostpanel` variable with note that it follows the clone location.
+  - `sudo` removed (running as root on production).
+  - `npm run build` simplified (workspace flags not needed from repo root).
+  - Uninstall command updated to `/root/hostpanel`.
+- **`docs/13-launch-checklist.md`**:
+  - Test counts updated to 23 files / 121 tests (×3 occurrences).
+  - Upgrade doc item marked ✅ with caveats (paths fixed; staging test remains manual).
+
+### Validation performed
+
+No code changes — doc changes only. Tests unchanged.
+
+```bash
+# Confirmed current test suite on production server (pre-commit):
+# 23 files / 121 tests / 0 failures
+# Build: passed
+# Service: active
+# /healthz: {"ok":true,...}
+# SSH password auth: passwordauthentication no
+```
+
+### Commit
+
+See next commit for hash.
