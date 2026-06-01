@@ -93,4 +93,31 @@ describe('production health and readiness checks', () => {
       process.env.NODE_ENV = prev;
     }
   });
+
+  it('warns in production readiness when SSH password authentication is enabled', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    process.env.NODE_ENV = 'production';
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication yes\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+
+    await import('../background-jobs');
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(body.checks.security.warnings).toEqual(
+        expect.arrayContaining([expect.stringMatching(/SSH password authentication is enabled/i)])
+      );
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+    }
+  });
 });

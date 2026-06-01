@@ -477,3 +477,39 @@ No code changes — doc changes only. Tests unchanged.
 ### Commit
 
 See next commit for hash.
+
+---
+
+## 2026-06-01 — Readiness advisory for SSH password authentication
+
+### Risk addressed
+
+Production launch verification already requires key-only SSH, but `/api/health/readiness` only surfaced admin 2FA security advisories. If a future package update or manual config drift re-enabled SSH password login, monitoring would not have an application-level warning.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production readiness now checks effective sshd password-authentication state and appends a non-blocking security warning when password login is enabled.
+  - Uses `sshd -T` for the live effective config in production.
+  - Supports `SSHD_CONFIG_FILE` for deterministic tests without touching host SSH config.
+  - Falls back to `/etc/ssh/sshd_config` parsing if `sshd -T` is unavailable.
+- **`server/src/routes/health.integration.test.ts`** — added regression coverage for a production readiness warning when `PasswordAuthentication yes` is detected.
+
+### Verification performed
+
+```bash
+# TDD cycle — RED
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "warns in production readiness when SSH password authentication is enabled"
+# → failed as expected: only the existing 2FA warning was returned
+
+# GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "warns in production readiness when SSH password authentication is enabled"
+# → passed
+
+# Full suite/build
+npm run test --workspace=server   # 23 files / 122 tests passed
+npm run build                     # passed (client + server)
+```
+
+### Follow-up
+
+Continue final production validation and runbook polish. Admin 2FA enrollment remains a manual Marcos action until he logs into `/admin-users` and enables TOTP.

@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { spawnSync } from 'child_process';
+import { readFileSync } from 'fs';
 import os from 'os';
 import si from 'systeminformation';
 import db from '../db';
@@ -25,6 +27,32 @@ function recentFailedJobs(hours = 24) {
     FROM background_jobs
     WHERE status='failed' AND datetime(COALESCE(completed_at, updated_at, created_at)) >= datetime('now', ?)
     ORDER BY id DESC LIMIT 10`).all(`-${hours} hours`) as any[];
+}
+
+function passwordAuthenticationEnabledFrom(text: string) {
+  const directives = text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith('#'));
+  const passwordAuth = directives
+    .map(line => line.match(/^passwordauthentication\s+(yes|no)\b/i)?.[1]?.toLowerCase())
+    .filter(Boolean)
+    .pop();
+  return passwordAuth === 'yes';
+}
+
+function sshPasswordAuthenticationEnabled() {
+  const configuredFile = process.env.SSHD_CONFIG_FILE;
+  if (configuredFile) {
+    return passwordAuthenticationEnabledFrom(readFileSync(configuredFile, 'utf8'));
+  }
+
+  const effective = spawnSync('sshd', ['-T'], { encoding: 'utf8', timeout: 5000 });
+  if (effective.status === 0 && effective.stdout) {
+    return passwordAuthenticationEnabledFrom(effective.stdout);
+  }
+
+  return passwordAuthenticationEnabledFrom(readFileSync('/etc/ssh/sshd_config', 'utf8'));
 }
 
 async function buildReadiness() {
@@ -67,6 +95,9 @@ async function buildReadiness() {
       const anyTotp = db.prepare('SELECT COUNT(*) AS c FROM admin_users WHERE totp_enabled = 1').get() as { c: number };
       if (!anyTotp || anyTotp.c === 0) {
         warnings.push('No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.');
+      }
+      if (sshPasswordAuthenticationEnabled()) {
+        warnings.push('SSH password authentication is enabled. Disable PasswordAuthentication and use key-only SSH for production access.');
       }
       checks.security = { warnings };
     } catch (err: any) {
