@@ -10,6 +10,7 @@ const router = Router();
 
 const STARTED_AT = new Date().toISOString();
 const SERVICE = 'hostpanel';
+const REQUIRED_SERVICES = (process.env.READINESS_REQUIRED_SERVICES || 'hostpanel,httpd,mariadb').split(',').map(s => s.trim()).filter(Boolean);
 
 function version() {
   try {
@@ -55,6 +56,12 @@ function sshPasswordAuthenticationEnabled() {
   return passwordAuthenticationEnabledFrom(readFileSync('/etc/ssh/sshd_config', 'utf8'));
 }
 
+function serviceActive(name: string) {
+  const result = spawnSync('systemctl', ['is-active', name], { encoding: 'utf8', timeout: 5000 });
+  const status = String(result.stdout || '').trim() || (result.status === 0 ? 'active' : 'unknown');
+  return { name, active: result.status === 0 && status === 'active', status };
+}
+
 async function buildReadiness() {
   const checks: any = {};
   try {
@@ -86,6 +93,15 @@ async function buildReadiness() {
     checks.recentFailedJobs = { ok: failures.length === 0, failures };
   } catch (err: any) {
     checks.recentFailedJobs = { ok: false, error: err.message, failures: [] };
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const services = REQUIRED_SERVICES.map(serviceActive);
+      checks.services = { ok: services.every(s => s.active), services };
+    } catch (err: any) {
+      checks.services = { ok: false, error: err.message, services: [] };
+    }
   }
 
   // Security readiness: TOTP is advisory until enabled manually; password SSH is launch-blocking.

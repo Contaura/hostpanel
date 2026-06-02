@@ -123,4 +123,36 @@ describe('production health and readiness checks', () => {
       else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
     }
   });
+
+  it('blocks production readiness when a required runtime service is inactive', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    await import('../background-jobs');
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        if (cmd === 'systemctl' && args[0] === 'is-active' && args[1] === 'hostpanel') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'systemctl' && args[0] === 'is-active' && args[1] === 'httpd') return { status: 3, stdout: 'inactive\n' };
+        if (cmd === 'systemctl' && args[0] === 'is-active' && args[1] === 'mariadb') return { status: 0, stdout: 'active\n' };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.ok).toBe(false);
+      expect(body.checks.services).toMatchObject({ ok: false });
+      expect(body.checks.services.services).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'httpd', active: false })])
+      );
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+    }
+  });
 });
