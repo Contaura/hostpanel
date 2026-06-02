@@ -196,4 +196,26 @@ describe('alerts route — webhook dispatch on threshold breach', () => {
       expect.objectContaining({ severity: 'critical' }),
     );
   });
+
+  it('rate limits webhook dispatches for repeated threshold breaches while still returning current alerts', async () => {
+    const si = (await import('systeminformation')).default as any;
+    si.currentLoad.mockResolvedValue({ currentLoad: 96 });
+    si.mem.mockResolvedValue({ used: 1e9, total: 8e9 });
+    si.fsSize.mockResolvedValue([{ mount: '/', use: 30, size: 100e9, used: 30e9 }]);
+
+    const { dispatchNotification } = await import('./notifications');
+
+    const db = (await import('../db')).default;
+    db.prepare('INSERT INTO alert_rules (metric, threshold, notify_email, enabled) VALUES (?, ?, ?, 1)').run('cpu', 80, '');
+
+    const server = await buildApp(); closeServer = server.close;
+    const first = await fetch(`${server.url}/api/alerts/current`);
+    const second = await fetch(`${server.url}/api/alerts/current`);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((await first.json()).alerts).toHaveLength(1);
+    expect((await second.json()).alerts).toHaveLength(1);
+    expect(dispatchNotification).toHaveBeenCalledTimes(1);
+  });
 });
