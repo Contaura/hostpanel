@@ -6,6 +6,7 @@ import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { AuthRequest } from '../middleware/auth';
 import { runFile } from '../utils/process-runner';
+import { createBackgroundJob } from '../background-jobs';
 
 const router = Router();
 
@@ -104,7 +105,7 @@ async function downloadToFile(url: string, dest: string): Promise<void> {
 }
 
 router.post('/install', async (req: AuthRequest, res: Response) => {
-  const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail } = req.body;
+  const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail, async: isAsync } = req.body;
 
   if (!script || !SCRIPTS[script]) {
     res.status(400).json({ error: 'Unknown script' });
@@ -130,7 +131,7 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
   const installPath = path.join(WEBROOT, domain, 'public_html');
   const meta = SCRIPTS[script];
 
-  try {
+  const doInstall = async () => {
     await fs.mkdir(installPath, { recursive: true });
 
     if (meta.url === 'composer') {
@@ -218,7 +219,23 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
     try { await runFile('find', [installPath, '-type', 'd', '-exec', 'chmod', '755', '{}', '+']); } catch {}
     try { await runFile('find', [installPath, '-type', 'f', '-exec', 'chmod', '644', '{}', '+']); } catch {}
 
-    res.json({ message: `${meta.name} installed at ${installPath}`, url: `http://${domain}` });
+    return { message: `${meta.name} installed at ${installPath}`, url: `http://${domain}`, installPath, script };
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'script.install', resource: `${script}:${domain}`, createdBy: req.user?.username }, async (ctx) => {
+      ctx.progress(10, `Installing ${meta.name} for ${domain}`);
+      const result = await doInstall();
+      ctx.progress(90, `${meta.name} installed for ${domain}`);
+      return result;
+    });
+    res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+    return;
+  }
+
+  try {
+    const result = await doInstall();
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

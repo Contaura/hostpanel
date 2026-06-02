@@ -196,6 +196,47 @@ describe('app staging/promote background jobs', () => {
     db.prepare('DELETE FROM app_staging WHERE app_name=?').run('testapp');
   });
 
+  it('enqueues script installation as a background job and reports completion', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const tmp = await import('fs/promises').then(fs => fs.mkdtemp('/tmp/hostpanel-script-job-'));
+    process.env.WEBROOT = tmp;
+    vi.resetModules();
+
+    const scripts = (await import('./scripts')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/scripts', scripts);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const res = await fetch(`${server.url}/api/scripts/install`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ script: 'laravel', domain: 'async-install.example.com', async: true }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('script.install');
+    expect(done.result.url).toBe('http://async-install.example.com');
+    expect(done.result.installPath).toContain('async-install.example.com/public_html');
+    expect(runFileMock).toHaveBeenCalledWith('composer', expect.arrayContaining(['create-project', 'laravel/laravel']), expect.objectContaining({ timeout: 300000 }));
+
+    await import('fs/promises').then(fs => fs.rm(tmp, { recursive: true, force: true }));
+    delete process.env.WEBROOT;
+  });
+
   it('enqueues app promote (rsync + pm2 restart) as a background job', async () => {
     runFileMock.mockReset();
     runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
