@@ -33,6 +33,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] Web terminal opens audit log row on session start (**verified** by terminal.test.ts)
 - [x] SSRF protection on webhook target URLs (`assertHttpTargetAllowed()` in safe-target.ts — **verified** by safe-target.test.ts)
 - [x] phpMyAdmin Signon validation endpoint (`/api/phpmyadmin/validate`) returns correct status (**verified** in earlier hardening pass)
+- [x] Production readiness fails closed if SSH password authentication is re-enabled (`/api/health/readiness` returns 503 with `checks.security.ok=false` — **verified 2026-06-02** by health integration test)
 - [x] Security headers (X-Content-Type-Options, X-Frame-Options, HSTS) emitted by Apache (**verified 2026-05-28**: present in `zz-hostpanel-headers.conf` and confirmed via `curl -I`)
 - [x] Content-Security-Policy header emitted by Apache (**added 2026-05-28**: `zz-hostpanel-headers.conf` updated — see below)
 

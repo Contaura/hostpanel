@@ -513,3 +513,36 @@ npm run build                     # passed (client + server)
 ### Follow-up
 
 Continue final production validation and runbook polish. Admin 2FA enrollment remains a manual Marcos action until he logs into `/admin-users` and enables TOTP.
+
+---
+
+## 2026-06-02 — Launch-blocking readiness failure for SSH password authentication
+
+### Risk addressed
+
+The prior readiness pass exposed `PasswordAuthentication yes` as a warning. For production launch, key-only SSH is a hard requirement, not an advisory. If sshd config drift re-enables password login, the readiness endpoint should fail so monitoring and launch checks block immediately.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production `checks.security` now includes `{ ok, warnings, failures }`.
+  - Missing admin TOTP remains a non-blocking warning because enrollment requires Marcos's manual UI action.
+  - Enabled SSH password authentication is now a blocking failure that makes `/api/health/readiness` return HTTP 503.
+  - Readiness-check errors while evaluating security state also fail closed.
+- **`server/src/routes/health.integration.test.ts`** — updated the SSH-password-auth regression to require HTTP 503, `body.ok=false`, `checks.security.ok=false`, and an explicit SSH password-auth failure message.
+
+### Verification performed
+
+```bash
+# TDD RED — new expectation failed against warning-only implementation
+npm run test --workspace=server -- health.integration
+# → failed as expected: expected 503, received 200
+
+# GREEN + full regression/build
+npm run test --workspace=server -- health.integration  # 23 files / 124 tests passed
+npm run test --workspace=server                       # 23 files / 124 tests passed
+npm run build                                         # passed (server + client)
+```
+
+### Follow-up
+
+Continue final production validation and runbook polish. Remaining launch blockers are manual operational items: external uptime monitor, off-server/nightly backup configuration, notification webhook, final critical-alert check, admin TOTP enrollment, emergency 2FA bypass test, and payment webhook secret validation if payments are live.

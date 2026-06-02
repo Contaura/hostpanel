@@ -88,20 +88,21 @@ async function buildReadiness() {
     checks.recentFailedJobs = { ok: false, error: err.message, failures: [] };
   }
 
-  // Security advisory (non-blocking): warn if no admin has 2FA enabled in production
+  // Security readiness: TOTP is advisory until enabled manually; password SSH is launch-blocking.
   if (process.env.NODE_ENV === 'production') {
     try {
       const warnings: string[] = [];
+      const failures: string[] = [];
       const anyTotp = db.prepare('SELECT COUNT(*) AS c FROM admin_users WHERE totp_enabled = 1').get() as { c: number };
       if (!anyTotp || anyTotp.c === 0) {
         warnings.push('No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.');
       }
       if (sshPasswordAuthenticationEnabled()) {
-        warnings.push('SSH password authentication is enabled. Disable PasswordAuthentication and use key-only SSH for production access.');
+        failures.push('SSH password authentication is enabled. Disable PasswordAuthentication and use key-only SSH for production access.');
       }
-      checks.security = { warnings };
+      checks.security = { ok: failures.length === 0, warnings, failures };
     } catch (err: any) {
-      checks.security = { warnings: [], error: err.message };
+      checks.security = { ok: false, warnings: [], failures: [], error: err.message };
     }
   }
 

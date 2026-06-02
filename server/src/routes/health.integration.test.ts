@@ -94,7 +94,7 @@ describe('production health and readiness checks', () => {
     }
   });
 
-  it('warns in production readiness when SSH password authentication is enabled', async () => {
+  it('blocks production readiness when SSH password authentication is enabled', async () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     process.env.NODE_ENV = 'production';
@@ -110,7 +110,10 @@ describe('production health and readiness checks', () => {
     try {
       const res = await fetch(`${server.url}/api/health/readiness`);
       const body = await res.json();
-      expect(body.checks.security.warnings).toEqual(
+      expect(res.status).toBe(503);
+      expect(body.ok).toBe(false);
+      expect(body.checks.security.ok).toBe(false);
+      expect(body.checks.security.failures).toEqual(
         expect.arrayContaining([expect.stringMatching(/SSH password authentication is enabled/i)])
       );
     } finally {
