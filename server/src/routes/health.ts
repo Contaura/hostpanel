@@ -5,6 +5,7 @@ import os from 'os';
 import si from 'systeminformation';
 import db from '../db';
 import '../background-jobs';
+import { getSelfHealthWatchdogState } from '../utils/self-health-watchdog';
 
 const router = Router();
 
@@ -135,7 +136,7 @@ async function buildReadiness() {
       if (enabledAlertRuleCount === 0) {
         warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
       }
-      checks.monitoring = { ok: true, activeWebhookCount, enabledAlertRuleCount, warnings };
+      checks.monitoring = { ok: true, activeWebhookCount, enabledAlertRuleCount, warnings, selfHealthWatchdog: getSelfHealthWatchdogState() };
     } catch (err: any) {
       checks.monitoring = { ok: true, activeWebhookCount: null, warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
     }

@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Self-health watchdog function under test — does not exist yet (RED)
-import { startSelfHealthWatchdog } from './self-health-watchdog';
+import { getSelfHealthWatchdogState, startSelfHealthWatchdog } from './self-health-watchdog';
 
 describe('startSelfHealthWatchdog', () => {
   let dispatchMock: ReturnType<typeof vi.fn>;
@@ -169,5 +169,41 @@ describe('startSelfHealthWatchdog', () => {
       error: expect.stringContaining('ECONNREFUSED'),
     }));
     stop();
+  });
+
+  it('records the latest watchdog status for readiness visibility', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 503 })
+      .mockResolvedValueOnce({ ok: true, status: 200 });
+
+    const stop = startSelfHealthWatchdog({
+      url: 'http://localhost:3001/healthz',
+      intervalMs: 1000,
+      failureThreshold: 3,
+      dispatch: dispatchMock,
+      fetch: fetchMock,
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getSelfHealthWatchdogState()).toMatchObject({
+      url: 'http://localhost:3001/healthz',
+      running: true,
+      lastOk: false,
+      lastStatus: 503,
+      consecutiveFailures: 1,
+      alertDispatched: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(getSelfHealthWatchdogState()).toMatchObject({
+      running: true,
+      lastOk: true,
+      lastStatus: 200,
+      consecutiveFailures: 0,
+      alertDispatched: false,
+    });
+
+    stop();
+    expect(getSelfHealthWatchdogState()).toMatchObject({ running: false });
   });
 });

@@ -25,6 +25,32 @@ export interface SelfHealthWatchdogOptions {
   fetch?: (url: string) => Promise<{ ok: boolean; status: number }>;
 }
 
+export interface SelfHealthWatchdogState {
+  url: string | null;
+  running: boolean;
+  lastOk: boolean | null;
+  lastStatus: number | null;
+  lastError: string | null;
+  lastCheckedAt: string | null;
+  consecutiveFailures: number;
+  alertDispatched: boolean;
+}
+
+const watchdogState: SelfHealthWatchdogState = {
+  url: null,
+  running: false,
+  lastOk: null,
+  lastStatus: null,
+  lastError: null,
+  lastCheckedAt: null,
+  consecutiveFailures: 0,
+  alertDispatched: false,
+};
+
+export function getSelfHealthWatchdogState(): SelfHealthWatchdogState {
+  return { ...watchdogState };
+}
+
 export function startSelfHealthWatchdog(opts: SelfHealthWatchdogOptions): () => void {
   const {
     url,
@@ -40,12 +66,25 @@ export function startSelfHealthWatchdog(opts: SelfHealthWatchdogOptions): () => 
   let consecutiveFailures = 0;
   let dispatched = false;
 
+  Object.assign(watchdogState, {
+    url,
+    running: true,
+    lastOk: null,
+    lastStatus: null,
+    lastError: null,
+    lastCheckedAt: null,
+    consecutiveFailures,
+    alertDispatched: dispatched,
+  });
+
   const check = async () => {
     let ok = false;
+    let status: number | null = null;
     let errorMsg: string | undefined;
     try {
       const res = await fetchFn(url);
       ok = res.ok;
+      status = res.status;
     } catch (err: unknown) {
       errorMsg = err instanceof Error ? err.message : String(err);
       ok = false;
@@ -67,9 +106,23 @@ export function startSelfHealthWatchdog(opts: SelfHealthWatchdogOptions): () => 
         void dispatch('system.healthz_down', payload).catch(() => {});
       }
     }
+
+    Object.assign(watchdogState, {
+      url,
+      running: true,
+      lastOk: ok,
+      lastStatus: status,
+      lastError: errorMsg || null,
+      lastCheckedAt: new Date().toISOString(),
+      consecutiveFailures,
+      alertDispatched: dispatched,
+    });
   };
 
   const timer = setInterval(() => { void check(); }, intervalMs);
 
-  return () => clearInterval(timer);
+  return () => {
+    clearInterval(timer);
+    watchdogState.running = false;
+  };
 }
