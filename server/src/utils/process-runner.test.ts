@@ -28,4 +28,12 @@ describe('process-runner', () => {
       expect.any(Function),
     );
   });
+
+  it('captures stderr from the native execFile callback shape on successful commands', async () => {
+    const execFile = vi.fn((_cmd, _args, _opts, cb) => cb(null, 'Syntax OK\n', 'AH00671 overlap warning\n'));
+    await expect(runFile('apachectl', ['configtest'], { execFile })).resolves.toEqual({
+      stdout: 'Syntax OK\n',
+      stderr: 'AH00671 overlap warning\n',
+    });
+  });
 });

@@ -1,6 +1,6 @@
 import { execFile as nodeExecFile } from 'child_process';
 
-export type ExecFileCallback = (error: NodeJS.ErrnoException | null, result: { stdout: string; stderr: string }) => void;
+export type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdoutOrResult: string | { stdout: string; stderr: string }, stderr?: string) => void;
 export type ExecFileLike = (
   command: string,
   args: readonly string[],
@@ -19,7 +19,10 @@ export interface RunFileOptions {
 export function runFile(command: string, args: string[], options: RunFileOptions = {}): Promise<{ stdout: string; stderr: string }> {
   const { execFile = nodeExecFile as unknown as ExecFileLike, ...execOptions } = options;
   return new Promise((resolve, reject) => {
-    execFile(command, args, { ...execOptions, shell: false }, (error, result) => {
+    execFile(command, args, { ...execOptions, shell: false }, (error, stdoutOrResult, stderr = '') => {
+      const result: { stdout: string; stderr: string } = typeof stdoutOrResult === 'string'
+        ? { stdout: stdoutOrResult, stderr: String(stderr || '') }
+        : stdoutOrResult;
       if (error) {
         Object.assign(error, result);
         reject(error);
