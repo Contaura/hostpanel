@@ -122,6 +122,19 @@ async function buildReadiness() {
     }
   }
 
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS c FROM notification_webhooks WHERE enabled = 1').get() as { c: number };
+      const activeWebhookCount = Number(row?.c || 0);
+      const warnings = activeWebhookCount === 0
+        ? ['No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.']
+        : [];
+      checks.monitoring = { ok: true, activeWebhookCount, warnings };
+    } catch (err: any) {
+      checks.monitoring = { ok: true, activeWebhookCount: null, warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
+    }
+  }
+
   const ok = Object.values(checks).every((c: any) => c.ok !== false);
   return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), checks };
 }

@@ -31,7 +31,7 @@ All notable changes to HostPanel are documented in this file.
 - Completed shell-execution hardening for the remaining legacy route modules (`node-apps`, `resource-limits`, `logs`, and `cache`) by replacing shell pipelines with `runFile` argv calls or Node primitives.
 - Expanded team-subaccount regression coverage for account, file, and database namespace scoping.
 - Added a centralized background jobs API (`/api/jobs`) with persisted status, progress, result/error, and structured logs; backup creation now has Backup Manager UI polling, and backup restore, transfer execution, DNS sync, WebDAV provision/reload, and plugin install/rollback can enqueue asynchronous jobs.
-- Added production health endpoints: public `/healthz` liveness plus authenticated `/api/health/readiness` checks for database, disk, memory, and recent failed background jobs.
+- Added production health endpoints: public `/healthz` liveness plus authenticated `/api/health/readiness` checks for database, disk, memory, recent failed background jobs, required runtime services, key-only SSH, and notification webhook monitoring advisory.
 - Added phpMyAdmin Signon field validation endpoint that checks managed Apache alias/config, bridge PHP syntax, httpd state, token directory presence, and avoids returning token payloads.
 - Added disaster-recovery restore drill automation for backup archives, including asynchronous `/api/backup/drill/:name` jobs and persisted JSON verification evidence.
 
