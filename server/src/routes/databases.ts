@@ -346,7 +346,7 @@ router.get('/phpmyadmin/validation', enforceResellerPrivilege('phpmyadmin'), asy
     signonBridge: bridge.includes('PMA_single_signon_user') && bridge.includes('PMA_single_signon_password') && bridge.includes(`index.php?server=${PMA_SSO_SERVER_ID}`),
     signonConfig: pmaConfig.includes("$cfg['Servers'][$i]['auth_type'] = 'signon'") && pmaConfig.includes("$cfg['Servers'][$i]['SignonSession'] = 'HOSTPANEL_PMA'") && pmaConfig.includes(`$cfg['Servers'][$i]['SignonURL'] = ${phpStringLiteral(`${pmaBaseUrl()}/hostpanel-signon.php`)}`),
     phpSyntax: phpSyntax.ok,
-    apacheConfig: apacheSyntax.ok && !/syntax error/i.test(apacheSyntax.output),
+    apacheConfig: apacheSyntax.ok && !/syntax error|AH00671|overlaps an earlier Alias|will probably never match/i.test(apacheSyntax.output),
     httpdActive: httpd.ok && httpd.output.includes('active'),
     tokenDirectory,
   };

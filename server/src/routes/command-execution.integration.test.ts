@@ -562,6 +562,31 @@ describe('high-risk route command execution integration', () => {
     expect(body.ready).toBe(true);
   });
 
+  it('flags phpMyAdmin validation as not ready when Apache reports overlapping alias warnings', async () => {
+    const pmaDir = path.join(tmp, 'phpMyAdmin');
+    process.env.PHPMYADMIN_PATHS = pmaDir;
+    process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
+    process.env.PHPMYADMIN_CONFIG_FILE = path.join(tmp, 'phpMyAdmin', 'config.inc.php');
+    process.env.PHPMYADMIN_SSO_TOKEN_DIR = path.join(tmp, 'tokens');
+    process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
+    await fs.mkdir(pmaDir, { recursive: true });
+    const server = await appFor('/api/databases', './databases');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+    await fetch(`${server.url}/api/databases/phpmyadmin/install`, { method: 'POST' });
+    runFileMock
+      .mockResolvedValueOnce('No syntax errors detected' as any)
+      .mockResolvedValueOnce({ stdout: 'Syntax OK\n', stderr: 'AH00671: The Alias directive in /etc/httpd/conf.d/hostpanel-phpmyadmin.conf will probably never match because it overlaps an earlier Alias.\n' })
+      .mockResolvedValueOnce({ stdout: 'active\n', stderr: '' });
+
+    const res = await fetch(`${server.url}/api/databases/phpmyadmin/validation`);
+    const body: any = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.checks.apacheConfig).toBe(false);
+    expect(body.ready).toBe(false);
+  });
+
   it('removes promisify(exec) from hardened route sources', async () => {
     for (const file of ['reseller.ts', 'logs.ts', 'cache.ts', 'resource-limits.ts', 'node-apps.ts']) {
       const src = await fs.readFile(path.resolve(__dirname, file), 'utf8');
