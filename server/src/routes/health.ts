@@ -125,11 +125,17 @@ async function buildReadiness() {
   if (process.env.NODE_ENV === 'production') {
     try {
       const row = db.prepare('SELECT COUNT(*) AS c FROM notification_webhooks WHERE enabled = 1').get() as { c: number };
+      const alertRuleRow = db.prepare('SELECT COUNT(*) AS c FROM alert_rules WHERE enabled = 1').get() as { c: number };
       const activeWebhookCount = Number(row?.c || 0);
-      const warnings = activeWebhookCount === 0
-        ? ['No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.']
-        : [];
-      checks.monitoring = { ok: true, activeWebhookCount, warnings };
+      const enabledAlertRuleCount = Number(alertRuleRow?.c || 0);
+      const warnings: string[] = [];
+      if (activeWebhookCount === 0) {
+        warnings.push('No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.');
+      }
+      if (enabledAlertRuleCount === 0) {
+        warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
+      }
+      checks.monitoring = { ok: true, activeWebhookCount, enabledAlertRuleCount, warnings };
     } catch (err: any) {
       checks.monitoring = { ok: true, activeWebhookCount: null, warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
     }

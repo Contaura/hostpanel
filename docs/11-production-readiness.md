@@ -546,3 +546,26 @@ npm run build                                         # passed (server + client)
 ### Follow-up
 
 Continue final production validation and runbook polish. Remaining launch blockers are manual operational items: external uptime monitor, off-server/nightly backup configuration, notification webhook, final critical-alert check, admin TOTP enrollment, emergency 2FA bypass test, and payment webhook secret validation if payments are live.
+
+## 2026-06-03 6-hour slice — monitoring alert-rule readiness advisory
+
+### Risk addressed
+
+Production monitoring should not only confirm that alerts can leave the panel; it should also surface whether any threshold rules are enabled. Without at least one enabled CPU, memory, disk, or load rule, the alerting channel can be configured but never fire for resource exhaustion.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production `/api/health/readiness` now reports `checks.monitoring.enabledAlertRuleCount` and adds a warning when zero alert rules are enabled.
+- **`server/src/routes/health.integration.test.ts`** — added a TDD regression proving readiness remains HTTP 200/advisory-only, but exposes `enabledAlertRuleCount: 0` and an explicit alert-rule warning when webhooks exist and no alert rules are enabled.
+
+### Verification performed
+
+```bash
+# TDD RED — new test failed before implementation because enabledAlertRuleCount was absent
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "no system alert rule"
+# → failed as expected: expected enabledAlertRuleCount: 0, property absent
+
+# GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "no system alert rule"
+# → passed
+```

@@ -79,6 +79,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 ## 5. Monitoring & Alerting
 
 - [ ] Webhook notification channel configured (Slack / Discord / email) in panel Settings (**manual step** — requires Marcos to set a webhook URL in Settings; production readiness now surfaces `checks.monitoring.warnings` until at least one notification webhook is enabled)
+- [x] Production readiness surfaces missing enabled alert rules via `checks.monitoring.enabledAlertRuleCount` and an advisory warning (**verified 2026-06-03** — TDD health readiness regression)
 - [x] Alerts fire on: background job failures, watchdog health failures, cert expiry warnings (**verified** — alerting routes and watchdog implemented)
 - [x] Audit log retains all admin actions in `audit_logs` table (316 entries in DB — **verified 2026-05-28**)
 - [x] Security scan alerts are routed to the notification channel (**verified** — scanner job alerts implemented)
