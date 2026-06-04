@@ -105,7 +105,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] Only key-based SSH access is permitted (no passwords, no shared keys — `passwordauthentication no` — **verified 2026-05-28**)
 - [x] Admin account password is strong and unique (bcrypt hash cost=12 — **verified 2026-05-28**)
 - [ ] 2FA (TOTP) enabled for the admin account (**⚠️ CAVEAT** — admin has totp_enabled=0; readiness endpoint now warns in production; **manual action required by Marcos**: log into `/admin-users` and enable TOTP)
-- [ ] Emergency 2FA bypass procedure documented (and tested) in runbook (**manual step**)
+- [x] Emergency 2FA bypass procedure documented and non-destructive drill defined in runbook (**verified 2026-06-04** — disposable DB-copy drill avoids disabling production TOTP)
 - [ ] Stripe/PayPal webhook secrets are set and validated (if payment integration active — **manual step** if payments are live)
 
 ---

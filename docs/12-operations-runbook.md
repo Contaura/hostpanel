@@ -311,6 +311,48 @@ firewall-cmd --list-all
 iptables -L INPUT -n --line-numbers | head -30
 ```
 
+### Emergency admin 2FA bypass (break-glass)
+
+Use this only when every admin is locked out of TOTP and Marcos has approved the break-glass action. The procedure requires existing root key-based SSH; do **not** enable SSH password authentication and do **not** store one-time recovery material in the repo.
+
+1. Capture the current state and make a timestamped database backup:
+   ```bash
+   cd /root/hostpanel
+   ts="$(date -u +%Y%m%d%H%M%S)"
+   sqlite3 data/hostpanel.db "SELECT id, username, email, totp_enabled FROM admin_users ORDER BY id;"
+   cp -a data/hostpanel.db "/root/hostpanel-backup-before-2fa-bypass-${ts}.db"
+   ```
+2. Disable TOTP for exactly one named admin account, then restart HostPanel:
+   ```bash
+   admin_user='admin'  # replace with the locked-out admin username
+   sqlite3 data/hostpanel.db \
+     "UPDATE admin_users SET totp_enabled=0, totp_secret=NULL, totp_backup_codes=NULL WHERE username='$admin_user'; SELECT changes();"
+   systemctl restart hostpanel
+   systemctl is-active hostpanel
+   curl -sf http://localhost:3001/healthz
+   ```
+   `SELECT changes()` must print `1`. If it prints `0`, stop and restore the pre-bypass database copy instead of making broader updates.
+3. Immediately have the admin log in, rotate the password if compromise is suspected, and re-enable TOTP from **Security → Two-Factor Authentication**.
+4. Verify readiness returns only the expected advisory until TOTP is re-enabled:
+   ```bash
+   curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:3001/api/health/readiness | jq '.checks.security'
+   ```
+5. Record the break-glass event in the incident ticket with the backup path, admin username, timestamps, and confirmation that TOTP was re-enabled. Remove any temporary DB copies after retention approval.
+
+#### Non-destructive bypass drill
+
+Run this after upgrades to prove the bypass SQL still matches the schema without changing production data:
+
+```bash
+cd /root/hostpanel
+tmp="$(mktemp /tmp/hostpanel-2fa-drill.XXXXXX.db)"
+cp -a data/hostpanel.db "$tmp"
+sqlite3 "$tmp" "UPDATE admin_users SET totp_enabled=0, totp_secret=NULL, totp_backup_codes=NULL WHERE id=(SELECT id FROM admin_users ORDER BY id LIMIT 1); SELECT changes();"
+rm -f "$tmp"
+```
+
+Expected result: `1` when at least one admin user exists. This verifies the emergency SQL against a disposable database copy only.
+
 ---
 
 ## 9. Monitoring & Alerting
