@@ -142,11 +142,14 @@ describe('production health and readiness checks', () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
     process.env.NODE_ENV = 'production';
     process.env.READINESS_REQUIRED_SERVICES = '';
     const sshdConfig = path.join(tmp, 'sshd_config');
     await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
     process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.DRILL_REPORT_DIR = path.join(tmp, 'empty-drills');
+    await fs.mkdir(process.env.DRILL_REPORT_DIR);
     vi.doMock('child_process', () => ({
       spawnSync: vi.fn((cmd: string, args: string[]) => {
         if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
@@ -176,6 +179,7 @@ describe('production health and readiness checks', () => {
       expect(body.launchBlockers).toEqual([
         { code: 'admin_2fa_missing', severity: 'manual', message: expect.stringMatching(/2FA/i) },
         { code: 'notification_webhook_missing', severity: 'manual', message: expect.stringMatching(/notification webhook/i) },
+        { code: 'dr_drill_evidence_missing', severity: 'manual', message: expect.stringMatching(/disaster-recovery restore drill/i) },
       ]);
     } finally {
       await server.close();
@@ -184,6 +188,8 @@ describe('production health and readiness checks', () => {
       else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
       if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
       else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
+      else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
     }
   });
 

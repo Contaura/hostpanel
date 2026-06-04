@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { spawnSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import os from 'os';
+import path from 'path';
 import si from 'systeminformation';
 import db from '../db';
 import '../background-jobs';
@@ -61,6 +62,21 @@ function serviceActive(name: string) {
   const result = spawnSync('systemctl', ['is-active', name], { encoding: 'utf8', timeout: 5000 });
   const status = String(result.stdout || '').trim() || (result.status === 0 ? 'active' : 'unknown');
   return { name, active: result.status === 0 && status === 'active', status };
+}
+
+function latestDrillReport() {
+  const dir = process.env.DRILL_REPORT_DIR || path.join(process.env.BACKUP_DIR || '/var/backups/hostpanel', 'drills');
+  if (!existsSync(dir)) return { dir, latest: null as null | { file: string; mtime: string } };
+  const reports = readdirSync(dir)
+    .filter(name => name.endsWith('.json'))
+    .map(name => {
+      const file = path.join(dir, name);
+      const st = statSync(file);
+      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString() };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const latest = reports[0];
+  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime } : null };
 }
 
 async function buildReadiness() {
@@ -144,6 +160,22 @@ async function buildReadiness() {
       checks.monitoring = { ok: true, activeWebhookCount, enabledAlertRuleCount, warnings, selfHealthWatchdog: getSelfHealthWatchdogState() };
     } catch (err: any) {
       checks.monitoring = { ok: true, activeWebhookCount: null, warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
+    }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const report = latestDrillReport();
+      if (!report.latest) {
+        launchBlockers.push({
+          code: 'dr_drill_evidence_missing',
+          severity: 'manual',
+          message: 'No disaster-recovery restore drill evidence was found. Run POST /api/backup/drill/:name and verify the persisted report before launch.',
+        });
+      }
+      checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir };
+    } catch (err: any) {
+      checks.disasterRecovery = { ok: true, latestDrillReport: null, warnings: [`Unable to inspect disaster-recovery drill evidence: ${err.message}`] };
     }
   }
 

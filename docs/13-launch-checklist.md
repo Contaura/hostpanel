@@ -50,7 +50,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [ ] Automated nightly database backup scheduled (cron or panel backup wizard — **manual step**)
 - [ ] Backup includes `.env`, DB, vhosts, DNS zones, SSL certs, email config (**manual step**)
 - [ ] Backup stored off-server (S3, B2, or equivalent — **manual step**)
-- [x] Restore procedure documented and tested via DR drill (`POST /api/backup/drill` — **verified** in DR drill automation pass)
+- [x] Restore procedure documented and tested via DR drill (`POST /api/backup/drill` — **verified** in DR drill automation pass; `/api/health/readiness` now surfaces `checks.disasterRecovery.latestDrillReport` and manual blocker `dr_drill_evidence_missing` until evidence exists)
 - [x] Disk usage alert configured (readiness endpoint returns 503 when ≥95% full — **verified** by health integration test)
 
 ---
