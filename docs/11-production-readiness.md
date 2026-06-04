@@ -569,3 +569,31 @@ npm run test --workspace=server -- src/routes/health.integration.test.ts -t "no 
 npm run test --workspace=server -- src/routes/health.integration.test.ts -t "no system alert rule"
 # → passed
 ```
+
+---
+
+## 2026-06-04 6-hour slice — machine-readable manual launch blockers
+
+### Risk addressed
+
+The launch checklist still has a few Marcos-owned/manual items (admin TOTP enrollment and outbound notification webhook setup). They were visible only as separate readiness warnings and checklist text, making it easy to miss them during automated launch gating.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production `/api/health/readiness` now includes a top-level `launchBlockers` array for manual launch gates that should be tracked before declaring production-ready without making liveness/readiness fail while the service is otherwise healthy.
+  - `admin_2fa_missing` is emitted when no admin has TOTP enabled.
+  - `notification_webhook_missing` is emitted when no enabled notification webhook exists.
+  - SSH password authentication remains a hard readiness failure, not a manual advisory.
+- **`server/src/routes/health.integration.test.ts`** — added a TDD regression proving the endpoint remains HTTP 200 when only manual launch blockers are present, while exposing both blocker codes in a stable response field.
+
+### Verification performed
+
+```bash
+# TDD RED — new expectation failed because launchBlockers was absent
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "summarizes manual production launch blockers"
+# → failed as expected: expected launchBlockers array, received undefined
+
+# GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "summarizes manual production launch blockers"
+# → passed
+```

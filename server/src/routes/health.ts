@@ -65,6 +65,7 @@ function serviceActive(name: string) {
 
 async function buildReadiness() {
   const checks: any = {};
+  const launchBlockers: Array<{ code: string; severity: 'manual'; message: string }> = [];
   try {
     const row = db.prepare('SELECT 1 AS ok').get() as any;
     checks.database = { ok: row?.ok === 1 };
@@ -112,7 +113,9 @@ async function buildReadiness() {
       const failures: string[] = [];
       const anyTotp = db.prepare('SELECT COUNT(*) AS c FROM admin_users WHERE totp_enabled = 1').get() as { c: number };
       if (!anyTotp || anyTotp.c === 0) {
-        warnings.push('No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.');
+        const message = 'No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.';
+        warnings.push(message);
+        launchBlockers.push({ code: 'admin_2fa_missing', severity: 'manual', message });
       }
       if (sshPasswordAuthenticationEnabled()) {
         failures.push('SSH password authentication is enabled. Disable PasswordAuthentication and use key-only SSH for production access.');
@@ -131,7 +134,9 @@ async function buildReadiness() {
       const enabledAlertRuleCount = Number(alertRuleRow?.c || 0);
       const warnings: string[] = [];
       if (activeWebhookCount === 0) {
-        warnings.push('No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.');
+        const message = 'No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.';
+        warnings.push(message);
+        launchBlockers.push({ code: 'notification_webhook_missing', severity: 'manual', message });
       }
       if (enabledAlertRuleCount === 0) {
         warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
@@ -143,7 +148,7 @@ async function buildReadiness() {
   }
 
   const ok = Object.values(checks).every((c: any) => c.ok !== false);
-  return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), checks };
+  return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), launchBlockers, checks };
 }
 
 router.get('/readiness', async (_req: Request, res: Response) => {
