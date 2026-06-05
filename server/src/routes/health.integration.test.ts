@@ -138,6 +138,70 @@ describe('production health and readiness checks', () => {
     }
   });
 
+  it('adds a manual launch blocker when the latest disaster-recovery drill evidence is stale', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevDrillMaxAgeDays = process.env.DRILL_REPORT_MAX_AGE_DAYS;
+    process.env.NODE_ENV = 'production';
+    process.env.READINESS_REQUIRED_SERVICES = '';
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
+    process.env.DRILL_REPORT_MAX_AGE_DAYS = '7';
+    await fs.mkdir(process.env.DRILL_REPORT_DIR);
+    const staleReport = path.join(process.env.DRILL_REPORT_DIR, 'stale-drill.json');
+    await fs.writeFile(staleReport, JSON.stringify({ ok: true }));
+    const staleDate = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await fs.utimes(staleReport, staleDate, staleDate);
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare('DELETE FROM notification_webhooks').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 1);
+    db.prepare("INSERT INTO notification_webhooks (name, url, type, events, enabled) VALUES (?, ?, ?, ?, ?)")
+      .run('ops', 'https://alerts.example.test/webhook', 'webhook', JSON.stringify(['system.disk_alert']), 1);
+    db.prepare("INSERT INTO alert_rules (metric, threshold, enabled) VALUES (?, ?, ?)")
+      .run('disk', 90, 1);
+
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.checks.disasterRecovery).toMatchObject({ ok: true, latestDrillReport: { file: staleReport }, maxAgeDays: 7 });
+      expect(body.launchBlockers).toEqual([
+        { code: 'dr_drill_evidence_stale', severity: 'manual', message: expect.stringMatching(/older than 7 days/i) },
+      ]);
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+      if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
+      else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
+      else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevDrillMaxAgeDays === undefined) delete process.env.DRILL_REPORT_MAX_AGE_DAYS;
+      else process.env.DRILL_REPORT_MAX_AGE_DAYS = prevDrillMaxAgeDays;
+    }
+  });
+
   it('summarizes manual production launch blockers without failing readiness', async () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;

@@ -609,19 +609,24 @@ The automated DR drill existed, but production readiness did not expose whether 
 ### Changes made
 
 - **`server/src/routes/health.ts`** — production `/api/health/readiness` now inspects the DR drill report directory (`DRILL_REPORT_DIR`, or `BACKUP_DIR/drills`, defaulting to `/var/backups/hostpanel/drills`).
-  - Adds `checks.disasterRecovery.latestDrillReport` and `reportDir` for launch verification.
+  - Adds `checks.disasterRecovery.latestDrillReport`, `reportDir`, `maxAgeDays`, and drill evidence age for launch verification.
   - Adds a manual `launchBlockers` entry with code `dr_drill_evidence_missing` when no JSON drill report exists.
+  - Adds a manual `launchBlockers` entry with code `dr_drill_evidence_stale` when the newest drill report is older than `DRILL_REPORT_MAX_AGE_DAYS` (default 7), forcing a current restore drill before launch.
   - Keeps readiness HTTP 200 when only this manual launch blocker is present, matching the existing manual-blocker model for admin 2FA and notification webhooks.
 - **`server/src/routes/health.integration.test.ts`** — extended the manual launch-blockers regression to require DR drill evidence visibility.
 
 ### Verification performed
 
 ```bash
-# TDD RED — new expectation failed because DR drill blocker was absent
-npm run test --workspace=server -- src/routes/health.integration.test.ts -t "summarizes manual production launch blockers"
-# → failed as expected: launchBlockers only contained admin_2fa_missing and notification_webhook_missing
+# TDD RED — new expectation failed because stale DR drill blocker/age fields were absent
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "adds a manual launch blocker when the latest disaster-recovery drill evidence is stale"
+# → failed as expected: checks.disasterRecovery did not include maxAgeDays and no stale launch blocker existed
 
 # GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "adds a manual launch blocker when the latest disaster-recovery drill evidence is stale"
+# → passed
+
+# Regression for missing evidence blocker
 npm run test --workspace=server -- src/routes/health.integration.test.ts -t "summarizes manual production launch blockers"
 # → passed
 ```

@@ -66,17 +66,22 @@ function serviceActive(name: string) {
 
 function latestDrillReport() {
   const dir = process.env.DRILL_REPORT_DIR || path.join(process.env.BACKUP_DIR || '/var/backups/hostpanel', 'drills');
-  if (!existsSync(dir)) return { dir, latest: null as null | { file: string; mtime: string } };
+  if (!existsSync(dir)) return { dir, latest: null as null | { file: string; mtime: string; ageDays: number }, maxAgeDays: drillReportMaxAgeDays() };
   const reports = readdirSync(dir)
     .filter(name => name.endsWith('.json'))
     .map(name => {
       const file = path.join(dir, name);
       const st = statSync(file);
-      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString() };
+      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString(), ageDays: Math.floor((Date.now() - st.mtimeMs) / (24 * 60 * 60 * 1000)) };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const latest = reports[0];
-  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime } : null };
+  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime, ageDays: latest.ageDays } : null, maxAgeDays: drillReportMaxAgeDays() };
+}
+
+function drillReportMaxAgeDays() {
+  const raw = Number(process.env.DRILL_REPORT_MAX_AGE_DAYS || 7);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 7;
 }
 
 async function buildReadiness() {
@@ -172,8 +177,14 @@ async function buildReadiness() {
           severity: 'manual',
           message: 'No disaster-recovery restore drill evidence was found. Run POST /api/backup/drill/:name and verify the persisted report before launch.',
         });
+      } else if (report.latest.ageDays > report.maxAgeDays) {
+        launchBlockers.push({
+          code: 'dr_drill_evidence_stale',
+          severity: 'manual',
+          message: `Latest disaster-recovery restore drill evidence is older than ${report.maxAgeDays} days. Re-run POST /api/backup/drill/:name against a current backup before launch.`,
+        });
       }
-      checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir };
+      checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir, maxAgeDays: report.maxAgeDays };
     } catch (err: any) {
       checks.disasterRecovery = { ok: true, latestDrillReport: null, warnings: [`Unable to inspect disaster-recovery drill evidence: ${err.message}`] };
     }
