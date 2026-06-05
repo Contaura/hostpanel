@@ -630,3 +630,32 @@ npm run test --workspace=server -- src/routes/health.integration.test.ts -t "add
 npm run test --workspace=server -- src/routes/health.integration.test.ts -t "summarizes manual production launch blockers"
 # → passed
 ```
+
+---
+
+## 2026-06-05 6-hour slice — critical alert launch-blocker automation
+
+### Risk addressed
+
+The launch checklist still required a manual panel/UI review for unresolved critical alerts. That manual-only gate could be skipped during final launch pressure, even though HostPanel already knows the enabled CPU, memory, and disk alert thresholds.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production `/api/health/readiness` now evaluates live enabled CPU/memory/disk alert rules and returns `checks.monitoring.criticalAlerts`.
+  - Critical alerts are defined as rule breaches at or above 95% for CPU, memory, or disk.
+  - Readiness fails closed when any critical alert is active.
+  - Adds a `launchBlockers` entry with code `critical_alerts_active` so launch reports have a stable machine-readable blocker.
+- **`server/src/routes/health.integration.test.ts`** — added TDD regression coverage for an active critical disk alert.
+- **`docs/13-launch-checklist.md`** — converted the unresolved-critical-alert checklist item from manual-only to automated readiness evidence.
+
+### Verification performed
+
+```bash
+# TDD RED — new expectation failed because checks.monitoring.criticalAlerts was absent
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "critical live alert"
+# → failed as expected: expected criticalAlerts array, received undefined
+
+# GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "critical live alert"
+# → passed
+```

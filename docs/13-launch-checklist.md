@@ -83,7 +83,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] Alerts fire on: background job failures, watchdog health failures, cert expiry warnings (**verified** — alerting routes and watchdog implemented)
 - [x] Audit log retains all admin actions in `audit_logs` table (316 entries in DB — **verified 2026-05-28**)
 - [x] Security scan alerts are routed to the notification channel (**verified** — scanner job alerts implemented)
-- [ ] No unresolved critical alerts in the panel UI at launch time (**manual step** — verify at launch time)
+- [x] No unresolved critical alerts in the panel UI at launch time (**automated guard added 2026-06-05** — `/api/health/readiness` now lists `checks.monitoring.criticalAlerts`, fails closed on active critical CPU/memory/disk alerts, and adds `critical_alerts_active` to `launchBlockers`)
 
 ---
 

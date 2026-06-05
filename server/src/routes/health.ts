@@ -84,6 +84,37 @@ function drillReportMaxAgeDays() {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 7;
 }
 
+async function currentCriticalAlerts() {
+  const [cpu, mem, disks] = await Promise.all([
+    si.currentLoad(),
+    si.mem(),
+    si.fsSize(),
+  ]);
+  const rules = db.prepare('SELECT * FROM alert_rules WHERE enabled=1').all() as any[];
+  const alerts: any[] = [];
+  const cpuPct = Math.round(Number(cpu.currentLoad));
+  const memPct = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
+
+  for (const rule of rules) {
+    const threshold = Number(rule.threshold || 80);
+    if (rule.metric === 'cpu' && cpuPct >= threshold && cpuPct >= 95) {
+      alerts.push({ metric: 'CPU', value: cpuPct, threshold, message: `CPU usage is ${cpuPct}%` });
+    }
+    if (rule.metric === 'memory' && memPct >= threshold && memPct >= 95) {
+      alerts.push({ metric: 'Memory', value: memPct, threshold, message: `Memory usage is ${memPct}%` });
+    }
+    if (rule.metric === 'disk') {
+      for (const disk of disks) {
+        const pct = Math.round(Number(disk.use));
+        if (pct >= threshold && pct >= 95) {
+          alerts.push({ metric: 'Disk', value: pct, threshold, mount: disk.mount, message: `Disk ${disk.mount} usage is ${pct}%` });
+        }
+      }
+    }
+  }
+  return alerts;
+}
+
 async function buildReadiness() {
   const checks: any = {};
   const launchBlockers: Array<{ code: string; severity: 'manual'; message: string }> = [];
@@ -153,6 +184,7 @@ async function buildReadiness() {
       const alertRuleRow = db.prepare('SELECT COUNT(*) AS c FROM alert_rules WHERE enabled = 1').get() as { c: number };
       const activeWebhookCount = Number(row?.c || 0);
       const enabledAlertRuleCount = Number(alertRuleRow?.c || 0);
+      const criticalAlerts = await currentCriticalAlerts();
       const warnings: string[] = [];
       if (activeWebhookCount === 0) {
         const message = 'No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.';
@@ -162,9 +194,14 @@ async function buildReadiness() {
       if (enabledAlertRuleCount === 0) {
         warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
       }
-      checks.monitoring = { ok: true, activeWebhookCount, enabledAlertRuleCount, warnings, selfHealthWatchdog: getSelfHealthWatchdogState() };
+      if (criticalAlerts.length > 0) {
+        const message = `${criticalAlerts.length} critical production alert${criticalAlerts.length === 1 ? '' : 's'} currently active. Resolve critical CPU, memory, or disk alerts before launch.`;
+        warnings.push(message);
+        launchBlockers.push({ code: 'critical_alerts_active', severity: 'manual', message });
+      }
+      checks.monitoring = { ok: criticalAlerts.length === 0, activeWebhookCount, enabledAlertRuleCount, criticalAlerts, warnings, selfHealthWatchdog: getSelfHealthWatchdogState() };
     } catch (err: any) {
-      checks.monitoring = { ok: true, activeWebhookCount: null, warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
+      checks.monitoring = { ok: true, activeWebhookCount: null, criticalAlerts: [], warnings: [`Unable to inspect notification webhook configuration: ${err.message}`] };
     }
   }
 
