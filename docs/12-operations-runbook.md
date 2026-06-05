@@ -31,9 +31,9 @@ curl -sf http://localhost:3001/healthz
 ### Readiness check (requires admin JWT, checks disk/memory/DB/failed jobs)
 
 ```bash
-TOKEN=$(grep JWT_SECRET /root/hostpanel/server/.env | cut -d= -f2-)
 # Obtain a JWT via /api/auth/login or use a pre-issued token
-curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/health/readiness
+TOKEN="<admin-jwt>"
+curl -sf -H "Authorization: Bearer EXAMPLE_JWT" http://localhost:3001/api/health/readiness
 # Expected 200: {"ok":true, "checks":{"database":{"ok":true},"disk":{...},"memory":{...},...}}
 # Expected 503: same structure, but ok=false with failing check details
 ```
@@ -41,7 +41,8 @@ curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/health/read
 ### Liveness endpoint (admin token, lightweight)
 
 ```bash
-curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:3001/api/health/live
+TOKEN="<admin-jwt>"
+curl -sf -H "Authorization: Bearer EXAMPLE_JWT" http://localhost:3001/api/health/live
 ```
 
 ### Systemd status
@@ -335,7 +336,8 @@ Use this only when every admin is locked out of TOTP and Marcos has approved the
 3. Immediately have the admin log in, rotate the password if compromise is suspected, and re-enable TOTP from **Security → Two-Factor Authentication**.
 4. Verify readiness returns only the expected advisory until TOTP is re-enabled:
    ```bash
-   curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" http://localhost:3001/api/health/readiness | jq '.checks.security'
+   TOKEN="<admin-jwt>"
+   curl -sf -H "Authorization: Bearer EXAMPLE_JWT" http://localhost:3001/api/health/readiness | jq ".checks.security"
    ```
 5. Record the break-glass event in the incident ticket with the backup path, admin username, timestamps, and confirmation that TOTP was re-enabled. Remove any temporary DB copies after retention approval.
 
