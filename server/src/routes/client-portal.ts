@@ -10,6 +10,7 @@ import mysql from 'mysql2/promise';
 import db from '../db';
 import { requireClientFeature } from './feature-lists';
 import { registerDkimKey } from '../utils/opendkim';
+import { createBackgroundJob } from '../background-jobs';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const speakeasy = require('speakeasy');
 import QRCode from 'qrcode';
@@ -1718,11 +1719,23 @@ router.post('/security-scan/:domain', clientAuth, async (req: Request, res: Resp
   // wrap clamscan's output in a try/catch so a non-zero exit (clamscan
   // returns 1 when it finds infections, 2 on error) is still reported
   // as a usable JSON response.
-  try {
+  const runScan = async () => {
     const { stdout, stderr } = await runFile('clamscan', ['-r', '--infected', '--no-summary', target], { timeout: 300000 }).catch((e: any) => ({ stdout: (e.stdout || '') as string, stderr: (e.stderr || '') as string }));
     const lines: string[] = (stdout + stderr).split('\n').filter(Boolean);
     const infected = lines.filter((l: string) => l.includes(': ') && !l.startsWith('LibClamAV')).map((l: string) => l.trim());
-    res.json({ scanned: target, infected_count: infected.length, infected });
+    return { scanned: target, infected_count: infected.length, infected };
+  };
+  if (req.body?.async) {
+    const jobId = createBackgroundJob({ type: 'portal.security_scan', resource: domain, metadata: { domain, target }, createdBy: `client:${(req as any).clientId}` }, async (ctx) => {
+      ctx.progress(10, `Scanning ${domain}`);
+      const result = await runScan();
+      ctx.progress(90, `Scan finished for ${domain}`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+  try {
+    res.json(await runScan());
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
