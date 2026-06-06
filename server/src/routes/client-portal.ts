@@ -1312,62 +1312,77 @@ router.get('/backups/:name/download', clientAuth, async (req: Request, res: Resp
 /* ── Scripts installer (WordPress for now) ──────────────────── */
 
 router.post('/scripts/install', clientAuth, async (req: Request, res: Response) => {
-  const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail } = req.body;
+  const { script, domain, dbName, dbUser, dbPass, siteTitle, adminUser, adminPass, adminEmail, async: isAsync } = req.body;
   if (script !== 'wordpress') return res.status(400).json({ error: 'Only wordpress is supported for client self-install right now' });
   if (!domain || !PORTAL_DOMAIN_RE.test(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!clientOwnsDomain((req as any).clientId, domain, teamAccountScope(req))) return res.status(403).json({ error: 'Not your domain' });
   if (!dbName || !dbUser || !dbPass) return res.status(400).json({ error: 'dbName, dbUser, dbPass required' });
   if (!clientPrefixOwner((req as any).clientId, dbName, teamAccountScope(req))) return res.status(403).json({ error: 'dbName must start with your account username' });
   if (!clientPrefixOwner((req as any).clientId, dbUser, teamAccountScope(req))) return res.status(403).json({ error: 'dbUser must start with your account username' });
+  if (adminEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(adminEmail))) {
+    return res.status(400).json({ error: 'Invalid admin email' });
+  }
   // Delegate to the admin /scripts/install logic via an internal http call.
   // We don't have a clean way to call the admin handler programmatically;
   // mint a short-lived admin-equivalent JWT scoped to this single request
   // and replay it. Safer alternative would be to extract the install
   // function into a shared module — but for now, do the install inline.
   const installPath = path.join(PORTAL_WEBROOT, domain, 'public_html');
-  await fs.mkdir(installPath, { recursive: true });
-  // Download WordPress
-  {
-    const { createWriteStream } = await import('fs');
-    const { pipeline } = await import('stream/promises');
-    const { Readable } = await import('stream');
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 180000);
-    try {
-      const r = await fetch('https://wordpress.org/latest.tar.gz', { signal: ctrl.signal });
-      if (!r.ok || !r.body) throw new Error(`download failed: ${r.status}`);
-      await pipeline(Readable.fromWeb(r.body as any), createWriteStream('/tmp/wp-portal.tar.gz'));
-    } finally { clearTimeout(timer); }
-  }
-  await fs.mkdir('/tmp/wp-portal-extract', { recursive: true });
-  await runFile('tar', ['-xzf', '/tmp/wp-portal.tar.gz', '-C', '/tmp/wp-portal-extract', '--strip-components=1']);
-  await runFile('cp', ['-r', '/tmp/wp-portal-extract/.', `${installPath}/`]);
-  await fs.rm('/tmp/wp-portal-extract', { recursive: true, force: true });
-  await fs.rm('/tmp/wp-portal.tar.gz', { force: true });
-  // wp-config + wp core install via wp-cli
-  await runFile('/usr/local/bin/wp', ['config', 'create', `--path=${installPath}`, `--dbname=${dbName}`, `--dbuser=${dbUser}`, `--dbpass=${dbPass}`, '--dbhost=localhost', '--skip-check', '--allow-root', '--force']);
-  if (siteTitle && adminUser && adminPass && adminEmail) {
+  const doInstall = async () => {
+    await fs.mkdir(installPath, { recursive: true });
+    // Download WordPress
     {
-      const safeTitle = String(siteTitle).replace(/["`$\\]/g, '');
-      const safeAdminUser = String(adminUser).replace(/[^a-zA-Z0-9_]/g, '');
-      const safeAdminPass = String(adminPass).replace(/["`$\\]/g, '');
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(adminEmail))) {
-        return res.status(400).json({ error: 'Invalid admin email' });
-      }
-      await runFile('/usr/local/bin/wp', [
-        'core', 'install', '--allow-root',
-        `--path=${installPath}`,
-        `--url=http://${domain}`,
-        `--title=${safeTitle}`,
-        `--admin_user=${safeAdminUser}`,
-        `--admin_password=${safeAdminPass}`,
-        `--admin_email=${adminEmail}`,
-        '--skip-email',
-      ]);
+      const { createWriteStream } = await import('fs');
+      const { pipeline } = await import('stream/promises');
+      const { Readable } = await import('stream');
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 180000);
+      try {
+        const r = await fetch('https://wordpress.org/latest.tar.gz', { signal: ctrl.signal });
+        if (!r.ok || !r.body) throw new Error(`download failed: ${r.status}`);
+        await pipeline(Readable.fromWeb(r.body as any), createWriteStream('/tmp/wp-portal.tar.gz'));
+      } finally { clearTimeout(timer); }
     }
+    await fs.mkdir('/tmp/wp-portal-extract', { recursive: true });
+    await runFile('tar', ['-xzf', '/tmp/wp-portal.tar.gz', '-C', '/tmp/wp-portal-extract', '--strip-components=1']);
+    await runFile('cp', ['-r', '/tmp/wp-portal-extract/.', `${installPath}/`]);
+    await fs.rm('/tmp/wp-portal-extract', { recursive: true, force: true });
+    await fs.rm('/tmp/wp-portal.tar.gz', { force: true });
+    // wp-config + wp core install via wp-cli
+    await runFile('/usr/local/bin/wp', ['config', 'create', `--path=${installPath}`, `--dbname=${dbName}`, `--dbuser=${dbUser}`, `--dbpass=${dbPass}`, '--dbhost=localhost', '--skip-check', '--allow-root', '--force']);
+    if (siteTitle && adminUser && adminPass && adminEmail) {
+      {
+        const safeTitle = String(siteTitle).replace(/["`$\\]/g, '');
+        const safeAdminUser = String(adminUser).replace(/[^a-zA-Z0-9_]/g, '');
+        const safeAdminPass = String(adminPass).replace(/["`$\\]/g, '');
+        await runFile('/usr/local/bin/wp', [
+          'core', 'install', '--allow-root',
+          `--path=${installPath}`,
+          `--url=http://${domain}`,
+          `--title=${safeTitle}`,
+          `--admin_user=${safeAdminUser}`,
+          `--admin_password=${safeAdminPass}`,
+          `--admin_email=${adminEmail}`,
+          '--skip-email',
+        ]);
+      }
+    }
+    await runFile('chown', ['-R', 'apache:apache', installPath]).catch(() => ({ stdout: '', stderr: '' }));
+    return { message: 'WordPress installed', url: `http://${domain}` };
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'portal.script_install', resource: domain, metadata: { script, domain }, createdBy: `client:${(req as any).clientId}` }, async (ctx) => {
+      ctx.progress(10, `Installing WordPress for ${domain}`);
+      const result = await doInstall();
+      ctx.progress(90, `WordPress installed for ${domain}`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
   }
-  await runFile('chown', ['-R', 'apache:apache', installPath]).catch(() => ({ stdout: '', stderr: '' }));
-  res.json({ message: 'WordPress installed', url: `http://${domain}` });
+
+  const result = await doInstall();
+  res.json(result);
 });
 
 /* ── Error pages (per owned domain) ─────────────────────────── */

@@ -100,4 +100,37 @@ describe('client portal background jobs', () => {
     expect(job.result.infected_count).toBe(1);
     expect(job.result.infected[0]).toContain('Eicar-Test-Signature FOUND');
   });
+
+  it('enqueues client portal WordPress installs with async:true and exposes install progress through jobs', async () => {
+    const { Readable } = await import('stream');
+    const realFetch = fetch;
+    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: any) => {
+      if (String(input).startsWith('http://127.0.0.1:')) return realFetch(input, init);
+      return { ok: true, body: Readable.toWeb(Readable.from(['wordpress archive'])) };
+    }));
+    const server = await appForRoutes(); closeServer = server.close;
+    const token = jwt.sign({ clientId: 1, email: 'client@example.com', role: 'client' }, process.env.JWT_SECRET!);
+
+    const r = await fetch(`${server.url}/api/portal/scripts/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        async: true,
+        script: 'wordpress',
+        domain: 'example.com',
+        dbName: 'client_wp',
+        dbUser: 'client_wp',
+        dbPass: 'secret',
+      }),
+    });
+
+    expect(r.status).toBe(202);
+    const body = await r.json();
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const job = await waitForJob(server.url, body.jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('portal.script_install');
+    expect(job.result).toMatchObject({ message: 'WordPress installed', url: 'http://example.com' });
+  });
 });
