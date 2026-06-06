@@ -693,3 +693,33 @@ npm run test --workspace=server -- src/routes/health.integration.test.ts -t "lat
 npm run test --workspace=server -- src/routes/health.integration.test.ts
 # → 25 files / 138 tests passed (Vitest project run selected all server source tests)
 ```
+
+---
+
+## 2026-06-06 6-hour slice — WordPress maintenance background-job hardening
+
+### Risk addressed
+
+The WordPress install flow already supported `/api/jobs` polling, but the bulk maintenance endpoint `POST /api/wordpress/:domain/update-all` still executed core/plugin/theme updates synchronously. On production sites that can hold an HTTP request open through multiple wp-cli operations, obscuring progress and increasing timeout risk during launch maintenance.
+
+### Changes made
+
+- **`server/src/routes/wordpress.ts`** — `POST /api/wordpress/:domain/update-all` now accepts `async: true` and enqueues a `wordpress.update_all` background job with progress messages.
+  - The job preserves the hardened argv-based `wp` calls for core, plugin, and theme updates.
+  - Synchronous compatibility is preserved when `async` is omitted.
+  - The job result includes the domain plus the same core/plugin/theme output fields returned by the synchronous path.
+- **`server/src/routes/wordpress.integration.test.ts`** — added TDD coverage proving `async: true` returns `202`, exposes `/api/jobs/:id`, completes as `wordpress.update_all`, and invokes the exact wp-cli operations.
+- **`docs/13-launch-checklist.md`** — updated the long-running-operations launch checklist evidence for WordPress maintenance update-all.
+
+### Verification performed
+
+```bash
+# TDD RED — new expectation failed because update-all returned 200 synchronously instead of 202/jobId
+npm run test --workspace=server -- wordpress.integration.test.ts -t "enqueues update-all"
+# → failed as expected: expected 202, received 200
+
+# GREEN targeted + route regression
+npm run test --workspace=server -- wordpress.integration.test.ts -t "enqueues update-all"
+npm run test --workspace=server -- wordpress.integration.test.ts
+# → passed: 25 server test files / 139 tests
+```

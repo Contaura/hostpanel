@@ -3,6 +3,7 @@
  */
 import express from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runFile } from '../utils/process-runner';
 
 // Mock wp-cli and child_process so no real binaries are needed
 vi.mock('../utils/process-runner', () => ({
@@ -126,5 +127,29 @@ describe('WordPress install background job', () => {
     const d = await r.json();
     expect(d.domain).toBe('sync.example.com');
     expect(d.url).toBe('http://sync.example.com');
+  });
+
+  it('enqueues update-all as a wordpress.update_all background job and preserves exact wp-cli operations', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/update-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.update_all');
+    expect(job.resource).toBe('maint.example.com');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com' }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'core', 'update']), expect.any(Object));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'plugin', 'update', '--all']), expect.any(Object));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', '--all']), expect.any(Object));
   });
 });

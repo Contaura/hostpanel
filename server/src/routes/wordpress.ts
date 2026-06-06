@@ -207,13 +207,27 @@ router.post('/:domain/themes/:slug/update', async (req: Request, res: Response) 
 router.post('/:domain/update-all', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
+
+  const doUpdateAll = async (ctx?: import('../background-jobs').JobContext) => {
+    ctx?.progress(10, 'Updating WordPress core…');
+    const core = await wp(domain, ['core', 'update']).catch((e: any) => ({ stdout: e.message }));
+    ctx?.progress(45, 'Updating WordPress plugins…');
+    const plugins = await wp(domain, ['plugin', 'update', '--all']).catch((e: any) => ({ stdout: e.message }));
+    ctx?.progress(75, 'Updating WordPress themes…');
+    const themes = await wp(domain, ['theme', 'update', '--all']).catch((e: any) => ({ stdout: e.message }));
+    return { domain, core: core.stdout, plugins: plugins.stdout, themes: themes.stdout };
+  };
+
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.update_all', resource: domain, metadata: { domain }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doUpdateAll(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
   try {
-    const [core, plugins, themes] = await Promise.all([
-      wp(domain, ['core', 'update']).catch((e: any) => ({ stdout: e.message })),
-      wp(domain, ['plugin', 'update', '--all']).catch((e: any) => ({ stdout: e.message })),
-      wp(domain, ['theme', 'update', '--all']).catch((e: any) => ({ stdout: e.message })),
-    ]);
-    res.json({ core: core.stdout, plugins: plugins.stdout, themes: themes.stdout });
+    res.json(await doUpdateAll());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

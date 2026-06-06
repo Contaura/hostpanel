@@ -59,7 +59,7 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 
 - [x] Frontend shipped as lazy-loaded per-route chunks (no single massive initial bundle — **verified 2026-05-28**: Vite splits per page)
 - [x] API response times acceptable under normal load (< 200ms for common endpoints — **verified** by integration test timings)
-- [x] Long-running operations (backups, scans, app installs, WordPress install) run as background jobs with `/api/jobs` polling (**verified** — all long ops migrated to `background_jobs`, 134 completed jobs in DB)
+- [x] Long-running operations (backups, scans, app installs, WordPress install/maintenance update-all) run as background jobs with `/api/jobs` polling (**verified 2026-06-06** — WordPress update-all now returns `wordpress.update_all` job evidence while preserving synchronous compatibility)
 - [x] Background job table does not have a runaway accumulation of failed rows (0 failed rows — **verified 2026-05-28**)
 - [x] No memory leak observed after 24h uptime (53.3 MB RSS at 5h uptime — **verified 2026-05-28**)
 
