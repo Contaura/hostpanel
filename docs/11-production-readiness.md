@@ -659,3 +659,37 @@ npm run test --workspace=server -- src/routes/health.integration.test.ts -t "cri
 npm run test --workspace=server -- src/routes/health.integration.test.ts -t "critical live alert"
 # → passed
 ```
+
+---
+
+## 2026-06-06 6-hour slice — backup evidence launch-blocker visibility
+
+### Risk addressed
+
+The launch checklist still required fresh backup scheduling and off-server replication as manual reliability gates. Without a machine-readable backup-evidence signal, final launch verification could miss that no current HostPanel backup archive had been produced before the deadline.
+
+### Changes made
+
+- **`server/src/routes/health.ts`** — production `/api/health/readiness` now inspects the backup archive directory (`BACKUP_DIR`, default `/var/backups/hostpanel`) for `.tar.gz` and `.sql.gz` backups.
+  - Adds `checks.backups.latestArchive`, `backupDir`, and `maxAgeDays` (default 1 day, configurable with `BACKUP_ARCHIVE_MAX_AGE_DAYS`).
+  - Adds manual launch blocker `backup_evidence_missing` when no backup archive exists.
+  - Adds manual launch blocker `backup_evidence_stale` when the newest archive is older than the allowed age.
+  - Keeps readiness HTTP 200 when this is the only issue, matching the manual-launch-blocker model while making the launch gate visible to monitoring and the final report.
+- **`server/src/routes/health.integration.test.ts`** — added TDD regression coverage for stale backup evidence and updated exact launch-blocker expectations.
+- **`docs/13-launch-checklist.md`** — documented the new backup evidence signal alongside the manual backup/off-server replication steps.
+
+### Verification performed
+
+```bash
+# TDD RED — new expectation failed because checks.backups was absent
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "latest backup archive is stale"
+# → failed as expected: expected body.checks.backups, received undefined
+
+# GREEN
+npm run test --workspace=server -- src/routes/health.integration.test.ts -t "latest backup archive is stale"
+# → passed
+
+# Regression suite for health readiness behavior
+npm run test --workspace=server -- src/routes/health.integration.test.ts
+# → 25 files / 138 tests passed (Vitest project run selected all server source tests)
+```

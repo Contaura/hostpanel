@@ -84,6 +84,28 @@ function drillReportMaxAgeDays() {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 7;
 }
 
+function latestBackupArchive() {
+  const dir = process.env.BACKUP_DIR || '/var/backups/hostpanel';
+  if (!existsSync(dir)) return { dir, latest: null as null | { file: string; mtime: string; ageDays: number }, maxAgeDays: backupArchiveMaxAgeDays() };
+  const archives = readdirSync(dir)
+    .filter(name => name.endsWith('.tar.gz') || name.endsWith('.sql.gz'))
+    .map(name => {
+      const file = path.join(dir, name);
+      const st = statSync(file);
+      if (!st.isFile()) return null;
+      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString(), ageDays: Math.floor((Date.now() - st.mtimeMs) / (24 * 60 * 60 * 1000)) };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => b.mtimeMs - a.mtimeMs) as Array<{ file: string; mtimeMs: number; mtime: string; ageDays: number }>;
+  const latest = archives[0];
+  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime, ageDays: latest.ageDays } : null, maxAgeDays: backupArchiveMaxAgeDays() };
+}
+
+function backupArchiveMaxAgeDays() {
+  const raw = Number(process.env.BACKUP_ARCHIVE_MAX_AGE_DAYS || 1);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
+}
+
 async function currentCriticalAlerts() {
   const [cpu, mem, disks] = await Promise.all([
     si.currentLoad(),
@@ -224,6 +246,28 @@ async function buildReadiness() {
       checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir, maxAgeDays: report.maxAgeDays };
     } catch (err: any) {
       checks.disasterRecovery = { ok: true, latestDrillReport: null, warnings: [`Unable to inspect disaster-recovery drill evidence: ${err.message}`] };
+    }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const archive = latestBackupArchive();
+      if (!archive.latest) {
+        launchBlockers.push({
+          code: 'backup_evidence_missing',
+          severity: 'manual',
+          message: 'No HostPanel backup archive evidence was found. Create and verify an on-server backup archive before launch, then confirm off-server replication.',
+        });
+      } else if (archive.latest.ageDays > archive.maxAgeDays) {
+        launchBlockers.push({
+          code: 'backup_evidence_stale',
+          severity: 'manual',
+          message: `Latest backup archive evidence is older than ${archive.maxAgeDays} day${archive.maxAgeDays === 1 ? '' : 's'}. Create a fresh backup and verify off-server replication before launch.`,
+        });
+      }
+      checks.backups = { ok: true, latestArchive: archive.latest, backupDir: archive.dir, maxAgeDays: archive.maxAgeDays };
+    } catch (err: any) {
+      checks.backups = { ok: true, latestArchive: null, warnings: [`Unable to inspect backup archive evidence: ${err.message}`] };
     }
   }
 

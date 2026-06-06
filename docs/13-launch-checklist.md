@@ -47,9 +47,9 @@ Work through each section in order. Mark items ✅ (done), ⚠️ (done with cav
 - [x] Built-in watchdog polls `/healthz` every 60 seconds and dispatches alerts on 3 consecutive failures (**verified** by self-health-watchdog TDD: 6 tests, 23 files / 121 tests green — `server/src/utils/self-health-watchdog.ts` wired in `index.ts` — **2026-05-28**)
 - [ ] External uptime monitor configured (UptimeRobot / BetterStack) pointing at `https://panel.contaura.com/healthz` (**manual step** — requires Marcos to configure)
 - [x] SQLite database on persistent volume (`/root/hostpanel/data/hostpanel.db` on root filesystem, not tmpfs — **verified 2026-05-28**)
-- [ ] Automated nightly database backup scheduled (cron or panel backup wizard — **manual step**)
-- [ ] Backup includes `.env`, DB, vhosts, DNS zones, SSL certs, email config (**manual step**)
-- [ ] Backup stored off-server (S3, B2, or equivalent — **manual step**)
+- [ ] Automated nightly database backup scheduled (cron or panel backup wizard — **manual step**; `/api/health/readiness` now surfaces `checks.backups.latestArchive` and `backup_evidence_missing` / `backup_evidence_stale` launch blockers until fresh backup evidence exists)
+- [ ] Backup includes `.env`, DB, vhosts, DNS zones, SSL certs, email config (**manual step**; verify contents during the backup-evidence check before launch)
+- [ ] Backup stored off-server (S3, B2, or equivalent — **manual step**; readiness message explicitly requires confirming off-server replication)
 - [x] Restore procedure documented and tested via DR drill (`POST /api/backup/drill` — **verified** in DR drill automation pass; `/api/health/readiness` now surfaces `checks.disasterRecovery.latestDrillReport` and manual blocker `dr_drill_evidence_missing` until evidence exists)
 - [x] Disk usage alert configured (readiness endpoint returns 503 when ≥95% full — **verified** by health integration test)
 
