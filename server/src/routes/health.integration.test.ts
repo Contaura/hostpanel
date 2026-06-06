@@ -143,12 +143,14 @@ describe('production health and readiness checks', () => {
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
     const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevBackupDir = process.env.BACKUP_DIR;
     const prevDrillMaxAgeDays = process.env.DRILL_REPORT_MAX_AGE_DAYS;
     process.env.NODE_ENV = 'production';
     process.env.READINESS_REQUIRED_SERVICES = '';
     const sshdConfig = path.join(tmp, 'sshd_config');
     await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
     process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.BACKUP_DIR = path.join(tmp, 'missing-backups');
     process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
     process.env.DRILL_REPORT_MAX_AGE_DAYS = '7';
     await fs.mkdir(process.env.DRILL_REPORT_DIR);
@@ -198,6 +200,8 @@ describe('production health and readiness checks', () => {
       else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
       if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
       else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
       if (prevDrillMaxAgeDays === undefined) delete process.env.DRILL_REPORT_MAX_AGE_DAYS;
       else process.env.DRILL_REPORT_MAX_AGE_DAYS = prevDrillMaxAgeDays;
     }
@@ -286,11 +290,13 @@ describe('production health and readiness checks', () => {
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
     const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevBackupDir = process.env.BACKUP_DIR;
     process.env.NODE_ENV = 'production';
     process.env.READINESS_REQUIRED_SERVICES = '';
     const sshdConfig = path.join(tmp, 'sshd_config');
     await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
     process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.BACKUP_DIR = path.join(tmp, 'missing-backups');
     process.env.DRILL_REPORT_DIR = path.join(tmp, 'empty-drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR);
     vi.doMock('child_process', () => ({
@@ -334,6 +340,8 @@ describe('production health and readiness checks', () => {
       else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
       if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
       else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
     }
   });
 
@@ -388,11 +396,13 @@ describe('production health and readiness checks', () => {
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
     const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevBackupDir = process.env.BACKUP_DIR;
     process.env.NODE_ENV = 'production';
     process.env.READINESS_REQUIRED_SERVICES = '';
     const sshdConfig = path.join(tmp, 'sshd_config');
     await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
     process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.BACKUP_DIR = path.join(tmp, 'missing-backups');
     process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR);
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
@@ -449,6 +459,8 @@ describe('production health and readiness checks', () => {
       else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
       if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
       else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
     }
   });
 

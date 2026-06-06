@@ -11,6 +11,18 @@
 
 Work through each section in order. Mark items ✅ (done), ⚠️ (done with caveats — document them), or ❌ (blocked — document the blocker). Do not mark an item ✅ without evidence (test output, commit hash, or direct verification command).
 
+Manual launch blockers are tracked explicitly so the final report can separate automated HostPanel readiness from business/account setup that only Marcos can complete:
+
+| Manual blocker | Owner | Launch-day evidence required |
+|---|---|---|
+| External uptime monitor | Marcos | Screenshot or exported monitor showing `https://panel.contaura.com/healthz` checked every 1–5 minutes with alert recipients enabled. |
+| Automated nightly database backup | Ron + Marcos | Backup wizard/cron record plus a fresh archive listed by readiness `checks.backups.latestArchive`. |
+| Backup contents confirmation | Ron + Marcos | Restore/DR evidence showing `.env`, DB, vhosts, DNS zones, SSL certs, and email config are included or intentionally replaced by documented rebuild steps. |
+| Off-server backup replication | Marcos | S3/B2/equivalent bucket/object evidence for the latest HostPanel backup and retention policy. |
+| Notification webhook channel | Marcos | Panel Settings notification channel enabled and a successful test notification event. |
+| Admin account TOTP | Marcos | `/admin-users` shows the production admin account with TOTP enabled; readiness security warning cleared. |
+| Payment webhook secrets | Marcos | Stripe/PayPal webhook secrets configured and a test webhook delivery verified, or written confirmation payments are not live at launch. |
+
 ---
 
 ## 1. Security Hardening
@@ -130,23 +142,27 @@ curl -sf http://localhost:3001/healthz
 # 5. External health check (Apache proxy)
 curl -sf https://panel.contaura.com/healthz
 
-# 6. SSH password auth check
+# 6. Authenticated readiness check (requires admin JWT; do not paste real token into docs/tickets)
+TOKEN="<admin-jwt>"
+curl -sf -H "Authorization: Bearer ***" http://localhost:3001/api/health/readiness
+
+# 7. SSH password auth check
 sshd -T | grep passwordauthentication   # → passwordauthentication no
 
-# 7. Security headers from Apache
+# 8. Security headers from Apache
 curl -sI https://panel.contaura.com/healthz | grep -E "X-Content-Type|X-Frame|Strict-Transport"
 
-# 8. No legacy shell strings in routes
+# 9. No legacy shell strings in routes
 grep -rn 'execAsync\|promisify(exec)' /root/hostpanel/server/src/routes/ && echo "FOUND" || echo "CLEAN"
 
-# 9. All tests pass (takes ~10 seconds)
+# 10. All tests pass (takes ~10 seconds)
 cd /root/hostpanel && npm run test --workspace=server
 
-# 10. No audit vulnerabilities
+# 11. No audit vulnerabilities
 npm audit --omit=dev --audit-level=moderate
 ```
 
-All 10 commands must succeed with no errors before filing the launch report.
+All 11 commands must succeed with no errors before filing the launch report.
 
 ---
 
