@@ -4,11 +4,12 @@ import { resolve } from 'node:path';
 
 const runbookPath = resolve(process.cwd(), '..', 'docs/12-operations-runbook.md');
 const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checklist.md');
-const dq = String.fromCharCode(34);
-const authHeader = String.fromCharCode(65,117,116,104,111,114,105,122,97,116,105,111,110,58,32,66,101,97,114,101,114,32,42,42,42);
+const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md');
+const sq = String.fromCharCode(39);
+const authHeader = ['Authorization: Bearer', 'AUTH_TOKEN'].join(' ');
 const healthCurl = (endpoint: 'readiness' | 'live') =>
-  ['curl -sf -H ', dq, authHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
-const malformedLocalHealthHeader = /Bearer \*\*\*\s+http:\/\/localhost:3001\/api\/health\//;
+  ['curl -sf -H ', sq, authHeader, sq, ' http://localhost:3001/api/health/', endpoint].join('');
+const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN)\s+http:\/\/localhost:3001\/api\/health\//;
 
 describe('operations runbook command examples', () => {
   it('documents authenticated health curls with closed Authorization headers', () => {
@@ -39,7 +40,15 @@ describe('production launch checklist', () => {
     const readinessCurl = checklist.split('\n').find(line => line.trim().startsWith('curl ') && line.includes('/api/health/readiness')) || '';
 
     expect(checklist).toContain(healthCurl('readiness'));
-    expect(readinessCurl.split(dq).length - 1).toBe(2);
+    expect(readinessCurl.split(sq).length - 1).toBe(2);
     expect(checklist).not.toMatch(malformedLocalHealthHeader);
+  });
+
+  it('does not list completed phpMyAdmin live validation as remaining cPanel parity work', () => {
+    const comparison = readFileSync(comparisonPath, 'utf8');
+
+    expect(comparison).toContain('phpMyAdmin launch/Signon handoff');
+    expect(comparison).not.toMatch(/Signon still needs live validation/i);
+    expect(comparison).not.toMatch(/^1\. Validate phpMyAdmin Signon end-to-end/m);
   });
 });
