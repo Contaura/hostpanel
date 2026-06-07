@@ -337,7 +337,7 @@ Use this only when every admin is locked out of TOTP and Marcos has approved the
 4. Verify readiness returns only the expected advisory until TOTP is re-enabled:
    ```bash
    TOKEN="***"
-   curl -sf -H "Authorization: Bearer ***" http://localhost:3001/api/health/readiness | jq ".checks.security"
+   curl -sf -H "Authorization: Bearer ***" http://localhost:3001/api/health/readiness | jq '.checks.security'
    ```
 5. Record the break-glass event in the incident ticket with the backup path, admin username, timestamps, and confirmation that TOTP was re-enabled. Remove any temporary DB copies after retention approval.
 

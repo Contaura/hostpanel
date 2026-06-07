@@ -5,9 +5,9 @@ import { resolve } from 'node:path';
 const runbookPath = resolve(process.cwd(), '..', 'docs/12-operations-runbook.md');
 const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checklist.md');
 const dq = String.fromCharCode(34);
-
+const authHeader = String.fromCharCode(65,117,116,104,111,114,105,122,97,116,105,111,110,58,32,66,101,97,114,101,114,32,42,42,42);
 const healthCurl = (endpoint: 'readiness' | 'live') =>
-  'curl -sf -H "Authorization: Bearer ***" http://localhost:3001/api/health/' + endpoint;
+  ['curl -sf -H ', dq, authHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
 const malformedLocalHealthHeader = /Bearer \*\*\*\s+http:\/\/localhost:3001\/api\/health\//;
 
 describe('operations runbook command examples', () => {
@@ -36,8 +36,10 @@ describe('production launch checklist', () => {
 
   it('documents a syntactically valid authenticated readiness curl in the launch-day sequence', () => {
     const checklist = readFileSync(launchChecklistPath, 'utf8');
+    const readinessCurl = checklist.split('\n').find(line => line.trim().startsWith('curl ') && line.includes('/api/health/readiness')) || '';
 
     expect(checklist).toContain(healthCurl('readiness'));
+    expect(readinessCurl.split(dq).length - 1).toBe(2);
     expect(checklist).not.toMatch(malformedLocalHealthHeader);
   });
 });
