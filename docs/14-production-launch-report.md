@@ -1,27 +1,29 @@
 # HostPanel Production Launch Report
 
-**Date:** 2026-06-08T04:17:11Z
+**Date:** 2026-06-08T22:39:25Z
 **Launch by:** Ron
-**Commit:** `60b6565`
+**Commit:** `4bc9a44`
 **Branch:** `master`
+
+## Latest verified production deployment
+
+Live production verification was run against `root@45.79.189.4:/root/hostpanel` using key-only SSH. Final delivery report supersedes this document if this document changes in the same deployment commit.
 
 ## Verification Results
 
-Live production verification was run against `root@45.79.189.4:/root/hostpanel` using key-only SSH.
-
-- Service: `hostpanel` active before this hardening slice.
+- Service: `hostpanel` active.
 - `/healthz: 200 OK` on localhost.
 - `/api/health/readiness: 200 OK` with a short-lived server-side JWT generated from the production environment for this check only.
 - SSH password auth: disabled (`PasswordAuthentication no` in `/etc/ssh/sshd_config.d/99-hostpanel-hardening.conf`).
 - Runtime services reported by readiness: `hostpanel`, `httpd`, and `mariadb` active.
-- Disaster-recovery drill evidence: `/var/backups/hostpanel/drills/db_hostpanel_2026-06-06T15-07-31.sql.gz-2026-06-06T15-07-31-251Z.json`.
-- Backup archive evidence: `/var/backups/hostpanel/db_hostpanel_2026-06-06T15-07-31.sql.gz`.
+- Backup archive evidence: `/var/backups/hostpanel/db_hostpanel_2026-06-08T16-36-29.sql.gz` (ageDays: 0).
+- Disaster-recovery drill evidence: `/var/backups/hostpanel/drills/db_hostpanel_2026-06-06T15-07-31.sql.gz-2026-06-06T15-07-31-251Z.json` (ageDays: 2).
 - Critical alerts: none reported by readiness.
-- Self-health watchdog: running, last `/healthz` check returned 200.
+- Self-health watchdog: running, last `/healthz` check returned 200 at `2026-06-08T22:39:25.168Z`.
 
 ## Manual launch blockers still owned by Marcos
 
-The application is operationally healthy, but the final business launch remains gated by Marcos-owned manual items that cannot be completed safely from this cron job without account access or third-party credentials:
+The application is operationally healthy, but final business launch remains gated by Marcos-owned manual items that cannot be completed safely from this cron job without account access or third-party credentials:
 
 | Code | Owner | Required evidence |
 |---|---|---|
@@ -36,8 +38,8 @@ Additional launch-checklist manual evidence still required before public launch 
 
 ## Current launch verdict
 
-HostPanel is close to production launch from the platform side: code hardening, health/readiness endpoints, DR drill visibility, background jobs, watchdog monitoring, command-execution hardening, and runbooks are in place. Do **not** declare final production launch complete until the Marcos-owned manual blockers above are cleared and the launch-day verification sequence in `docs/13-launch-checklist.md` is rerun against the final deployment commit.
+HostPanel is production-ready from the automated platform side: code hardening, health/readiness endpoints, DR drill visibility, fresh backup evidence, background jobs, watchdog monitoring, command-execution hardening, and runbooks are in place. Do **not** declare final business launch complete until the Marcos-owned manual blockers above are cleared and the launch-day verification sequence in `docs/13-launch-checklist.md` is rerun against the final deployment commit.
 
 ## Signed Off
 
-Ron — 2026-06-08T04:17:11Z
+Ron — 2026-06-08T22:39:25Z
