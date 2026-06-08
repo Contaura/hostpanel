@@ -110,6 +110,13 @@ describe('production health and readiness checks', () => {
         return { status: 1, stdout: '', stderr: '' };
       })
     }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
+    }));
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
@@ -164,6 +171,13 @@ describe('production health and readiness checks', () => {
         if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
         return { status: 1, stdout: '', stderr: '' };
       })
+    }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
     }));
 
     await import('../background-jobs');
