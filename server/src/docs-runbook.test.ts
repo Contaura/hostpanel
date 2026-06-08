@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 const runbookPath = resolve(process.cwd(), '..', 'docs/12-operations-runbook.md');
 const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checklist.md');
 const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md');
+const launchReportPath = resolve(process.cwd(), '..', 'docs/14-production-launch-report.md');
 const sq = String.fromCharCode(39);
 const authHeader = ['Authorization: Bearer', 'AUTH_TOKEN'].join(' ');
 const healthCurl = (endpoint: 'readiness' | 'live') =>
@@ -50,5 +51,19 @@ describe('production launch checklist', () => {
     expect(comparison).toContain('phpMyAdmin launch/Signon handoff');
     expect(comparison).not.toMatch(/Signon still needs live validation/i);
     expect(comparison).not.toMatch(/^1\. Validate phpMyAdmin Signon end-to-end/m);
+  });
+
+  it('files a final production launch report with live verification and manual blocker ownership', () => {
+    const report = readFileSync(launchReportPath, 'utf8');
+
+    expect(report).toContain('# HostPanel Production Launch Report');
+    expect(report).toMatch(/\*\*Commit:\*\* `[0-9a-f]{7,40}`/);
+    expect(report).toContain('/healthz: 200 OK');
+    expect(report).toContain('/api/health/readiness: 200 OK');
+    expect(report).toContain('SSH password auth: disabled');
+    expect(report).toContain('Manual launch blockers still owned by Marcos');
+    expect(report).toContain('admin_2fa_missing');
+    expect(report).toContain('notification_webhook_missing');
+    expect(report).not.toMatch(/TODO|TBD|<git hash>|YYYY-MM-DD/);
   });
 });
