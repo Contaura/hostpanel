@@ -38,9 +38,11 @@ describe('production launch checklist', () => {
 
   it('documents a syntactically valid authenticated readiness curl in the launch-day sequence', () => {
     const checklist = readFileSync(launchChecklistPath, 'utf8');
-    const readinessCurl = checklist.split('\n').find(line => line.trim().startsWith('curl ') && line.includes('/api/health/readiness')) || '';
+    const launchDaySequence = checklist.split('## 8. Launch Day Verification Sequence')[1] || '';
+    const readinessCurl = launchDaySequence.split('\n').find(line => line.trim().startsWith('curl ') && line.includes('/api/health/readiness')) || '';
 
     expect(checklist).toContain(healthCurl('readiness'));
+    expect(readinessCurl).toBe(healthCurl('readiness'));
     expect(readinessCurl.split(sq).length - 1).toBe(2);
     expect(checklist).not.toMatch(malformedLocalHealthHeader);
   });
