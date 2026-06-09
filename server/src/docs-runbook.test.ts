@@ -67,7 +67,7 @@ describe('production launch checklist', () => {
     expect(report).toContain('SSH password auth: disabled');
     expect(report).toContain('Manual launch blockers still owned by Marcos');
     expect(report).toContain('Hard deadline: 2026-06-09 23:59 UTC');
-    expect(report).toMatch(/Deadline status: .+ before 2026-06-09 23:59 UTC/);
+    expect(report).toContain('Deadline status: Automated platform verification completed before 2026-06-09 23:59 UTC; final business launch still depends on Marcos-owned manual evidence below.');
     expect(report).toContain('admin_2fa_missing');
     expect(report).toContain('notification_webhook_missing');
     expect(report).not.toMatch(/TODO|TBD|<git hash>|YYYY-MM-DD/);
