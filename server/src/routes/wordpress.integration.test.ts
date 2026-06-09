@@ -152,4 +152,48 @@ describe('WordPress install background job', () => {
     expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'plugin', 'update', '--all']), expect.any(Object));
     expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', '--all']), expect.any(Object));
   });
+
+  it('enqueues a single plugin update as a wordpress.plugin_update background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/plugins/akismet/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.plugin_update');
+    expect(job.resource).toBe('maint.example.com:akismet');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', plugin: 'akismet' }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'plugin', 'update', 'akismet']), expect.any(Object));
+  });
+
+  it('enqueues a single theme update as a wordpress.theme_update background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/themes/twentytwentyfive/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.theme_update');
+    expect(job.resource).toBe('maint.example.com:twentytwentyfive');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', theme: 'twentytwentyfive' }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', 'twentytwentyfive']), expect.any(Object));
+  });
 });

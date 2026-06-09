@@ -1,6 +1,6 @@
 # HostPanel Feature Gap Inventory
 
-Last audited: 2026-06-07
+Last audited: 2026-06-09
 
 This inventory is intentionally stricter than the broad parity/status documents. A module being present in the UI or API does **not** mean it has cPanel/WHM-level depth. HostPanel has many real wired foundations, but Marcos is right: a lot of production-grade hosting-panel functionality is still missing or shallow.
 
@@ -16,8 +16,8 @@ This inventory is intentionally stricter than the broad parity/status documents.
 ### P0 — Must close before broad public rollout
 
 1. **WordPress/script installs need centralized async job execution**
-   - Current install/update operations can exceed normal request time.
-   - Need job records, progress events, logs, retry/failure states, and portal/admin polling for wp-cli and script installer flows.
+   - WordPress install, update-all, single plugin update, and single theme update now support persisted background jobs via `async: true` and `/api/jobs/:id` polling.
+   - Remaining work: extend this same pattern to uploaded plugin/theme ZIP installs and any non-WordPress script-installer flows that can exceed normal request time.
 
 2. **Fresh-install/bootstrap validation needs repeated hardening**
    - Every system-level feature must be idempotently installed by `install.sh`, not only by manual post-install fixes.
@@ -90,7 +90,7 @@ A HostPanel feature should not be called complete until it has:
 
 ## Next recommended build slices
 
-1. Move WordPress/wp-cli and script installer operations to persisted background jobs.
+1. Finish moving uploaded WordPress plugin/theme ZIP installs and script installer operations to persisted background jobs.
 2. Add analytics/mail frontend charts and export UX polish.
 3. Add live drill automation/reporting for backup restore and transfer/import.
 4. Expand portal/team authorization tests module-by-module.

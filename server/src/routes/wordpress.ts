@@ -154,9 +154,24 @@ router.post('/:domain/plugins/:slug/update', async (req: Request, res: Response)
   const { domain, slug } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid plugin slug' });
-  try {
+
+  const doPluginUpdate = async (ctx?: import('../background-jobs').JobContext) => {
+    ctx?.progress(20, `Updating plugin ${slug}…`);
     const { stdout } = await wp(domain, ['plugin', 'update', slug]);
-    res.json({ output: stdout });
+    return { domain, plugin: slug, output: stdout };
+  };
+
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.plugin_update', resource: `${domain}:${slug}`, metadata: { domain, plugin: slug }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doPluginUpdate(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    const result = await doPluginUpdate();
+    res.json({ output: result.output });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -196,9 +211,24 @@ router.post('/:domain/themes/:slug/update', async (req: Request, res: Response) 
   const { domain, slug } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'Invalid theme slug' });
-  try {
+
+  const doThemeUpdate = async (ctx?: import('../background-jobs').JobContext) => {
+    ctx?.progress(20, `Updating theme ${slug}…`);
     const { stdout } = await wp(domain, ['theme', 'update', slug]);
-    res.json({ output: stdout });
+    return { domain, theme: slug, output: stdout };
+  };
+
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.theme_update', resource: `${domain}:${slug}`, metadata: { domain, theme: slug }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doThemeUpdate(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    const result = await doThemeUpdate();
+    res.json({ output: result.output });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
