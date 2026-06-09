@@ -155,14 +155,17 @@ curl -sI https://panel.contaura.com/healthz | grep -E "X-Content-Type|X-Frame|St
 # 9. No legacy shell strings in routes
 grep -rn 'execAsync\|promisify(exec)' /root/hostpanel/server/src/routes/ && echo "FOUND" || echo "CLEAN"
 
-# 10. All tests pass (takes ~10 seconds)
+# 10. Production build passes
+cd /root/hostpanel && npm run build
+
+# 11. All tests pass (takes ~10 seconds)
 cd /root/hostpanel && npm run test --workspace=server
 
-# 11. No audit vulnerabilities
+# 12. No audit vulnerabilities
 npm audit --omit=dev --audit-level=moderate
 ```
 
-All 11 commands must succeed with no errors before filing the launch report.
+All 12 commands must succeed with no errors before filing the launch report.
 
 ---
 

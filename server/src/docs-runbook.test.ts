@@ -55,6 +55,14 @@ describe('production launch checklist', () => {
     expect(comparison).not.toMatch(/^1\. Validate phpMyAdmin Signon end-to-end/m);
   });
 
+  it('documents the production build command in the launch-day verification sequence', () => {
+    const checklist = readFileSync(launchChecklistPath, 'utf8');
+    const launchDaySequence = checklist.split('## 8. Launch Day Verification Sequence')[1] || '';
+
+    expect(launchDaySequence).toContain('npm run build');
+    expect(launchDaySequence.indexOf('npm run build')).toBeLessThan(launchDaySequence.indexOf('npm run test --workspace=server'));
+  });
+
   it('files a final production launch report with live verification and manual blocker ownership', () => {
     const report = readFileSync(launchReportPath, 'utf8');
 
