@@ -153,6 +153,28 @@ describe('WordPress install background job', () => {
     expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', '--all']), expect.any(Object));
   });
 
+  it('enqueues a core update as a wordpress.core_update background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/core-update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.core_update');
+    expect(job.resource).toBe('maint.example.com');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', output: expect.any(String) }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'core', 'update']), expect.any(Object));
+  });
+
   it('enqueues a single plugin update as a wordpress.plugin_update background job when async:true', async () => {
     const runFileMock = vi.mocked(runFile);
     runFileMock.mockClear();

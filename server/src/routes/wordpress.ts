@@ -121,9 +121,24 @@ router.get('/:domain/info', async (req: Request, res: Response) => {
 router.post('/:domain/core-update', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
-  try {
+
+  const doCoreUpdate = async (ctx?: import('../background-jobs').JobContext) => {
+    ctx?.progress(20, 'Updating WordPress core…');
     const { stdout } = await wp(domain, ['core', 'update']);
-    res.json({ output: stdout });
+    return { domain, output: stdout };
+  };
+
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.core_update', resource: domain, metadata: { domain }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doCoreUpdate(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    const result = await doCoreUpdate();
+    res.json({ output: result.output });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
