@@ -6,11 +6,11 @@ const runbookPath = resolve(process.cwd(), '..', 'docs/12-operations-runbook.md'
 const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checklist.md');
 const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md');
 const launchReportPath = resolve(process.cwd(), '..', 'docs/14-production-launch-report.md');
-const sq = String.fromCharCode(39);
-const authHeader = ['Authorization: Bearer', 'AUTH_TOKEN'].join(' ');
+const dq = String.fromCharCode(34);
+const authHeader = 'Authorization: Bearer ${AUTH_TOKEN}';
 const healthCurl = (endpoint: 'readiness' | 'live') =>
-  ['curl -sf -H ', sq, authHeader, sq, ' http://localhost:3001/api/health/', endpoint].join('');
-const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN)\s+http:\/\/localhost:3001\/api\/health\//;
+  ['curl -sf -H ', dq, authHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
+const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN|\$\{AUTH_TOKEN\})\s+http:\/\/localhost:3001\/api\/health\//;
 
 describe('operations runbook command examples', () => {
   it('documents authenticated health curls with closed Authorization headers', () => {
@@ -43,7 +43,7 @@ describe('production launch checklist', () => {
 
     expect(checklist).toContain(healthCurl('readiness'));
     expect(readinessCurl).toBe(healthCurl('readiness'));
-    expect(readinessCurl.split(sq).length - 1).toBe(2);
+    expect(readinessCurl.split(dq).length - 1).toBe(2);
     expect(checklist).not.toMatch(malformedLocalHealthHeader);
   });
 
