@@ -7,7 +7,7 @@ const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checkli
 const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md');
 const launchReportPath = resolve(process.cwd(), '..', 'docs/14-production-launch-report.md');
 const dq = String.fromCharCode(34);
-const authHeader = 'Authorization: Bearer ${AUTH_TOKEN}';
+const authHeader = 'Authorization: Bearer TOKEN';
 const healthCurl = (endpoint: 'readiness' | 'live') =>
   ['curl -sf -H ', dq, authHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
 const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN|\$\{AUTH_TOKEN\})\s+http:\/\/localhost:3001\/api\/health\//;
