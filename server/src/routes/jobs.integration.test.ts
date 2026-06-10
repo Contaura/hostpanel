@@ -65,6 +65,8 @@ describe('central background jobs API', () => {
     delete process.env.PLUGIN_DIR;
     delete process.env.PLUGIN_ROLLBACK_DIR;
     delete process.env.TRANSFER_ROLLBACK_DIR;
+    delete process.env.VHOST_DIR;
+    delete process.env.DATA_DIR;
     vi.resetModules();
   });
 
@@ -144,6 +146,46 @@ describe('central background jobs API', () => {
     expect(report.success).toBe(true);
     expect(report.restorePlan.count).toBe(1);
     expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', archive], expect.objectContaining({ timeout: 120000 }));
+  });
+
+  it('enqueues app creation as a central job and exposes the created app result', async () => {
+    process.env.VHOST_DIR = path.join(tmp, 'httpd');
+    process.env.DATA_DIR = path.join(tmp, 'data-app-create');
+    await fs.mkdir(process.env.VHOST_DIR, { recursive: true });
+    const apps = (await import('./apps')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use((_req, _res, next) => { (_req as any).user = { username: 'admin', role: 'admin' }; next(); });
+    app.use('/api/apps', apps);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const workDir = path.join(tmp, 'apps', 'demo');
+    const started = await fetch(`${server.url}/api/apps`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'demo',
+        type: 'nodejs',
+        domain: 'demo.example.com',
+        port: 3100,
+        start_script: path.join(workDir, 'server.js'),
+        working_dir: workDir,
+        env_vars: { NODE_ENV: 'production' },
+        async: true,
+      }),
+    });
+
+    expect(started.status).toBe(202);
+    const body = await started.json();
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+    const done = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(), j => j.status === 'completed');
+    expect(done.type).toBe('app.create');
+    expect(done.result.name).toBe('demo');
+    expect(done.result.domain).toBe('demo.example.com');
+    expect(done.result.status).toBe('stopped');
+    expect(await fs.readFile(path.join(process.env.VHOST_DIR, 'app_demo.conf'), 'utf8')).toContain('ProxyPass / http://127.0.0.1:3100/');
   });
 
   it('enqueues restore, transfer, DNS, WebDAV, and plugin operations as central jobs', async () => {

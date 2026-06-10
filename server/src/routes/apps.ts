@@ -80,7 +80,7 @@ function isSafePath(p: string): boolean {
 }
 
 router.post('/', adminOnly, async (req: Request, res: Response) => {
-  const { name, type, domain, port, start_script, working_dir, env_vars } = req.body;
+  const { name, type, domain, port, start_script, working_dir, env_vars, async: isAsync } = req.body;
   if (!name || !domain || !port || !start_script || !working_dir) {
     return res.status(400).json({ error: 'name, domain, port, start_script, working_dir are required' });
   }
@@ -90,11 +90,11 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
   if (isNaN(portNum) || portNum < 1 || portNum > 65535) return res.status(400).json({ error: 'Invalid port' });
   if (!isSafePath(start_script)) return res.status(400).json({ error: 'Invalid start_script path' });
   if (!isSafePath(working_dir))  return res.status(400).json({ error: 'Invalid working_dir path' });
-  if (!existsSync(working_dir)) {
-    try { mkdirSync(working_dir, { recursive: true }); } catch (_) {}
-  }
 
-  try {
+  const doCreate = async () => {
+    if (!existsSync(working_dir)) {
+      try { mkdirSync(working_dir, { recursive: true }); } catch (_) {}
+    }
     const r = db.prepare(`
       INSERT INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
       VALUES (?, ?, ?, ?, ?, ?, 'stopped', ?)
@@ -112,7 +112,21 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
     writeFileSync(path.join(VHOST_DIR, `app_${name}.conf`), vhostConf);
     await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
 
-    res.json(db.prepare('SELECT * FROM managed_apps WHERE id = ?').get(r.lastInsertRowid));
+    return db.prepare('SELECT * FROM managed_apps WHERE id = ?').get(r.lastInsertRowid) as any;
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'app.create', resource: name }, async (ctx) => {
+      ctx.progress(10, `Creating app ${name}`);
+      const created = await doCreate();
+      ctx.progress(90, `App ${name} created`);
+      return created;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doCreate());
   } catch (err: any) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'App name already exists' });
     res.status(500).json({ error: err.message });
