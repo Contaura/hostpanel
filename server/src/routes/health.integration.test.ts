@@ -21,11 +21,13 @@ describe('production health and readiness checks', () => {
     vi.resetModules();
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'hostpanel-health-'));
     process.env.DATA_DIR = tmp;
+    process.env.TLS_CERT_CHECK_DIR = path.join(tmp, 'certs-empty');
   });
 
   afterEach(async () => {
     await fs.rm(tmp, { recursive: true, force: true });
     delete process.env.DATA_DIR;
+    delete process.env.TLS_CERT_CHECK_DIR;
     vi.resetModules();
   });
 
@@ -539,6 +541,83 @@ describe('production health and readiness checks', () => {
       else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
       if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
       else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+    }
+  });
+
+  it('blocks production readiness when a monitored TLS certificate is near expiry', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevCertDir = process.env.TLS_CERT_CHECK_DIR;
+    const prevCertWarnDays = process.env.TLS_CERT_WARN_DAYS;
+    process.env.NODE_ENV = 'production';
+    process.env.READINESS_REQUIRED_SERVICES = '';
+    process.env.TLS_CERT_CHECK_DIR = path.join(tmp, 'letsencrypt-live');
+    process.env.TLS_CERT_WARN_DAYS = '14';
+    const certPath = path.join(process.env.TLS_CERT_CHECK_DIR, 'example.com', 'fullchain.pem');
+    await fs.mkdir(path.dirname(certPath), { recursive: true });
+    await fs.writeFile(certPath, 'test certificate');
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+    const notAfter = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toUTCString();
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        if (cmd === 'openssl' && args.includes(certPath)) return { status: 0, stdout: `notAfter=${notAfter}\n` };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
+    }));
+
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare('DELETE FROM notification_webhooks').run();
+    db.prepare('DELETE FROM alert_rules').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 1);
+    db.prepare("INSERT INTO notification_webhooks (name, url, type, events, enabled) VALUES (?, ?, ?, ?, ?)")
+      .run('ops', 'https://alerts.example.test/webhook', 'webhook', JSON.stringify(['system.cert_expiring']), 1);
+    db.prepare("INSERT INTO alert_rules (metric, threshold, enabled) VALUES (?, ?, ?)")
+      .run('disk', 90, 1);
+
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.ok).toBe(false);
+      expect(body.checks.certificates).toMatchObject({ ok: false, warnDays: 14 });
+      expect(body.checks.certificates.expiring).toEqual([
+        { domain: 'example.com', file: certPath, daysLeft: 5, notAfter },
+      ]);
+      expect(body.launchBlockers).toEqual(
+        expect.arrayContaining([
+          { code: 'tls_cert_expiring', severity: 'manual', message: expect.stringMatching(/example\.com.*5 days/i) },
+        ])
+      );
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+      if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
+      else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevCertDir === undefined) delete process.env.TLS_CERT_CHECK_DIR;
+      else process.env.TLS_CERT_CHECK_DIR = prevCertDir;
+      if (prevCertWarnDays === undefined) delete process.env.TLS_CERT_WARN_DAYS;
+      else process.env.TLS_CERT_WARN_DAYS = prevCertWarnDays;
     }
   });
 

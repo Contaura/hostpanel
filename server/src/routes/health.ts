@@ -106,6 +106,36 @@ function backupArchiveMaxAgeDays() {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
 }
 
+function tlsCertificateWarnDays() {
+  const raw = Number(process.env.TLS_CERT_WARN_DAYS || 14);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 14;
+}
+
+function tlsCertificateDir() {
+  return process.env.TLS_CERT_CHECK_DIR || '/etc/letsencrypt/live';
+}
+
+function monitoredCertificates() {
+  const dir = tlsCertificateDir();
+  const warnDays = tlsCertificateWarnDays();
+  if (!existsSync(dir)) return { ok: true, dir, warnDays, certificates: [], expiring: [] };
+  const certificates = readdirSync(dir)
+    .map(domain => ({ domain, file: path.join(dir, domain, 'fullchain.pem') }))
+    .filter(cert => existsSync(cert.file))
+    .map(cert => {
+      const result = spawnSync('openssl', ['x509', '-in', cert.file, '-noout', '-enddate'], { encoding: 'utf8', timeout: 5000 });
+      const raw = String(result.stdout || '').trim();
+      const notAfter = raw.replace(/^notAfter=/, '');
+      const expiresAt = Date.parse(notAfter);
+      const daysLeft = Number.isFinite(expiresAt) ? Math.ceil((expiresAt - Date.now()) / (24 * 60 * 60 * 1000)) : null;
+      return { ...cert, notAfter, daysLeft, ok: result.status === 0 && daysLeft !== null && daysLeft > warnDays };
+    });
+  const expiring = certificates
+    .filter(cert => cert.daysLeft === null || cert.daysLeft <= warnDays)
+    .map(({ domain, file, notAfter, daysLeft }) => ({ domain, file, notAfter, daysLeft }));
+  return { ok: expiring.length === 0, dir, warnDays, certificates, expiring };
+}
+
 async function currentCriticalAlerts() {
   const [cpu, mem, disks] = await Promise.all([
     si.currentLoad(),
@@ -268,6 +298,24 @@ async function buildReadiness() {
       checks.backups = { ok: true, latestArchive: archive.latest, backupDir: archive.dir, maxAgeDays: archive.maxAgeDays };
     } catch (err: any) {
       checks.backups = { ok: true, latestArchive: null, warnings: [`Unable to inspect backup archive evidence: ${err.message}`] };
+    }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const certificates = monitoredCertificates();
+      if (certificates.expiring.length > 0) {
+        const first = certificates.expiring[0];
+        const days = first.daysLeft === null ? 'an unknown number of' : String(first.daysLeft);
+        launchBlockers.push({
+          code: 'tls_cert_expiring',
+          severity: 'manual',
+          message: `TLS certificate for ${first.domain} expires in ${days} days. Renew certificates before launch and verify HTTPS handshakes.`,
+        });
+      }
+      checks.certificates = certificates;
+    } catch (err: any) {
+      checks.certificates = { ok: false, warnings: [`Unable to inspect TLS certificates: ${err.message}`], expiring: [] };
     }
   }
 
