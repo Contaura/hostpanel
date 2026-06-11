@@ -71,7 +71,7 @@ Manual launch blockers are tracked explicitly so the final report can separate a
 
 - [x] Frontend shipped as lazy-loaded per-route chunks (no single massive initial bundle — **verified 2026-05-28**: Vite splits per page)
 - [x] API response times acceptable under normal load (< 200ms for common endpoints — **verified** by integration test timings)
-- [x] Long-running operations (backups, scans, app installs, WordPress install/maintenance update-all) run as background jobs with `/api/jobs` polling (**verified 2026-06-06** — WordPress update-all now returns `wordpress.update_all` job evidence while preserving synchronous compatibility)
+- [x] Long-running operations (backups, scans, app installs, WordPress install/maintenance/update-all, uploaded WordPress plugin/theme ZIP installs) run as background jobs with `/api/jobs` polling (**verified 2026-06-11** — uploaded plugin/theme ZIP installs now return `wordpress.plugin_upload` / `wordpress.theme_upload` job evidence while preserving synchronous compatibility)
 - [x] Background job table does not have a runaway accumulation of failed rows (0 failed rows — **verified 2026-05-28**)
 - [x] No memory leak observed after 24h uptime (53.3 MB RSS at 5h uptime — **verified 2026-05-28**)
 

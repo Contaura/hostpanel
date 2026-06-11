@@ -218,4 +218,54 @@ describe('WordPress install background job', () => {
     expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', theme: 'twentytwentyfive' }));
     expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', 'twentytwentyfive']), expect.any(Object));
   });
+
+  it('enqueues uploaded plugin zip installs as a wordpress.plugin_upload background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+    const form = new FormData();
+    form.append('async', 'true');
+    form.append('zip', new Blob(['fake plugin zip']), 'plugin.zip');
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/plugins/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.plugin_upload');
+    expect(job.resource).toBe('maint.example.com');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', output: expect.any(String) }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'plugin', 'install', expect.stringMatching(/^\/tmp\//), '--activate']), expect.any(Object));
+  });
+
+  it('enqueues uploaded theme zip installs as a wordpress.theme_upload background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+    const form = new FormData();
+    form.append('async', 'true');
+    form.append('zip', new Blob(['fake theme zip']), 'theme.zip');
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/themes/upload`, {
+      method: 'POST',
+      body: form,
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.theme_upload');
+    expect(job.resource).toBe('maint.example.com');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', output: expect.any(String) }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'install', expect.stringMatching(/^\/tmp\//)]), expect.any(Object));
+  });
 });

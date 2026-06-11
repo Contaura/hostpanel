@@ -309,12 +309,30 @@ router.post('/:domain/plugins/upload', zipUpload.single('zip'), async (req: Requ
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
+
+  const zipPath = req.file.path;
+  const doPluginUpload = async (ctx?: import('../background-jobs').JobContext) => {
+    try {
+      ctx?.progress(20, 'Installing uploaded plugin zip…');
+      const { stdout } = await wp(domain, ['plugin', 'install', zipPath, '--activate']);
+      return { domain, output: stdout };
+    } finally {
+      if (existsSync(zipPath)) unlinkSync(zipPath);
+    }
+  };
+
+  if (req.body?.async === true || req.body?.async === 'true') {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.plugin_upload', resource: domain, metadata: { domain }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doPluginUpload(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
   try {
-    const { stdout } = await wp(domain, ['plugin', 'install', req.file.path, '--activate']);
-    unlinkSync(req.file.path);
-    res.json({ output: stdout });
+    const result = await doPluginUpload();
+    res.json({ output: result.output });
   } catch (err: any) {
-    if (req.file && existsSync(req.file.path)) unlinkSync(req.file.path);
     res.status(500).json({ error: err.message });
   }
 });
@@ -323,12 +341,30 @@ router.post('/:domain/themes/upload', zipUpload.single('zip'), async (req: Reque
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
   if (!req.file) return res.status(400).json({ error: 'No zip file uploaded' });
+
+  const zipPath = req.file.path;
+  const doThemeUpload = async (ctx?: import('../background-jobs').JobContext) => {
+    try {
+      ctx?.progress(20, 'Installing uploaded theme zip…');
+      const { stdout } = await wp(domain, ['theme', 'install', zipPath]);
+      return { domain, output: stdout };
+    } finally {
+      if (existsSync(zipPath)) unlinkSync(zipPath);
+    }
+  };
+
+  if (req.body?.async === true || req.body?.async === 'true') {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.theme_upload', resource: domain, metadata: { domain }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doThemeUpload(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
   try {
-    const { stdout } = await wp(domain, ['theme', 'install', req.file.path]);
-    unlinkSync(req.file.path);
-    res.json({ output: stdout });
+    const result = await doThemeUpload();
+    res.json({ output: result.output });
   } catch (err: any) {
-    if (req.file && existsSync(req.file.path)) unlinkSync(req.file.path);
     res.status(500).json({ error: err.message });
   }
 });

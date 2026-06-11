@@ -34,6 +34,7 @@ All notable changes to HostPanel are documented in this file.
 - Added production health endpoints: public `/healthz` liveness plus authenticated `/api/health/readiness` checks for database, disk, memory, recent failed background jobs, required runtime services, key-only SSH, and notification webhook monitoring advisory.
 - Added phpMyAdmin Signon field validation endpoint that checks managed Apache alias/config, bridge PHP syntax, httpd state, token directory presence, and avoids returning token payloads.
 - Added disaster-recovery restore drill automation for backup archives, including asynchronous `/api/backup/drill/:name` jobs and persisted JSON verification evidence.
+- Added background-job support for uploaded WordPress plugin/theme ZIP installs (`async: true`) while preserving synchronous install compatibility.
 
 ### Fixed
 
