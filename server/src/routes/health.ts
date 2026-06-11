@@ -106,6 +106,13 @@ function backupArchiveMaxAgeDays() {
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 1;
 }
 
+function countEnabledNightlyDatabaseBackups() {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='backup_schedules'").get() as any;
+  if (!table) return 0;
+  const row = db.prepare("SELECT COUNT(*) AS c FROM backup_schedules WHERE type='database' AND enabled=1").get() as { c: number };
+  return Number(row?.c || 0);
+}
+
 function tlsCertificateWarnDays() {
   const raw = Number(process.env.TLS_CERT_WARN_DAYS || 14);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 14;
@@ -298,6 +305,22 @@ async function buildReadiness() {
       checks.backups = { ok: true, latestArchive: archive.latest, backupDir: archive.dir, maxAgeDays: archive.maxAgeDays };
     } catch (err: any) {
       checks.backups = { ok: true, latestArchive: null, warnings: [`Unable to inspect backup archive evidence: ${err.message}`] };
+    }
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      const enabledNightlyDatabaseBackupCount = countEnabledNightlyDatabaseBackups();
+      if (enabledNightlyDatabaseBackupCount === 0) {
+        launchBlockers.push({
+          code: 'nightly_database_backup_schedule_missing',
+          severity: 'manual',
+          message: 'No enabled nightly database backup schedule was found. Configure an enabled database backup schedule and verify the first archive before launch.',
+        });
+      }
+      checks.backupSchedules = { ok: true, enabledNightlyDatabaseBackupCount };
+    } catch (err: any) {
+      checks.backupSchedules = { ok: true, enabledNightlyDatabaseBackupCount: null, warnings: [`Unable to inspect backup schedules: ${err.message}`] };
     }
   }
 

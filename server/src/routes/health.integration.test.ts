@@ -206,6 +206,7 @@ describe('production health and readiness checks', () => {
       expect(body.launchBlockers).toEqual([
         { code: 'dr_drill_evidence_stale', severity: 'manual', message: expect.stringMatching(/older than 7 days/i) },
         { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
+        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
       ]);
     } finally {
       await server.close();
@@ -220,6 +221,90 @@ describe('production health and readiness checks', () => {
       else process.env.BACKUP_DIR = prevBackupDir;
       if (prevDrillMaxAgeDays === undefined) delete process.env.DRILL_REPORT_MAX_AGE_DAYS;
       else process.env.DRILL_REPORT_MAX_AGE_DAYS = prevDrillMaxAgeDays;
+    }
+  });
+
+  it('adds a manual launch blocker when no enabled nightly database backup schedule exists in production', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevBackupDir = process.env.BACKUP_DIR;
+    process.env.NODE_ENV = 'production';
+    process.env.READINESS_REQUIRED_SERVICES = '';
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
+    await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
+    const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
+    await fs.writeFile(freshReport, JSON.stringify({ ok: true }));
+    const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
+    await fs.writeFile(freshBackup, 'backup');
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
+    }));
+
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare('DELETE FROM notification_webhooks').run();
+    db.prepare('DELETE FROM alert_rules').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 1);
+    db.prepare("INSERT INTO notification_webhooks (name, url, type, events, enabled) VALUES (?, ?, ?, ?, ?)")
+      .run('ops', 'https://alerts.example.test/webhook', 'webhook', JSON.stringify(['system.disk_alert']), 1);
+    db.prepare("INSERT INTO alert_rules (metric, threshold, enabled) VALUES (?, ?, ?)")
+      .run('disk', 90, 1);
+    db.exec(`CREATE TABLE IF NOT EXISTS backup_schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      target TEXT,
+      schedule TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      last_run TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+    db.prepare('DELETE FROM backup_schedules').run();
+    db.prepare('INSERT INTO backup_schedules (type, target, schedule, enabled) VALUES (?, ?, ?, ?)')
+      .run('files', 'all', '0 2 * * *', 1);
+
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.checks.backupSchedules).toMatchObject({ ok: true, enabledNightlyDatabaseBackupCount: 0 });
+      expect(body.launchBlockers).toEqual([
+        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+      ]);
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+      if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
+      else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
+      else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
     }
   });
 
@@ -284,6 +369,7 @@ describe('production health and readiness checks', () => {
       expect(body.checks.backups).toMatchObject({ ok: true, latestArchive: { file: staleBackup }, maxAgeDays: 1 });
       expect(body.launchBlockers).toEqual([
         { code: 'backup_evidence_stale', severity: 'manual', message: expect.stringMatching(/backup archive evidence is older than 1 day/i) },
+        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
       ]);
     } finally {
       await server.close();
@@ -346,6 +432,7 @@ describe('production health and readiness checks', () => {
         { code: 'notification_webhook_missing', severity: 'manual', message: expect.stringMatching(/notification webhook/i) },
         { code: 'dr_drill_evidence_missing', severity: 'manual', message: expect.stringMatching(/disaster-recovery restore drill/i) },
         { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
+        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
       ]);
     } finally {
       await server.close();
@@ -465,6 +552,7 @@ describe('production health and readiness checks', () => {
       expect(body.launchBlockers).toEqual([
         { code: 'critical_alerts_active', severity: 'manual', message: expect.stringMatching(/critical production alert/i) },
         { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
+        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
       ]);
     } finally {
       await server.close();
