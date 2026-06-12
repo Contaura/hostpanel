@@ -237,6 +237,37 @@ describe('app staging/promote background jobs', () => {
     delete process.env.WEBROOT;
   });
 
+  it('keeps script installation synchronous when form payload sends async as false string', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const tmp = await import('fs/promises').then(fs => fs.mkdtemp('/tmp/hostpanel-script-sync-'));
+    process.env.WEBROOT = tmp;
+    vi.resetModules();
+
+    const scripts = (await import('./scripts')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/scripts', scripts);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const res = await fetch(`${server.url}/api/scripts/install`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ script: 'laravel', domain: 'sync-install.example.com', async: 'false' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.url).toBe('http://sync-install.example.com');
+    expect(body.installPath).toContain('sync-install.example.com/public_html');
+    expect(body).not.toHaveProperty('jobId');
+    expect(runFileMock).toHaveBeenCalledWith('composer', expect.arrayContaining(['create-project', 'laravel/laravel']), expect.objectContaining({ timeout: 300000 }));
+
+    await import('fs/promises').then(fs => fs.rm(tmp, { recursive: true, force: true }));
+    delete process.env.WEBROOT;
+  });
+
   it('enqueues app promote (rsync + pm2 restart) as a background job', async () => {
     runFileMock.mockReset();
     runFileMock.mockResolvedValue({ stdout: '', stderr: '' });

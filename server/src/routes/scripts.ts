@@ -222,7 +222,8 @@ router.post('/install', async (req: AuthRequest, res: Response) => {
     return { message: `${meta.name} installed at ${installPath}`, url: `http://${domain}`, installPath, script };
   };
 
-  if (isAsync) {
+  const runAsBackgroundJob = isAsync === true || isAsync === 'true';
+  if (runAsBackgroundJob) {
     const jobId = createBackgroundJob({ type: 'script.install', resource: `${script}:${domain}`, createdBy: req.user?.username }, async (ctx) => {
       ctx.progress(10, `Installing ${meta.name} for ${domain}`);
       const result = await doInstall();
