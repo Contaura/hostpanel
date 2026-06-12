@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { spawn } from 'child_process';
-import { createReadStream, createWriteStream, readdirSync, statSync, existsSync, mkdirSync, unlinkSync, writeFileSync, mkdtempSync } from 'fs';
+import { createReadStream, createWriteStream, readdirSync, readFileSync, statSync, existsSync, mkdirSync, unlinkSync, writeFileSync, mkdtempSync } from 'fs';
 import zlib from 'zlib';
 import path from 'path';
 import os from 'os';
@@ -39,6 +39,27 @@ function safeFileName(name: string): string {
 
 function safeArchiveEntry(entry: string): boolean {
   return !!entry && !entry.startsWith('/') && !entry.includes('..') && !entry.includes('\0');
+}
+
+function summarizeDrillReport(file: string) {
+  const full = path.join(getDrillReportDir(), file);
+  const parsed = JSON.parse(readFileSync(full, 'utf8'));
+  const st = statSync(full);
+  const restorePlan = parsed.restorePlan || {};
+  return {
+    file,
+    backup: String(parsed.backup || ''),
+    success: parsed.success === true,
+    drill: parsed.drill === true,
+    verifiedAt: parsed.verifiedAt || st.mtime.toISOString(),
+    created: st.mtime.toISOString(),
+    restorePlan: {
+      type: restorePlan.type || null,
+      count: typeof restorePlan.count === 'number' ? restorePlan.count : null,
+      dryRun: typeof restorePlan.dryRun === 'boolean' ? restorePlan.dryRun : null,
+      actionCount: Array.isArray(restorePlan.actions) ? restorePlan.actions.length : 0,
+    },
+  };
 }
 
 async function tarEntries(file: string): Promise<string[]> {
@@ -207,6 +228,19 @@ router.post('/drill/:name', async (req: AuthRequest, res: Response) => {
   }
   try { res.json(await runRestoreDrill(name, req.body || {})); }
   catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
+router.get('/drills', (_req: AuthRequest, res: Response) => {
+  try {
+    const dir = getDrillReportDir();
+    const reports = readdirSync(dir)
+      .filter(f => f.endsWith('.json'))
+      .map(summarizeDrillReport)
+      .sort((a, b) => new Date(b.verifiedAt).getTime() - new Date(a.verifiedAt).getTime());
+    res.json({ dir, latest: reports[0] || null, reports });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.get('/restore/:name/plan', async (req: AuthRequest, res: Response) => {

@@ -148,6 +148,47 @@ describe('central background jobs API', () => {
     expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', archive], expect.objectContaining({ timeout: 120000 }));
   });
 
+  it('lists disaster-recovery drill evidence without exposing restore internals beyond the verification summary', async () => {
+    const backup = (await import('./backup')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/backup', backup);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const drillDir = path.join(process.env.BACKUP_DIR!, 'drills');
+    await fs.mkdir(drillDir, { recursive: true });
+    const oldReport = path.join(drillDir, 'files_all_old.tar.gz-2024-01-01T00-00-00-000Z.json');
+    const latestReport = path.join(drillDir, 'files_all_new.tar.gz-2024-01-02T00-00-00-000Z.json');
+    await fs.writeFile(oldReport, JSON.stringify({
+      success: true,
+      drill: true,
+      backup: 'files_all_old.tar.gz',
+      verifiedAt: '2024-01-01T00:00:00.000Z',
+      restorePlan: { count: 1, actions: ['Would restore old.html'] },
+    }));
+    await fs.writeFile(latestReport, JSON.stringify({
+      success: true,
+      drill: true,
+      backup: 'files_all_new.tar.gz',
+      verifiedAt: '2024-01-02T00:00:00.000Z',
+      restorePlan: { count: 2, actions: ['Would restore index.html', 'Would restore app.js'], selected: ['index.html', 'app.js'] },
+      accidentalSecret: 'do-not-return',
+    }));
+
+    const res = await fetch(`${server.url}/api/backup/drills`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.dir).toBe(drillDir);
+    expect(body.latest.backup).toBe('files_all_new.tar.gz');
+    expect(body.latest.verifiedAt).toBe('2024-01-02T00:00:00.000Z');
+    expect(body.latest.restorePlan).toEqual({ type: null, count: 2, dryRun: null, actionCount: 2 });
+    expect(body.reports.map((r: any) => r.backup)).toEqual(['files_all_new.tar.gz', 'files_all_old.tar.gz']);
+    expect(JSON.stringify(body)).not.toContain('do-not-return');
+    expect(JSON.stringify(body)).not.toContain('index.html');
+  });
+
   it('enqueues app creation as a central job and exposes the created app result', async () => {
     process.env.VHOST_DIR = path.join(tmp, 'httpd');
     process.env.DATA_DIR = path.join(tmp, 'data-app-create');
