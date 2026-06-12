@@ -174,9 +174,36 @@ async function currentCriticalAlerts() {
   return alerts;
 }
 
+type ManualLaunchBlockerCode =
+  | 'admin_2fa_missing'
+  | 'notification_webhook_missing'
+  | 'critical_alerts_active'
+  | 'dr_drill_evidence_missing'
+  | 'dr_drill_evidence_stale'
+  | 'backup_evidence_missing'
+  | 'backup_evidence_stale'
+  | 'nightly_database_backup_schedule_missing'
+  | 'tls_cert_expiring';
+
+const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: string; requiredEvidence: string }> = {
+  admin_2fa_missing: { owner: 'Marcos', requiredEvidence: 'Enable TOTP for the production admin account in /admin-users; readiness security warning clears.' },
+  notification_webhook_missing: { owner: 'Marcos', requiredEvidence: 'Configure an enabled notification webhook and send a successful test notification; readiness monitoring warning clears.' },
+  critical_alerts_active: { owner: 'Ron', requiredEvidence: 'Resolve active critical CPU, memory, or disk alerts and rerun /api/health/readiness.' },
+  dr_drill_evidence_missing: { owner: 'Ron', requiredEvidence: 'Run POST /api/backup/drill/:name and verify the persisted report before launch.' },
+  dr_drill_evidence_stale: { owner: 'Ron', requiredEvidence: 'Rerun POST /api/backup/drill/:name against a current backup and verify the persisted report age.' },
+  backup_evidence_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Create and verify on-server backup archive evidence, then confirm off-server replication.' },
+  backup_evidence_stale: { owner: 'Ron + Marcos', requiredEvidence: 'Create a fresh backup archive and verify off-server replication before launch.' },
+  nightly_database_backup_schedule_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Configure an enabled database backup schedule and verify the first archive before launch.' },
+  tls_cert_expiring: { owner: 'Ron', requiredEvidence: 'Renew expiring TLS certificates and verify HTTPS handshakes before launch.' },
+};
+
+function manualLaunchBlocker(code: ManualLaunchBlockerCode, message: string) {
+  return { code, severity: 'manual' as const, ...MANUAL_LAUNCH_BLOCKER_EVIDENCE[code], message };
+}
+
 async function buildReadiness() {
   const checks: any = {};
-  const launchBlockers: Array<{ code: string; severity: 'manual'; message: string }> = [];
+  const launchBlockers: Array<ReturnType<typeof manualLaunchBlocker>> = [];
   try {
     const row = db.prepare('SELECT 1 AS ok').get() as any;
     checks.database = { ok: row?.ok === 1 };
@@ -226,7 +253,7 @@ async function buildReadiness() {
       if (!anyTotp || anyTotp.c === 0) {
         const message = 'No admin user has 2FA (TOTP) enabled. Enable 2FA for all admin accounts to harden access.';
         warnings.push(message);
-        launchBlockers.push({ code: 'admin_2fa_missing', severity: 'manual', message });
+        launchBlockers.push(manualLaunchBlocker('admin_2fa_missing', message));
       }
       if (sshPasswordAuthenticationEnabled()) {
         failures.push('SSH password authentication is enabled. Disable PasswordAuthentication and use key-only SSH for production access.');
@@ -248,7 +275,7 @@ async function buildReadiness() {
       if (activeWebhookCount === 0) {
         const message = 'No enabled notification webhook is configured. Configure Slack, Discord, or email webhook delivery so production alerts leave the panel.';
         warnings.push(message);
-        launchBlockers.push({ code: 'notification_webhook_missing', severity: 'manual', message });
+        launchBlockers.push(manualLaunchBlocker('notification_webhook_missing', message));
       }
       if (enabledAlertRuleCount === 0) {
         warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
@@ -256,7 +283,7 @@ async function buildReadiness() {
       if (criticalAlerts.length > 0) {
         const message = `${criticalAlerts.length} critical production alert${criticalAlerts.length === 1 ? '' : 's'} currently active. Resolve critical CPU, memory, or disk alerts before launch.`;
         warnings.push(message);
-        launchBlockers.push({ code: 'critical_alerts_active', severity: 'manual', message });
+        launchBlockers.push(manualLaunchBlocker('critical_alerts_active', message));
       }
       checks.monitoring = { ok: criticalAlerts.length === 0, activeWebhookCount, enabledAlertRuleCount, criticalAlerts, warnings, selfHealthWatchdog: getSelfHealthWatchdogState() };
     } catch (err: any) {
@@ -268,17 +295,9 @@ async function buildReadiness() {
     try {
       const report = latestDrillReport();
       if (!report.latest) {
-        launchBlockers.push({
-          code: 'dr_drill_evidence_missing',
-          severity: 'manual',
-          message: 'No disaster-recovery restore drill evidence was found. Run POST /api/backup/drill/:name and verify the persisted report before launch.',
-        });
+        launchBlockers.push(manualLaunchBlocker('dr_drill_evidence_missing', 'No disaster-recovery restore drill evidence was found. Run POST /api/backup/drill/:name and verify the persisted report before launch.'));
       } else if (report.latest.ageDays > report.maxAgeDays) {
-        launchBlockers.push({
-          code: 'dr_drill_evidence_stale',
-          severity: 'manual',
-          message: `Latest disaster-recovery restore drill evidence is older than ${report.maxAgeDays} days. Re-run POST /api/backup/drill/:name against a current backup before launch.`,
-        });
+        launchBlockers.push(manualLaunchBlocker('dr_drill_evidence_stale', `Latest disaster-recovery restore drill evidence is older than ${report.maxAgeDays} days. Re-run POST /api/backup/drill/:name against a current backup before launch.`));
       }
       checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir, maxAgeDays: report.maxAgeDays };
     } catch (err: any) {
@@ -290,17 +309,9 @@ async function buildReadiness() {
     try {
       const archive = latestBackupArchive();
       if (!archive.latest) {
-        launchBlockers.push({
-          code: 'backup_evidence_missing',
-          severity: 'manual',
-          message: 'No HostPanel backup archive evidence was found. Create and verify an on-server backup archive before launch, then confirm off-server replication.',
-        });
+        launchBlockers.push(manualLaunchBlocker('backup_evidence_missing', 'No HostPanel backup archive evidence was found. Create and verify an on-server backup archive before launch, then confirm off-server replication.'));
       } else if (archive.latest.ageDays > archive.maxAgeDays) {
-        launchBlockers.push({
-          code: 'backup_evidence_stale',
-          severity: 'manual',
-          message: `Latest backup archive evidence is older than ${archive.maxAgeDays} day${archive.maxAgeDays === 1 ? '' : 's'}. Create a fresh backup and verify off-server replication before launch.`,
-        });
+        launchBlockers.push(manualLaunchBlocker('backup_evidence_stale', `Latest backup archive evidence is older than ${archive.maxAgeDays} day${archive.maxAgeDays === 1 ? '' : 's'}. Create a fresh backup and verify off-server replication before launch.`));
       }
       checks.backups = { ok: true, latestArchive: archive.latest, backupDir: archive.dir, maxAgeDays: archive.maxAgeDays };
     } catch (err: any) {
@@ -312,11 +323,7 @@ async function buildReadiness() {
     try {
       const enabledNightlyDatabaseBackupCount = countEnabledNightlyDatabaseBackups();
       if (enabledNightlyDatabaseBackupCount === 0) {
-        launchBlockers.push({
-          code: 'nightly_database_backup_schedule_missing',
-          severity: 'manual',
-          message: 'No enabled nightly database backup schedule was found. Configure an enabled database backup schedule and verify the first archive before launch.',
-        });
+        launchBlockers.push(manualLaunchBlocker('nightly_database_backup_schedule_missing', 'No enabled nightly database backup schedule was found. Configure an enabled database backup schedule and verify the first archive before launch.'));
       }
       checks.backupSchedules = { ok: true, enabledNightlyDatabaseBackupCount };
     } catch (err: any) {
@@ -330,11 +337,7 @@ async function buildReadiness() {
       if (certificates.expiring.length > 0) {
         const first = certificates.expiring[0];
         const days = first.daysLeft === null ? 'an unknown number of' : String(first.daysLeft);
-        launchBlockers.push({
-          code: 'tls_cert_expiring',
-          severity: 'manual',
-          message: `TLS certificate for ${first.domain} expires in ${days} days. Renew certificates before launch and verify HTTPS handshakes.`,
-        });
+        launchBlockers.push(manualLaunchBlocker('tls_cert_expiring', `TLS certificate for ${first.domain} expires in ${days} days. Renew certificates before launch and verify HTTPS handshakes.`));
       }
       checks.certificates = certificates;
     } catch (err: any) {

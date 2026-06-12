@@ -204,9 +204,9 @@ describe('production health and readiness checks', () => {
       expect(body.ok).toBe(true);
       expect(body.checks.disasterRecovery).toMatchObject({ ok: true, latestDrillReport: { file: staleReport }, maxAgeDays: 7 });
       expect(body.launchBlockers).toEqual([
-        { code: 'dr_drill_evidence_stale', severity: 'manual', message: expect.stringMatching(/older than 7 days/i) },
-        { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
-        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+        expect.objectContaining({ code: 'dr_drill_evidence_stale', severity: 'manual', owner: 'Ron', requiredEvidence: expect.any(String), message: expect.stringMatching(/older than 7 days/i) }),
+        expect.objectContaining({ code: 'backup_evidence_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/backup archive evidence/i) }),
+        expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
       await server.close();
@@ -292,7 +292,7 @@ describe('production health and readiness checks', () => {
       expect(body.ok).toBe(true);
       expect(body.checks.backupSchedules).toMatchObject({ ok: true, enabledNightlyDatabaseBackupCount: 0 });
       expect(body.launchBlockers).toEqual([
-        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+        expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
       await server.close();
@@ -368,8 +368,8 @@ describe('production health and readiness checks', () => {
       expect(body.ok).toBe(true);
       expect(body.checks.backups).toMatchObject({ ok: true, latestArchive: { file: staleBackup }, maxAgeDays: 1 });
       expect(body.launchBlockers).toEqual([
-        { code: 'backup_evidence_stale', severity: 'manual', message: expect.stringMatching(/backup archive evidence is older than 1 day/i) },
-        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+        expect.objectContaining({ code: 'backup_evidence_stale', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/backup archive evidence is older than 1 day/i) }),
+        expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
       await server.close();
@@ -428,11 +428,11 @@ describe('production health and readiness checks', () => {
       expect(res.status).toBe(200);
       expect(body.ok).toBe(true);
       expect(body.launchBlockers).toEqual([
-        { code: 'admin_2fa_missing', severity: 'manual', message: expect.stringMatching(/2FA/i) },
-        { code: 'notification_webhook_missing', severity: 'manual', message: expect.stringMatching(/notification webhook/i) },
-        { code: 'dr_drill_evidence_missing', severity: 'manual', message: expect.stringMatching(/disaster-recovery restore drill/i) },
-        { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
-        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+        expect.objectContaining({ code: 'admin_2fa_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/Enable TOTP/i), message: expect.stringMatching(/2FA/i) }),
+        expect.objectContaining({ code: 'notification_webhook_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/test notification/i), message: expect.stringMatching(/notification webhook/i) }),
+        expect.objectContaining({ code: 'dr_drill_evidence_missing', severity: 'manual', owner: 'Ron', requiredEvidence: expect.stringMatching(/persisted report/i), message: expect.stringMatching(/disaster-recovery restore drill/i) }),
+        expect.objectContaining({ code: 'backup_evidence_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.stringMatching(/off-server replication/i), message: expect.stringMatching(/backup archive evidence/i) }),
+        expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.stringMatching(/enabled database backup schedule/i), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
       await server.close();
@@ -550,9 +550,9 @@ describe('production health and readiness checks', () => {
         { metric: 'Disk', value: 96, threshold: 80, mount: '/', message: 'Disk / usage is 96%' },
       ]);
       expect(body.launchBlockers).toEqual([
-        { code: 'critical_alerts_active', severity: 'manual', message: expect.stringMatching(/critical production alert/i) },
-        { code: 'backup_evidence_missing', severity: 'manual', message: expect.stringMatching(/backup archive evidence/i) },
-        { code: 'nightly_database_backup_schedule_missing', severity: 'manual', message: expect.stringMatching(/nightly database backup schedule/i) },
+        expect.objectContaining({ code: 'critical_alerts_active', severity: 'manual', owner: 'Ron', requiredEvidence: expect.any(String), message: expect.stringMatching(/critical production alert/i) }),
+        expect.objectContaining({ code: 'backup_evidence_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/backup archive evidence/i) }),
+        expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.any(String), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
       await server.close();
@@ -692,7 +692,7 @@ describe('production health and readiness checks', () => {
       ]);
       expect(body.launchBlockers).toEqual(
         expect.arrayContaining([
-          { code: 'tls_cert_expiring', severity: 'manual', message: expect.stringMatching(/example\.com.*5 days/i) },
+          expect.objectContaining({ code: 'tls_cert_expiring', severity: 'manual', owner: 'Ron', requiredEvidence: expect.stringMatching(/Renew expiring TLS/i), message: expect.stringMatching(/example\.com.*5 days/i) }),
         ])
       );
     } finally {
