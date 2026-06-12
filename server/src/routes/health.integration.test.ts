@@ -224,6 +224,89 @@ describe('production health and readiness checks', () => {
     }
   });
 
+  it('adds a manual launch blocker when latest disaster-recovery drill evidence is invalid', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    const prevBackupDir = process.env.BACKUP_DIR;
+    process.env.NODE_ENV = 'production';
+    process.env.READINESS_REQUIRED_SERVICES = '';
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
+    await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
+    const invalidReport = path.join(process.env.DRILL_REPORT_DIR, 'failed-drill.json');
+    await fs.writeFile(invalidReport, JSON.stringify({ success: false, drill: true, backup: 'files_all.tar.gz', restorePlan: { dryRun: true, actions: [] } }));
+    const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
+    await fs.writeFile(freshBackup, 'backup');
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
+    }));
+
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare('DELETE FROM notification_webhooks').run();
+    db.exec(`CREATE TABLE IF NOT EXISTS backup_schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      target TEXT,
+      schedule TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      last_run TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`);
+    db.prepare('DELETE FROM backup_schedules').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 1);
+    db.prepare("INSERT INTO notification_webhooks (name, url, type, events, enabled) VALUES (?, ?, ?, ?, ?)")
+      .run('ops', 'https://alerts.example.test/webhook', 'webhook', JSON.stringify(['system.disk_alert']), 1);
+    db.prepare("INSERT INTO alert_rules (metric, threshold, enabled) VALUES (?, ?, ?)")
+      .run('disk', 90, 1);
+    db.prepare("INSERT INTO backup_schedules (type, target, schedule, enabled) VALUES (?, ?, ?, ?)")
+      .run('database', 'hostpanel', '0 2 * * *', 1);
+
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(200);
+      expect(body.ok).toBe(true);
+      expect(body.checks.disasterRecovery).toMatchObject({ ok: true, latestDrillReport: { file: invalidReport, valid: false } });
+      expect(body.launchBlockers).toEqual([
+        expect.objectContaining({ code: 'dr_drill_evidence_invalid', severity: 'manual', owner: 'Ron', requiredEvidence: expect.any(String), message: expect.stringMatching(/invalid disaster-recovery restore drill evidence/i) }),
+      ]);
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+      if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
+      else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
+      else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
+    }
+  });
+
   it('adds a manual launch blocker when no enabled nightly database backup schedule exists in production', async () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
@@ -239,7 +322,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ ok: true }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(freshBackup, 'backup');
     vi.doMock('child_process', () => ({
@@ -325,7 +408,7 @@ describe('production health and readiness checks', () => {
     process.env.BACKUP_ARCHIVE_MAX_AGE_DAYS = '1';
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ ok: true }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const staleBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(staleBackup, 'backup');
     const staleDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
@@ -509,7 +592,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR);
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ ok: true }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     vi.doMock('child_process', () => ({
       spawnSync: vi.fn((cmd: string, args: string[]) => {
         if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };

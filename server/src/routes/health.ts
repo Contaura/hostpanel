@@ -64,19 +64,35 @@ function serviceActive(name: string) {
   return { name, active: result.status === 0 && status === 'active', status };
 }
 
-function latestDrillReport() {
+function latestDrillReport(): { dir: string; latest: null | { file: string; mtime: string; ageDays: number; valid: boolean; validationErrors: string[] }; maxAgeDays: number } {
   const dir = process.env.DRILL_REPORT_DIR || path.join(process.env.BACKUP_DIR || '/var/backups/hostpanel', 'drills');
-  if (!existsSync(dir)) return { dir, latest: null as null | { file: string; mtime: string; ageDays: number }, maxAgeDays: drillReportMaxAgeDays() };
+  if (!existsSync(dir)) return { dir, latest: null, maxAgeDays: drillReportMaxAgeDays() };
   const reports = readdirSync(dir)
     .filter(name => name.endsWith('.json'))
     .map(name => {
       const file = path.join(dir, name);
       const st = statSync(file);
-      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString(), ageDays: Math.floor((Date.now() - st.mtimeMs) / (24 * 60 * 60 * 1000)) };
+      const validation = validateDrillReport(file);
+      return { file, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString(), ageDays: Math.floor((Date.now() - st.mtimeMs) / (24 * 60 * 60 * 1000)), ...validation };
     })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
   const latest = reports[0];
-  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime, ageDays: latest.ageDays } : null, maxAgeDays: drillReportMaxAgeDays() };
+  return { dir, latest: latest ? { file: latest.file, mtime: latest.mtime, ageDays: latest.ageDays, valid: latest.valid, validationErrors: latest.validationErrors } : null, maxAgeDays: drillReportMaxAgeDays() };
+}
+
+function validateDrillReport(file: string) {
+  const errors: string[] = [];
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    if (parsed.success !== true) errors.push('success is not true');
+    if (parsed.drill !== true) errors.push('drill is not true');
+    if (!parsed.backup || typeof parsed.backup !== 'string') errors.push('backup is missing');
+    if (!parsed.verifiedAt || Number.isNaN(Date.parse(parsed.verifiedAt))) errors.push('verifiedAt is missing or invalid');
+    if (!parsed.restorePlan || parsed.restorePlan.dryRun !== true) errors.push('restorePlan dry-run evidence is missing');
+  } catch (err: any) {
+    errors.push(`report is not valid JSON: ${err.message}`);
+  }
+  return { valid: errors.length === 0, validationErrors: errors };
 }
 
 function drillReportMaxAgeDays() {
@@ -180,6 +196,7 @@ type ManualLaunchBlockerCode =
   | 'critical_alerts_active'
   | 'dr_drill_evidence_missing'
   | 'dr_drill_evidence_stale'
+  | 'dr_drill_evidence_invalid'
   | 'backup_evidence_missing'
   | 'backup_evidence_stale'
   | 'nightly_database_backup_schedule_missing'
@@ -191,6 +208,7 @@ const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: s
   critical_alerts_active: { owner: 'Ron', requiredEvidence: 'Resolve active critical CPU, memory, or disk alerts and rerun /api/health/readiness.' },
   dr_drill_evidence_missing: { owner: 'Ron', requiredEvidence: 'Run POST /api/backup/drill/:name and verify the persisted report before launch.' },
   dr_drill_evidence_stale: { owner: 'Ron', requiredEvidence: 'Rerun POST /api/backup/drill/:name against a current backup and verify the persisted report age.' },
+  dr_drill_evidence_invalid: { owner: 'Ron', requiredEvidence: 'Rerun POST /api/backup/drill/:name and confirm the latest report has success=true, drill=true, a valid verifiedAt timestamp, backup name, and dry-run restore plan.' },
   backup_evidence_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Create and verify on-server backup archive evidence, then confirm off-server replication.' },
   backup_evidence_stale: { owner: 'Ron + Marcos', requiredEvidence: 'Create a fresh backup archive and verify off-server replication before launch.' },
   nightly_database_backup_schedule_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Configure an enabled database backup schedule and verify the first archive before launch.' },
@@ -298,6 +316,8 @@ async function buildReadiness() {
         launchBlockers.push(manualLaunchBlocker('dr_drill_evidence_missing', 'No disaster-recovery restore drill evidence was found. Run POST /api/backup/drill/:name and verify the persisted report before launch.'));
       } else if (report.latest.ageDays > report.maxAgeDays) {
         launchBlockers.push(manualLaunchBlocker('dr_drill_evidence_stale', `Latest disaster-recovery restore drill evidence is older than ${report.maxAgeDays} days. Re-run POST /api/backup/drill/:name against a current backup before launch.`));
+      } else if (!report.latest.valid) {
+        launchBlockers.push(manualLaunchBlocker('dr_drill_evidence_invalid', `Latest invalid disaster-recovery restore drill evidence must be rerun before launch: ${report.latest.validationErrors.join('; ')}`));
       }
       checks.disasterRecovery = { ok: true, latestDrillReport: report.latest, reportDir: report.dir, maxAgeDays: report.maxAgeDays };
     } catch (err: any) {
