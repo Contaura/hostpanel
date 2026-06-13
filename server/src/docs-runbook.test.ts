@@ -78,6 +78,9 @@ describe('production launch checklist', () => {
     expect(report).toContain('Deadline status: Automated platform verification completed before 2026-06-09 23:59 UTC; final business launch still depends on Marcos-owned manual evidence below.');
     expect(report).toContain('admin_2fa_missing');
     expect(report).toContain('notification_webhook_missing');
+    expect(report).toContain('external_uptime_monitor_missing');
+    expect(report).toContain('off_server_backup_replication_missing');
+    expect(report).toContain('payment_webhook_secrets_unverified');
     expect(report).not.toMatch(/TODO|TBD|<git hash>|YYYY-MM-DD/);
   });
 });

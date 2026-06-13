@@ -31,12 +31,14 @@ The application is operationally healthy, but final business launch remains gate
 |---|---|---|
 | `admin_2fa_missing` | Marcos | Enable TOTP for the production admin account in `/admin-users`; readiness security warning clears. |
 | `notification_webhook_missing` | Marcos | Configure an enabled Slack, Discord, or email webhook in Settings and send a successful test notification; readiness monitoring warning clears. |
+| `external_uptime_monitor_missing` | Marcos | External monitor for `https://panel.contaura.com/healthz` checks every 1–5 minutes and alerts the launch recipients. |
+| `off_server_backup_replication_missing` | Marcos | Latest HostPanel backup archive is replicated to S3/B2/equivalent off-server storage with retention evidence. |
+| `payment_webhook_secrets_unverified` | Marcos | Stripe/PayPal webhook secrets are configured and a test delivery succeeds, or Marcos confirms payments are not live at launch. |
 
 Additional launch-checklist manual evidence still required before public launch sign-off:
 
-- External uptime monitor for `https://panel.contaura.com/healthz` with alert recipients enabled.
-- Off-server backup replication evidence for the latest HostPanel backup and documented retention.
-- Payment webhook secrets verified, or written confirmation that payments are not live at launch.
+- Backup contents confirmation for `.env`, DB, vhosts, DNS zones, SSL certs, and email config, or documented rebuild steps for intentionally excluded items.
+- Automated nightly backup schedule evidence if Marcos wants this enforced outside HostPanel's existing backup/archive readiness checks.
 
 ## Current launch verdict
 
