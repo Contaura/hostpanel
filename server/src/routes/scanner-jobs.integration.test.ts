@@ -196,6 +196,35 @@ describe('app staging/promote background jobs', () => {
     db.prepare('DELETE FROM app_staging WHERE app_name=?').run('testapp');
   });
 
+  it('keeps app staging synchronous when form payload sends async as false string', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const apps = (await import('./apps')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/apps', withAdminAuth(apps));
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const db = (await import('../db')).default;
+    db.prepare(`INSERT OR IGNORE INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
+      VALUES ('syncstage','nodejs','syncstage.example.com',5567,'/apps/syncstage/app.js','/apps/syncstage','stopped','{}')`).run();
+
+    const res = await fetch(`${server.url}/api/apps/syncstage/stage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 5568, branch: 'staging', async: 'false' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.staging_name).toBe('syncstage-staging');
+    expect(body).not.toHaveProperty('jobId');
+
+    db.prepare('DELETE FROM managed_apps WHERE name=?').run('syncstage');
+    db.prepare('DELETE FROM app_staging WHERE app_name=?').run('syncstage');
+  });
+
   it('enqueues script installation as a background job and reports completion', async () => {
     runFileMock.mockReset();
     runFileMock.mockResolvedValue({ stdout: '', stderr: '' });

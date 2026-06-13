@@ -45,6 +45,10 @@ function buildEnvArg(envVarsJson: string | null | undefined): string[] {
   return parts.length ? ['--env-var', parts.join(',')] : [];
 }
 
+function asyncRequested(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
 /* ── List apps ───────────────────────────────────────────── */
 
 router.get('/', async (_req: Request, res: Response) => {
@@ -115,7 +119,7 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
     return db.prepare('SELECT * FROM managed_apps WHERE id = ?').get(r.lastInsertRowid) as any;
   };
 
-  if (isAsync) {
+  if (asyncRequested(isAsync)) {
     const jobId = createBackgroundJob({ type: 'app.create', resource: name }, async (ctx) => {
       ctx.progress(10, `Creating app ${name}`);
       const created = await doCreate();
@@ -201,7 +205,7 @@ router.delete('/:name', adminOnly, async (req: Request, res: Response) => {
     return { success: true, appName: app.name };
   };
 
-  if (isAsync) {
+  if (asyncRequested(isAsync)) {
     const jobId = createBackgroundJob({ type: 'app.delete', resource: app.name }, async (ctx) => {
       ctx.progress(10, `Deleting app ${app.name}`);
       const result = await doDelete();
@@ -255,7 +259,7 @@ router.post('/:name/stage', adminOnly, async (req: Request, res: Response) => {
     return db.prepare('SELECT * FROM app_staging WHERE id = ?').get(r.lastInsertRowid) as any;
   };
 
-  if (isAsync) {
+  if (asyncRequested(isAsync)) {
     const jobId = createBackgroundJob({ type: 'app.stage', resource: app.name }, async (ctx) => {
       ctx.progress(10, `Creating staging environment for ${app.name}`);
       const staged = await doStage();
@@ -285,7 +289,7 @@ router.post('/:name/promote', adminOnly, async (req: Request, res: Response) => 
     return { success: true, appName: app.name, message: `Staging promoted to production for ${app.name}` };
   };
 
-  if (isAsync) {
+  if (asyncRequested(isAsync)) {
     const jobId = createBackgroundJob({ type: 'app.promote', resource: app.name }, async (ctx) => {
       ctx.progress(10, `Promoting staging to production for ${app.name}`);
       const result = await doPromote();
