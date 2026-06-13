@@ -723,3 +723,32 @@ npm run test --workspace=server -- wordpress.integration.test.ts -t "enqueues up
 npm run test --workspace=server -- wordpress.integration.test.ts
 # → passed: 25 server test files / 139 tests
 ```
+
+---
+
+## 2026-06-13 6-hour slice — app deletion background-job hardening
+
+Priority: continue closing production-depth gaps for long-running app operations.
+
+### Risk addressed
+
+App create/stage/promote, scripts, and WordPress maintenance already had `/api/jobs` support, but managed-app deletion still ran synchronously while it could invoke PM2, remove Apache vhost files, and reload Apache. During launch operations, that left no durable job record or polling path if deletion took longer than a normal HTTP request.
+
+### Changes made
+
+- **`server/src/routes/apps.ts`** — `DELETE /api/apps/:name` now accepts `{ "async": true }` and returns `202` with `jobId`/`statusUrl` while preserving the existing synchronous response when `async` is omitted.
+- The asynchronous delete job records type `app.delete`, reports progress, removes the managed-app row, and returns `{ success: true, appName }`.
+- Added app-name validation to the delete route before database lookup.
+- **`server/src/routes/scanner-jobs.integration.test.ts`** — added a regression proving app deletion enqueues through `/api/jobs` and removes the database record after completion.
+
+### TDD evidence
+
+```bash
+# RED — failed because DELETE /api/apps/:name ignored async:true and returned 200
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app deletion"
+# → failed as expected: expected 202, received 200
+
+# GREEN
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app deletion"
+# → passed
+```

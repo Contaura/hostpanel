@@ -268,6 +268,43 @@ describe('app staging/promote background jobs', () => {
     delete process.env.WEBROOT;
   });
 
+  it('enqueues app deletion (pm2 delete + vhost cleanup) as a background job', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const apps = (await import('./apps')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/apps', withAdminAuth(apps));
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const db = (await import('../db')).default;
+    db.prepare(`INSERT OR IGNORE INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
+      VALUES ('deleteapp','nodejs','deleteapp.example.com',5002,'/apps/deleteapp/app.js','/apps/deleteapp','running','{}')`).run();
+
+    const res = await fetch(`${server.url}/api/apps/deleteapp`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('app.delete');
+    expect(done.result).toMatchObject({ success: true, appName: 'deleteapp' });
+    expect(db.prepare('SELECT * FROM managed_apps WHERE name=?').get('deleteapp')).toBeUndefined();
+  });
+
   it('enqueues app promote (rsync + pm2 restart) as a background job', async () => {
     runFileMock.mockReset();
     runFileMock.mockResolvedValue({ stdout: '', stderr: '' });

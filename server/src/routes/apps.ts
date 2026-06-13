@@ -187,15 +187,32 @@ router.post('/:name/logs', async (req: Request, res: Response) => {
 /* ── Delete app ──────────────────────────────────────────── */
 
 router.delete('/:name', adminOnly, async (req: Request, res: Response) => {
+  if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
-  try {
+  const { async: isAsync } = req.body || {};
+
+  const doDelete = async () => {
     await execFileAsync('pm2', ['delete', app.name]).catch(() => {});
     const conf = path.join(VHOST_DIR, `app_${app.name}.conf`);
     if (existsSync(conf)) require('fs').unlinkSync(conf);
     await runFile('apachectl', ['graceful']).catch(() => ({ stdout: '', stderr: '' }));
     db.prepare('DELETE FROM managed_apps WHERE name = ?').run(app.name);
-    res.json({ success: true });
+    return { success: true, appName: app.name };
+  };
+
+  if (isAsync) {
+    const jobId = createBackgroundJob({ type: 'app.delete', resource: app.name }, async (ctx) => {
+      ctx.progress(10, `Deleting app ${app.name}`);
+      const result = await doDelete();
+      ctx.progress(90, `App ${app.name} deleted`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doDelete());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
