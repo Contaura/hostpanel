@@ -60,4 +60,23 @@ describe('role and permission middleware integration', () => {
       await server.close();
     }
   });
+
+  it('allows readonly role safe HEAD and OPTIONS probes for health monitors', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(readonlyGuard);
+    app.get('/health/readiness', authenticateToken, (_req, res) => res.json({ ok: true }));
+    app.options('/health/readiness', authenticateToken, (_req, res) => res.sendStatus(204));
+    const server = await listen(app);
+    try {
+      const headers = { Authorization: `Bearer ${token('readonly')}` };
+      const head = await fetch(`${server.url}/health/readiness`, { method: 'HEAD', headers });
+      expect(head.status).toBe(200);
+
+      const options = await fetch(`${server.url}/health/readiness`, { method: 'OPTIONS', headers });
+      expect(options.status).toBe(204);
+    } finally {
+      await server.close();
+    }
+  });
 });

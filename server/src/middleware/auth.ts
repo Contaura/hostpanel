@@ -56,7 +56,7 @@ export function blockPortalRoles(req: AuthRequest, res: Response, next: NextFunc
 
 // Decodes JWT without requiring req.user to already be set — used as a global pre-route guard
 export function readonlyGuard(req: Request, res: Response, next: NextFunction): void {
-  if (req.method === 'GET') { next(); return; }
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) { next(); return; }
   const tok = (req.headers.authorization || '').replace(/^Bearer /, '');
   if (!tok) { next(); return; }
   try {
