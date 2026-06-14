@@ -143,7 +143,8 @@ router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
   if (pm2NotInstalled(res)) return;
   const app = db.prepare('SELECT * FROM managed_apps WHERE name = ?').get(req.params.name) as any;
   if (!app) return res.status(404).json({ error: 'App not found' });
-  try {
+
+  const doStart = async () => {
     await execFileAsync('pm2', [
       'start', app.start_script,
       '--name', app.name,
@@ -156,7 +157,21 @@ router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
     // the actual pm2 process. Leave it NULL here; the next `pm2 jlist`
     // enrichment in the GET handler fills it with the real id.
     db.prepare("UPDATE managed_apps SET status='running', pm2_id=NULL WHERE name=?").run(app.name);
-    res.json({ success: true });
+    return { success: true, appName: app.name };
+  };
+
+  if (asyncRequested(req.body?.async)) {
+    const jobId = createBackgroundJob({ type: 'app.start', resource: app.name, metadata: { appName: app.name }, createdBy: (req as any).user?.username || 'admin' }, async (ctx) => {
+      ctx.progress(10, `Starting app ${app.name}`);
+      const result = await doStart();
+      ctx.progress(90, `App ${app.name} started`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doStart());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
