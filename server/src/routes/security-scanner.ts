@@ -113,10 +113,24 @@ router.post('/scan', heavyLimit, async (req: Request, res: Response) => {
   }
 });
 
-router.post('/update-definitions', heavyLimit, async (_req: Request, res: Response) => {
-  try {
+router.post('/update-definitions', heavyLimit, async (req: Request, res: Response) => {
+  const runUpdate = async () => {
     const { stdout, stderr } = await runFile('freshclam', [], { timeout: 120000 });
-    res.json({ output: stdout + stderr });
+    return { output: stdout + stderr };
+  };
+
+  if (req.body?.async === true || req.body?.async === 'true') {
+    const jobId = createBackgroundJob({ type: 'scanner.update_definitions', resource: 'clamav-definitions' }, async (ctx) => {
+      ctx.progress(10, 'Starting ClamAV definition update');
+      const result = await runUpdate();
+      ctx.progress(90, 'ClamAV definition update complete');
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await runUpdate());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

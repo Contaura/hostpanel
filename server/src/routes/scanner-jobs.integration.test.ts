@@ -119,6 +119,39 @@ describe('security scanner background jobs', () => {
     expect(runFileMock).toHaveBeenCalledWith('clamscan', expect.arrayContaining(['-r', '--infected']), expect.any(Object));
   });
 
+  it('enqueues a ClamAV definition update as a background job and exposes output', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: 'daily.cvd updated\n', stderr: 'freshclam warning\n' });
+
+    const scanner = (await import('./security-scanner')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/scanner', scanner);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const res = await fetch(`${server.url}/api/scanner/update-definitions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('scanner.update_definitions');
+    expect(done.result.output).toContain('daily.cvd updated');
+    expect(runFileMock).toHaveBeenCalledWith('freshclam', [], { timeout: 120000 });
+  });
+
   it('enqueues a file integrity baseline rebuild as a background job', async () => {
     runFileMock.mockReset();
     runFileMock.mockResolvedValue({ stdout: '', stderr: '' });

@@ -790,3 +790,32 @@ npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -
 # → passed
 ```
 
+
+---
+
+## 2026-06-15 6-hour slice — scanner definition-update background-job hardening
+
+Priority: continue closing production-depth gaps for remaining long-running security-scanner operations after the launch deadline, while preserving synchronous compatibility for existing callers.
+
+### Risk addressed
+
+Security-scanner malware scans and integrity baselines already supported `/api/jobs`, but `POST /api/security-scanner/update-definitions` still invoked `freshclam` synchronously. ClamAV definition refreshes can block on mirrors or package locks during production maintenance, leaving operators without a durable job record or polling path.
+
+### Changes made
+
+- **`server/src/routes/security-scanner.ts`** — `POST /api/security-scanner/update-definitions` now accepts `{ "async": true }` and enqueues a `scanner.update_definitions` background job with progress, `jobId`, and `statusUrl`.
+- The legacy synchronous response is preserved when `async` is omitted.
+- **`server/src/routes/scanner-jobs.integration.test.ts`** — added regression coverage proving the async ClamAV definition update completes through `/api/jobs` and returns command output evidence.
+- **`docs/13-launch-checklist.md`** — updated long-running-operation evidence to include ClamAV definition updates.
+
+### TDD evidence
+
+```bash
+# RED — failed because async:true returned 200 synchronously instead of 202/jobId
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues a ClamAV definition update"
+# → failed as expected: expected 202, received 200
+
+# GREEN
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues a ClamAV definition update"
+# → passed
+```
