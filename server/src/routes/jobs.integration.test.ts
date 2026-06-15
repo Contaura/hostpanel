@@ -141,10 +141,12 @@ describe('central background jobs API', () => {
     expect(done.result.backup).toBe(path.basename(archive));
     expect(done.result.restorePlan.dryRun).toBe(true);
     expect(done.result.restorePlan.actions).toEqual(['Would restore example.com/index.html']);
+    expect(done.result.archive).toEqual({ size: 7, sha256: '0eb3e36bfb24dcd9bb1d1bece1531216b59539a8fde17ee80224af0653c92aa3' });
     expect(done.result.reportPath).toMatch(/drills\/files_all_2024-01-01T00-00-00\.tar\.gz-.*\.json$/);
     const report = JSON.parse(await fs.readFile(done.result.reportPath, 'utf8'));
     expect(report.success).toBe(true);
     expect(report.restorePlan.count).toBe(1);
+    expect(report.archive).toEqual({ size: 7, sha256: '0eb3e36bfb24dcd9bb1d1bece1531216b59539a8fde17ee80224af0653c92aa3' });
     expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', archive], expect.objectContaining({ timeout: 120000 }));
   });
 
@@ -172,6 +174,7 @@ describe('central background jobs API', () => {
       drill: true,
       backup: 'files_all_new.tar.gz',
       verifiedAt: '2024-01-02T00:00:00.000Z',
+      archive: { size: 1234, sha256: 'abc123' },
       restorePlan: { count: 2, actions: ['Would restore index.html', 'Would restore app.js'], selected: ['index.html', 'app.js'] },
       accidentalSecret: 'do-not-return',
     }));
@@ -184,6 +187,7 @@ describe('central background jobs API', () => {
     expect(body.latest.backup).toBe('files_all_new.tar.gz');
     expect(body.latest.verifiedAt).toBe('2024-01-02T00:00:00.000Z');
     expect(body.latest.restorePlan).toEqual({ type: null, count: 2, dryRun: null, actionCount: 2 });
+    expect(body.latest.archive).toEqual({ size: 1234, sha256: 'abc123' });
     expect(body.reports.map((r: any) => r.backup)).toEqual(['files_all_new.tar.gz', 'files_all_old.tar.gz']);
     expect(JSON.stringify(body)).not.toContain('do-not-return');
     expect(JSON.stringify(body)).not.toContain('index.html');

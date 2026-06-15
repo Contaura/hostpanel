@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream, readdirSync, readFileSync, statSyn
 import zlib from 'zlib';
 import path from 'path';
 import os from 'os';
+import { createHash } from 'crypto';
 import { AuthRequest } from '../middleware/auth';
 import db from '../db';
 import { runFile } from '../utils/process-runner';
@@ -46,6 +47,12 @@ function summarizeDrillReport(file: string) {
   const parsed = JSON.parse(readFileSync(full, 'utf8'));
   const st = statSync(full);
   const restorePlan = parsed.restorePlan || {};
+  const archive = parsed.archive && typeof parsed.archive === 'object'
+    ? {
+        size: typeof parsed.archive.size === 'number' ? parsed.archive.size : null,
+        sha256: typeof parsed.archive.sha256 === 'string' ? parsed.archive.sha256 : null,
+      }
+    : null;
   return {
     file,
     backup: String(parsed.backup || ''),
@@ -53,12 +60,21 @@ function summarizeDrillReport(file: string) {
     drill: parsed.drill === true,
     verifiedAt: parsed.verifiedAt || st.mtime.toISOString(),
     created: st.mtime.toISOString(),
+    archive,
     restorePlan: {
       type: restorePlan.type || null,
       count: typeof restorePlan.count === 'number' ? restorePlan.count : null,
       dryRun: typeof restorePlan.dryRun === 'boolean' ? restorePlan.dryRun : null,
       actionCount: Array.isArray(restorePlan.actions) ? restorePlan.actions.length : 0,
     },
+  };
+}
+
+function archiveIntegrity(file: string) {
+  const contents = readFileSync(file);
+  return {
+    size: contents.length,
+    sha256: createHash('sha256').update(contents).digest('hex'),
   };
 }
 
@@ -202,12 +218,14 @@ router.get('/download/:name', (req: AuthRequest, res: Response) => {
 
 async function runRestoreDrill(name: string, body: any, ctx?: JobContext) {
   ctx?.progress(10, 'Starting restore dry-run drill');
+  const file = path.join(getBackupDir(), name);
   const restorePlan = await restoreBackupFile(name, { ...(body || {}), dryRun: true }, ctx);
   const report = {
     success: true,
     drill: true,
     backup: name,
     verifiedAt: new Date().toISOString(),
+    archive: archiveIntegrity(file),
     restorePlan,
   };
   const stamp = report.verifiedAt.replace(/[:.]/g, '-');
