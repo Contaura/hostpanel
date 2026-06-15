@@ -6,6 +6,7 @@
  */
 import express from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { chmodSync, existsSync, unlinkSync, writeFileSync } from 'fs';
 import { runFile } from '../utils/process-runner';
 
 vi.mock('../utils/process-runner', () => ({
@@ -28,6 +29,21 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 const runFileMock = vi.mocked(runFile);
+const fakePm2Path = '/usr/local/bin/pm2';
+let createdFakePm2 = false;
+
+function ensurePm2PresentForMockedExecFile() {
+  if (existsSync(fakePm2Path)) return;
+  writeFileSync(fakePm2Path, '#!/bin/sh\nexit 0\n');
+  chmodSync(fakePm2Path, 0o755);
+  createdFakePm2 = true;
+}
+
+function cleanupFakePm2() {
+  if (!createdFakePm2) return;
+  try { unlinkSync(fakePm2Path); } catch (_) {}
+  createdFakePm2 = false;
+}
 
 function listen(app: express.Express): Promise<{ url: string; close: () => Promise<void> }> {
   return new Promise(resolve => {
@@ -58,6 +74,7 @@ describe('security scanner background jobs', () => {
 
   afterEach(async () => {
     if (closeServer) await closeServer();
+    cleanupFakePm2();
     closeServer = undefined;
     vi.resetModules();
   });
@@ -151,6 +168,7 @@ describe('app staging/promote background jobs', () => {
 
   afterEach(async () => {
     if (closeServer) await closeServer();
+    cleanupFakePm2();
     closeServer = undefined;
     vi.resetModules();
   });
@@ -295,6 +313,85 @@ describe('app staging/promote background jobs', () => {
 
     await import('fs/promises').then(fs => fs.rm(tmp, { recursive: true, force: true }));
     delete process.env.WEBROOT;
+  });
+
+  it('enqueues app stop as a background job and reports completion', async () => {
+    ensurePm2PresentForMockedExecFile();
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const apps = (await import('./apps')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/apps', withAdminAuth(apps));
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const db = (await import('../db')).default;
+    db.prepare(`INSERT OR IGNORE INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
+      VALUES ('stopapp','nodejs','stopapp.example.com',5003,'/apps/stopapp/app.js','/apps/stopapp','running','{}')`).run();
+
+    const res = await fetch(`${server.url}/api/apps/stopapp/stop`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('app.stop');
+    expect(done.result).toMatchObject({ success: true, appName: 'stopapp' });
+    expect(db.prepare('SELECT status FROM managed_apps WHERE name=?').get('stopapp')).toMatchObject({ status: 'stopped' });
+
+    db.prepare('DELETE FROM managed_apps WHERE name=?').run('stopapp');
+  });
+
+  it('enqueues app restart as a background job and reports completion', async () => {
+    ensurePm2PresentForMockedExecFile();
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const apps = (await import('./apps')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/apps', withAdminAuth(apps));
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const db = (await import('../db')).default;
+    db.prepare(`INSERT OR IGNORE INTO managed_apps (name, type, domain, port, start_script, working_dir, status, env_vars)
+      VALUES ('restartapp','nodejs','restartapp.example.com',5004,'/apps/restartapp/app.js','/apps/restartapp','running','{}')`).run();
+
+    const res = await fetch(`${server.url}/api/apps/restartapp/restart`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ async: true }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('app.restart');
+    expect(done.result).toMatchObject({ success: true, appName: 'restartapp' });
+
+    db.prepare('DELETE FROM managed_apps WHERE name=?').run('restartapp');
   });
 
   it('enqueues app deletion (pm2 delete + vhost cleanup) as a background job', async () => {

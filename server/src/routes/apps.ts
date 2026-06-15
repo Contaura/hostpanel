@@ -178,19 +178,51 @@ router.post('/:name/start', adminOnly, async (req: Request, res: Response) => {
 router.post('/:name/stop', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   if (pm2NotInstalled(res)) return;
+  const appName = req.params.name;
+
+  const doStop = async () => {
+    await execFileAsync('pm2', ['stop', appName]);
+    db.prepare("UPDATE managed_apps SET status='stopped' WHERE name=?").run(appName);
+    return { success: true, appName };
+  };
+
+  if (asyncRequested(req.body?.async)) {
+    const jobId = createBackgroundJob({ type: 'app.stop', resource: appName, metadata: { appName }, createdBy: (req as any).user?.username || 'admin' }, async (ctx) => {
+      ctx.progress(10, `Stopping app ${appName}`);
+      const result = await doStop();
+      ctx.progress(90, `App ${appName} stopped`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
   try {
-    await execFileAsync('pm2', ['stop', req.params.name]);
-    db.prepare("UPDATE managed_apps SET status='stopped' WHERE name=?").run(req.params.name);
-    res.json({ success: true });
+    res.json(await doStop());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/:name/restart', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   if (pm2NotInstalled(res)) return;
+  const appName = req.params.name;
+
+  const doRestart = async () => {
+    await execFileAsync('pm2', ['restart', appName]);
+    return { success: true, appName };
+  };
+
+  if (asyncRequested(req.body?.async)) {
+    const jobId = createBackgroundJob({ type: 'app.restart', resource: appName, metadata: { appName }, createdBy: (req as any).user?.username || 'admin' }, async (ctx) => {
+      ctx.progress(10, `Restarting app ${appName}`);
+      const result = await doRestart();
+      ctx.progress(90, `App ${appName} restarted`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
   try {
-    await execFileAsync('pm2', ['restart', req.params.name]);
-    res.json({ success: true });
+    res.json(await doRestart());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

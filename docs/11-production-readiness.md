@@ -752,3 +752,41 @@ npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -
 npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app deletion"
 # → passed
 ```
+
+---
+
+## 2026-06-15 6-hour slice — app lifecycle background-job hardening
+
+Priority: continue closing production-depth gaps for remaining app lifecycle operations after the launch deadline, while preserving synchronous compatibility for existing callers.
+
+### Risk addressed
+
+Managed-app start/create/stage/promote/delete already had `/api/jobs` coverage, but `POST /api/apps/:name/stop` and `POST /api/apps/:name/restart` still ran synchronously. PM2 control can block or fail during production maintenance, leaving operators without a durable job record or polling path.
+
+### Changes made
+
+- **`server/src/routes/apps.ts`** — `POST /api/apps/:name/stop` now accepts `{ "async": true }` and enqueues an `app.stop` background job with progress, `jobId`, and `statusUrl`; the legacy synchronous response remains available when `async` is omitted.
+- **`server/src/routes/apps.ts`** — `POST /api/apps/:name/restart` now accepts `{ "async": true }` and enqueues an `app.restart` background job with progress, `jobId`, and `statusUrl`; synchronous compatibility is preserved.
+- **`server/src/routes/scanner-jobs.integration.test.ts`** — added TDD coverage for app stop/restart background jobs and job-result evidence.
+- **`docs/13-launch-checklist.md`** — updated long-running-operation evidence to include app stop/restart lifecycle operations.
+
+### TDD evidence
+
+```bash
+# RED — stop failed because async:true returned 200 synchronously instead of 202/jobId
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app stop"
+# → failed as expected: expected 202, received 200
+
+# GREEN — stop background job
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app stop"
+# → passed
+
+# RED — restart failed because async:true returned 200 synchronously instead of 202/jobId
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app restart"
+# → failed as expected: expected 202, received 200
+
+# GREEN — stop/restart targeted regression
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues app restart|enqueues app stop"
+# → passed
+```
+
