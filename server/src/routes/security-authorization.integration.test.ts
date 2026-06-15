@@ -158,6 +158,25 @@ describe('admin API portal-role isolation', () => {
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/portal/i);
   });
+
+  it('blocks admin-role users from minting admin-permission API tokens', async () => {
+    const { authenticateToken, blockPortalRoles } = await import('../middleware/auth');
+    const apiTokensRoute = (await import('./api-tokens')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/api-tokens', authenticateToken, blockPortalRoles, apiTokensRoute);
+    const server = await listen(app); closeServer = server.close;
+
+    const adminToken = makeToken({ username: 'admin', role: 'admin' });
+    const res = await fetch(`${server.url}/api/api-tokens`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'persistence', permissions: 'admin' }),
+    });
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/superadmin/i);
+  });
 });
 
 describe('readonly-role write-block guard', () => {

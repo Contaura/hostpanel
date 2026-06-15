@@ -4,7 +4,7 @@ import https from 'https';
 import http from 'http';
 import { URL } from 'url';
 import db from '../db';
-import { requireRole } from '../middleware/auth';
+import { AuthRequest, requireRole } from '../middleware/auth';
 import { assertHttpTargetAllowed } from '../utils/safe-target';
 
 const router = Router();
@@ -28,10 +28,11 @@ router.get('/', (_req: Request, res: Response) => {
 
 /* ── Create token ────────────────────────────────────────── */
 
-router.post('/', adminOnly, (req: Request, res: Response) => {
+router.post('/', adminOnly, (req: AuthRequest, res: Response) => {
   const { name, permissions, expires_at } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!['read', 'write', 'admin'].includes(permissions)) return res.status(400).json({ error: 'permissions must be read, write, or admin' });
+  if (permissions === 'admin' && req.user?.role !== 'superadmin') return res.status(403).json({ error: 'Only superadmin users can mint admin-permission API tokens' });
 
   const rawToken = 'hp_' + crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
