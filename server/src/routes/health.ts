@@ -13,6 +13,7 @@ const router = Router();
 const STARTED_AT = new Date().toISOString();
 const SERVICE = 'hostpanel';
 const REQUIRED_SERVICES = (process.env.READINESS_REQUIRED_SERVICES || 'hostpanel,httpd,mariadb').split(',').map(s => s.trim()).filter(Boolean);
+const DEFAULT_LAUNCH_DEADLINE_UTC = '2026-06-09T23:59:00.000Z';
 
 function version() {
   try {
@@ -225,6 +226,21 @@ function manualLaunchBlocker(code: ManualLaunchBlockerCode, message: string) {
   return { code, severity: 'manual' as const, ...MANUAL_LAUNCH_BLOCKER_EVIDENCE[code], message };
 }
 
+function launchDeadlineSummary(blockerCount: number) {
+  const rawDeadline = process.env.HOSTPANEL_LAUNCH_DEADLINE_UTC || DEFAULT_LAUNCH_DEADLINE_UTC;
+  const parsedDeadline = new Date(rawDeadline);
+  const deadline = Number.isNaN(parsedDeadline.getTime()) ? new Date(DEFAULT_LAUNCH_DEADLINE_UTC) : parsedDeadline;
+  const now = new Date();
+  const overdue = now.getTime() > deadline.getTime();
+  const blocked = blockerCount > 0;
+  return {
+    deadlineUtc: deadline.toISOString(),
+    overdue,
+    blockerCount,
+    status: overdue ? (blocked ? 'overdue_blocked' : 'overdue_ready') : (blocked ? 'on_track_blocked' : 'on_track_ready'),
+  };
+}
+
 function settingEnabled(key: string): boolean {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value?: string } | undefined;
   const value = String(row?.value || '').trim().toLowerCase();
@@ -401,7 +417,7 @@ async function buildReadiness() {
   }
 
   const ok = Object.values(checks).every((c: any) => c.ok !== false);
-  return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), launchBlockers, checks };
+  return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), launchDeadline: launchDeadlineSummary(launchBlockers.length), launchBlockers, checks };
 }
 
 router.get('/readiness', async (_req: Request, res: Response) => {
