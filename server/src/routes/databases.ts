@@ -5,7 +5,7 @@ import fs from 'fs/promises';
 import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import multer from 'multer';
-import { existsSync, unlinkSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, unlinkSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import { AuthRequest } from '../middleware/auth';
@@ -33,6 +33,7 @@ const DB_ROOT_USER = process.env.DB_ROOT_USER || 'root';
 const DB_ROOT_PASS = process.env.DB_ROOT_PASS || '';
 const PMA_ALIAS = process.env.PHPMYADMIN_ALIAS || '/phpMyAdmin';
 const PMA_CONF_FILE = process.env.PHPMYADMIN_CONF_FILE || '/etc/httpd/conf.d/hostpanel-phpmyadmin.conf';
+const PMA_DISTRO_CONF_FILE = process.env.PHPMYADMIN_DISTRO_CONF_FILE || '/etc/httpd/conf.d/phpMyAdmin.conf';
 const PMA_CONFIG_FILE = process.env.PHPMYADMIN_CONFIG_FILE || '/etc/phpMyAdmin/config.inc.php';
 const PMA_CANDIDATES = (process.env.PHPMYADMIN_PATHS || '/usr/share/phpMyAdmin:/usr/share/phpmyadmin:/var/www/html/phpMyAdmin:/var/www/html/phpmyadmin').split(':').filter(Boolean);
 const PMA_SSO_TOKEN_DIR = process.env.PHPMYADMIN_SSO_TOKEN_DIR || '/var/lib/hostpanel/phpmyadmin-sso';
@@ -267,7 +268,15 @@ function writePmaApacheConfig(foundPath: string) {
   mkdirSync(path.dirname(PMA_CONF_FILE), { recursive: true });
   mkdirSync(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });
   writeFileSync(path.join(foundPath, 'hostpanel-signon.php'), pmaBridgePhp(), { mode: 0o640 });
-  writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nSetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR ${PMA_SSO_TOKEN_DIR}\nAlias ${PMA_ALIAS} ${foundPath}\nAlias ${PMA_ALIAS}/ ${foundPath}/\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
+  disableDistroPmaAliases();
+  writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nSetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR ${PMA_SSO_TOKEN_DIR}\nAlias ${PMA_ALIAS} ${foundPath}\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
+}
+
+function disableDistroPmaAliases() {
+  if (PMA_DISTRO_CONF_FILE === PMA_CONF_FILE || !existsSync(PMA_DISTRO_CONF_FILE)) return;
+  const src = readFileSync(PMA_DISTRO_CONF_FILE, 'utf8');
+  const next = src.replace(/^(Alias\s+\/phpMyAdmin\s+.+)$/gmi, '# Disabled by HostPanel to avoid duplicate Apache Alias warnings: $1');
+  if (next !== src) writeFileSync(PMA_DISTRO_CONF_FILE, next, { mode: 0o644 });
 }
 async function createPmaSsoToken(username: string, password: string, database?: string) {
   await fs.mkdir(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });

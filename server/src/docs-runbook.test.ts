@@ -6,6 +6,7 @@ const runbookPath = resolve(process.cwd(), '..', 'docs/12-operations-runbook.md'
 const launchChecklistPath = resolve(process.cwd(), '..', 'docs/13-launch-checklist.md');
 const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md');
 const launchReportPath = resolve(process.cwd(), '..', 'docs/14-production-launch-report.md');
+const installScriptPath = resolve(process.cwd(), '..', 'install.sh');
 const dq = String.fromCharCode(34);
 const authHeader = 'Authorization: Bearer ${ADMIN_JWT}';
 const healthCurl = (endpoint: 'readiness' | 'live') =>
@@ -19,6 +20,16 @@ describe('operations runbook command examples', () => {
     expect(runbook).toContain(healthCurl('readiness'));
     expect(runbook).toContain(healthCurl('live'));
     expect(runbook).not.toMatch(malformedLocalHealthHeader);
+  });
+});
+
+describe('installer bootstrap', () => {
+  it('does not generate overlapping phpMyAdmin Apache aliases', () => {
+    const installer = readFileSync(installScriptPath, 'utf8');
+
+    expect(installer).toContain('Alias /phpMyAdmin ${PMA_DIR}');
+    expect(installer).not.toContain('Alias /phpMyAdmin/ ${PMA_DIR}/');
+    expect(installer).toContain('Disabled by HostPanel to avoid duplicate Apache Alias warnings');
   });
 });
 

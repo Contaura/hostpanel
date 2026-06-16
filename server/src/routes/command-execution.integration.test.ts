@@ -58,6 +58,8 @@ describe('high-risk route command execution integration', () => {
     await fs.rm(tmp, { recursive: true, force: true });
     delete process.env.PHPMYADMIN_PATHS;
     delete process.env.PHPMYADMIN_CONF_FILE;
+    delete process.env.PHPMYADMIN_DISTRO_CONF_FILE;
+    delete process.env.PHPMYADMIN_CONFIG_FILE;
     delete process.env.PHPMYADMIN_ALIAS;
     vi.resetModules();
   });
@@ -481,7 +483,10 @@ describe('high-risk route command execution integration', () => {
     process.env.PHPMYADMIN_PATHS = pmaDir;
     process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
     process.env.PHPMYADMIN_CONFIG_FILE = path.join(tmp, 'phpMyAdmin', 'config.inc.php');
+    process.env.PHPMYADMIN_DISTRO_CONF_FILE = path.join(tmp, 'httpd', 'phpMyAdmin.conf');
     process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
+    await fs.mkdir(path.dirname(process.env.PHPMYADMIN_DISTRO_CONF_FILE), { recursive: true });
+    await fs.writeFile(process.env.PHPMYADMIN_DISTRO_CONF_FILE, 'Alias /phpMyAdmin /usr/share/phpMyAdmin\nAlias /phpmyadmin /usr/share/phpMyAdmin\n');
     const server = await appFor('/api/databases', './databases');
     closeServer = server.close;
     runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
@@ -492,7 +497,12 @@ describe('high-risk route command execution integration', () => {
     expect(res.status).toBe(200);
     expect(runFileMock).toHaveBeenCalledWith('dnf', ['install', '-y', 'phpMyAdmin'], expect.objectContaining({ timeout: 300000 }));
     expect(runFileMock).toHaveBeenCalledWith('apachectl', ['graceful'], expect.objectContaining({ timeout: 120000 }));
-    await expect(fs.readFile(process.env.PHPMYADMIN_CONF_FILE, 'utf8')).resolves.toContain(`Alias /phpMyAdmin ${pmaDir}`);
+    const apacheConfig = await fs.readFile(process.env.PHPMYADMIN_CONF_FILE, 'utf8');
+    expect(apacheConfig).toContain(`Alias /phpMyAdmin ${pmaDir}`);
+    expect(apacheConfig).not.toContain(`Alias /phpMyAdmin/ ${pmaDir}/`);
+    const distroConfig = await fs.readFile(process.env.PHPMYADMIN_DISTRO_CONF_FILE, 'utf8');
+    expect(distroConfig).toContain('# Disabled by HostPanel to avoid duplicate Apache Alias warnings: Alias /phpMyAdmin /usr/share/phpMyAdmin');
+    expect(distroConfig).toContain('# Disabled by HostPanel to avoid duplicate Apache Alias warnings: Alias /phpmyadmin /usr/share/phpMyAdmin');
     await expect(fs.readFile(path.join(pmaDir, 'hostpanel-signon.php'), 'utf8')).resolves.toContain('PMA_single_signon_user');
     const pmaConfig = await fs.readFile(process.env.PHPMYADMIN_CONFIG_FILE, 'utf8');
     expect(pmaConfig).toContain("$cfg['Servers'][$i]['auth_type'] = 'signon'");

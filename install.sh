@@ -127,13 +127,30 @@ SIGNON_CFG
     echo "  Added HostPanel Signon server entry to ${PMA_CFG}."
   fi
 
+  # Disable distro phpMyAdmin aliases before writing HostPanel's managed alias;
+  # keeping both active makes apachectl emit AH00671 overlap warnings and keeps
+  # the Signon validation endpoint from reporting launch-ready.
+  for _pma_apache_cfg in /etc/httpd/conf.d/phpMyAdmin.conf /etc/httpd/conf.d/phpmyadmin.conf; do
+    if [[ -f "$_pma_apache_cfg" ]]; then
+      python3 - "$_pma_apache_cfg" <<'PY'
+from pathlib import Path
+import re
+import sys
+p = Path(sys.argv[1])
+src = p.read_text()
+next_src = re.sub(r'^(Alias\s+/phpMyAdmin\s+.+)$', r'# Disabled by HostPanel to avoid duplicate Apache Alias warnings: \1', src, flags=re.I | re.M)
+if next_src != src:
+    p.write_text(next_src)
+PY
+    fi
+  done
+
   # Apache config for phpMyAdmin alias + SSO token dir env (idempotent)
   if [[ ! -f /etc/httpd/conf.d/hostpanel-phpmyadmin.conf ]]; then
     cat >/etc/httpd/conf.d/hostpanel-phpmyadmin.conf <<PMACNF
 # Managed by HostPanel. Exposes phpMyAdmin through Apache.
 SetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR /var/lib/hostpanel/phpmyadmin-sso
 Alias /phpMyAdmin ${PMA_DIR}
-Alias /phpMyAdmin/ ${PMA_DIR}/
 <Directory ${PMA_DIR}>
   Options FollowSymLinks
   DirectoryIndex index.php
