@@ -34,6 +34,8 @@ describe('production launch checklist', () => {
     expect(checklist).toMatch(/\| Notification webhook channel \| Marcos \|/);
     expect(checklist).toMatch(/\| Admin account TOTP \| Marcos \|/);
     expect(checklist).toMatch(/\| Payment webhook secrets \| Marcos \|/);
+    expect(checklist).toContain('external_uptime_monitor_verified');
+    expect(checklist).toContain('off_server_backup_replication_verified');
   });
 
   it('documents a syntactically valid authenticated readiness curl in the launch-day sequence', () => {

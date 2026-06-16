@@ -14,6 +14,11 @@ function listen(app: express.Express): Promise<{ url: string; close: () => Promi
   });
 }
 
+function markBusinessLaunchEvidenceVerified(db: any) {
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run('external_uptime_monitor_verified', 'https://uptime.example.test/hostpanel');
+  db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run('off_server_backup_replication_verified', 's3://example-hostpanel-backups/latest');
+}
+
 describe('production health and readiness checks', () => {
   let tmp = '';
 
@@ -184,6 +189,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
@@ -259,6 +265,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.exec(`CREATE TABLE IF NOT EXISTS backup_schedules (
@@ -342,6 +349,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.prepare('DELETE FROM alert_rules').run();
@@ -430,6 +438,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.prepare('DELETE FROM alert_rules').run();
@@ -513,8 +522,10 @@ describe('production health and readiness checks', () => {
       expect(body.launchBlockers).toEqual([
         expect.objectContaining({ code: 'admin_2fa_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/Enable TOTP/i), message: expect.stringMatching(/2FA/i) }),
         expect.objectContaining({ code: 'notification_webhook_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/test notification/i), message: expect.stringMatching(/notification webhook/i) }),
+        expect.objectContaining({ code: 'external_uptime_monitor_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/external uptime monitor/i), message: expect.stringMatching(/external uptime monitor/i) }),
         expect.objectContaining({ code: 'dr_drill_evidence_missing', severity: 'manual', owner: 'Ron', requiredEvidence: expect.stringMatching(/persisted report/i), message: expect.stringMatching(/disaster-recovery restore drill/i) }),
         expect.objectContaining({ code: 'backup_evidence_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.stringMatching(/off-server replication/i), message: expect.stringMatching(/backup archive evidence/i) }),
+        expect.objectContaining({ code: 'off_server_backup_replication_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/off-server backup replication/i), message: expect.stringMatching(/off-server backup replication/i) }),
         expect.objectContaining({ code: 'nightly_database_backup_schedule_missing', severity: 'manual', owner: 'Ron + Marcos', requiredEvidence: expect.stringMatching(/enabled database backup schedule/i), message: expect.stringMatching(/nightly database backup schedule/i) }),
       ]);
     } finally {
@@ -566,6 +577,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.prepare('DELETE FROM alert_rules').run();
@@ -696,6 +708,7 @@ describe('production health and readiness checks', () => {
 
     await import('../background-jobs');
     const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
     db.prepare('DELETE FROM admin_users').run();
     db.prepare('DELETE FROM notification_webhooks').run();
     db.prepare('DELETE FROM alert_rules').run();

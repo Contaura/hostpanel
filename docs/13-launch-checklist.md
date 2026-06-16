@@ -15,10 +15,10 @@ Manual launch blockers are tracked explicitly so the final report can separate a
 
 | Manual blocker | Owner | Launch-day evidence required |
 |---|---|---|
-| External uptime monitor | Marcos | Screenshot or exported monitor showing `https://panel.contaura.com/healthz` checked every 1–5 minutes with alert recipients enabled. |
+| External uptime monitor | Marcos | Screenshot or exported monitor showing `https://panel.contaura.com/healthz` checked every 1–5 minutes with alert recipients enabled; record evidence by setting `external_uptime_monitor_verified` to the monitor URL/evidence reference so readiness clears `external_uptime_monitor_missing`. |
 | Automated nightly database backup | Ron + Marcos | Backup wizard/cron record plus a fresh archive listed by readiness `checks.backups.latestArchive`. |
 | Backup contents confirmation | Ron + Marcos | Restore/DR evidence showing `.env`, DB, vhosts, DNS zones, SSL certs, and email config are included or intentionally replaced by documented rebuild steps. |
-| Off-server backup replication | Marcos | S3/B2/equivalent bucket/object evidence for the latest HostPanel backup and retention policy. |
+| Off-server backup replication | Marcos | S3/B2/equivalent bucket/object evidence for the latest HostPanel backup and retention policy; record evidence by setting `off_server_backup_replication_verified` to the bucket/object/evidence reference so readiness clears `off_server_backup_replication_missing`. |
 | Notification webhook channel | Marcos | Panel Settings notification channel enabled and a successful test notification event. |
 | Admin account TOTP | Marcos | `/admin-users` shows the production admin account with TOTP enabled; readiness security warning cleared. |
 | Payment webhook secrets | Marcos | Stripe/PayPal webhook secrets configured and a test webhook delivery verified, or written confirmation payments are not live at launch. |
@@ -57,11 +57,11 @@ Manual launch blockers are tracked explicitly so the final report can separate a
 - [x] `Restart=on-failure` in systemd unit (service auto-recovers from crashes — **verified 2026-05-28**)
 - [x] `After=network.target mariadb.service` in unit (correct startup ordering — **verified 2026-05-28**)
 - [x] Built-in watchdog polls `/healthz` every 60 seconds and dispatches alerts on 3 consecutive failures (**verified** by self-health-watchdog TDD: 6 tests, 23 files / 121 tests green — `server/src/utils/self-health-watchdog.ts` wired in `index.ts` — **2026-05-28**)
-- [ ] External uptime monitor configured (UptimeRobot / BetterStack) pointing at `https://panel.contaura.com/healthz` (**manual step** — requires Marcos to configure)
+- [ ] External uptime monitor configured (UptimeRobot / BetterStack) pointing at `https://panel.contaura.com/healthz` (**manual step** — requires Marcos to configure; readiness now adds `external_uptime_monitor_missing` until `external_uptime_monitor_verified` contains evidence)
 - [x] SQLite database on persistent volume (`/root/hostpanel/data/hostpanel.db` on root filesystem, not tmpfs — **verified 2026-05-28**)
 - [ ] Automated nightly database backup scheduled (cron or panel backup wizard — **manual step**; `/api/health/readiness` now surfaces `checks.backupSchedules.enabledNightlyDatabaseBackupCount` and the `nightly_database_backup_schedule_missing` launch blocker until an enabled database backup schedule exists; it also surfaces `checks.backups.latestArchive` and `backup_evidence_missing` / `backup_evidence_stale` launch blockers until fresh backup evidence exists)
 - [ ] Backup includes `.env`, DB, vhosts, DNS zones, SSL certs, email config (**manual step**; verify contents during the backup-evidence check before launch)
-- [ ] Backup stored off-server (S3, B2, or equivalent — **manual step**; readiness message explicitly requires confirming off-server replication)
+- [ ] Backup stored off-server (S3, B2, or equivalent — **manual step**; readiness now adds `off_server_backup_replication_missing` until `off_server_backup_replication_verified` contains evidence)
 - [x] Restore procedure documented and tested via DR drill (`POST /api/backup/drill` — **verified** in DR drill automation pass; `/api/health/readiness` now surfaces `checks.disasterRecovery.latestDrillReport` and manual blocker `dr_drill_evidence_missing` until evidence exists)
 - [x] Disk usage alert configured (readiness endpoint returns 503 when ≥95% full — **verified** by health integration test)
 

@@ -193,6 +193,7 @@ async function currentCriticalAlerts() {
 type ManualLaunchBlockerCode =
   | 'admin_2fa_missing'
   | 'notification_webhook_missing'
+  | 'external_uptime_monitor_missing'
   | 'payment_webhook_secrets_unverified'
   | 'critical_alerts_active'
   | 'dr_drill_evidence_missing'
@@ -200,12 +201,14 @@ type ManualLaunchBlockerCode =
   | 'dr_drill_evidence_invalid'
   | 'backup_evidence_missing'
   | 'backup_evidence_stale'
+  | 'off_server_backup_replication_missing'
   | 'nightly_database_backup_schedule_missing'
   | 'tls_cert_expiring';
 
 const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: string; requiredEvidence: string }> = {
   admin_2fa_missing: { owner: 'Marcos', requiredEvidence: 'Enable TOTP for the production admin account in /admin-users; readiness security warning clears.' },
   notification_webhook_missing: { owner: 'Marcos', requiredEvidence: 'Configure an enabled notification webhook and send a successful test notification; readiness monitoring warning clears.' },
+  external_uptime_monitor_missing: { owner: 'Marcos', requiredEvidence: 'Configure an external uptime monitor for the public /healthz endpoint and record the monitor URL or dashboard evidence before launch.' },
   payment_webhook_secrets_unverified: { owner: 'Marcos', requiredEvidence: 'Configure the Stripe webhook signing secret in Settings and verify a signed Stripe webhook test event before launch.' },
   critical_alerts_active: { owner: 'Ron', requiredEvidence: 'Resolve active critical CPU, memory, or disk alerts and rerun /api/health/readiness.' },
   dr_drill_evidence_missing: { owner: 'Ron', requiredEvidence: 'Run POST /api/backup/drill/:name and verify the persisted report before launch.' },
@@ -213,12 +216,19 @@ const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: s
   dr_drill_evidence_invalid: { owner: 'Ron', requiredEvidence: 'Rerun POST /api/backup/drill/:name and confirm the latest report has success=true, drill=true, a valid verifiedAt timestamp, backup name, and dry-run restore plan.' },
   backup_evidence_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Create and verify on-server backup archive evidence, then confirm off-server replication.' },
   backup_evidence_stale: { owner: 'Ron + Marcos', requiredEvidence: 'Create a fresh backup archive and verify off-server replication before launch.' },
+  off_server_backup_replication_missing: { owner: 'Marcos', requiredEvidence: 'Provide off-server backup replication evidence from S3, B2, or equivalent storage for the latest HostPanel backup archive.' },
   nightly_database_backup_schedule_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Configure an enabled database backup schedule and verify the first archive before launch.' },
   tls_cert_expiring: { owner: 'Ron', requiredEvidence: 'Renew expiring TLS certificates and verify HTTPS handshakes before launch.' },
 };
 
 function manualLaunchBlocker(code: ManualLaunchBlockerCode, message: string) {
   return { code, severity: 'manual' as const, ...MANUAL_LAUNCH_BLOCKER_EVIDENCE[code], message };
+}
+
+function settingEnabled(key: string): boolean {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value?: string } | undefined;
+  const value = String(row?.value || '').trim().toLowerCase();
+  return Boolean(value && !['0', 'false', 'no', 'missing', 'unverified'].includes(value));
 }
 
 async function buildReadiness() {
@@ -297,6 +307,11 @@ async function buildReadiness() {
         warnings.push(message);
         launchBlockers.push(manualLaunchBlocker('notification_webhook_missing', message));
       }
+      if (!settingEnabled('external_uptime_monitor_verified')) {
+        const message = 'No external uptime monitor evidence is recorded. Configure a third-party monitor for the public /healthz endpoint before launch.';
+        warnings.push(message);
+        launchBlockers.push(manualLaunchBlocker('external_uptime_monitor_missing', message));
+      }
       if (enabledAlertRuleCount === 0) {
         warnings.push('No enabled system alert rule is configured. Enable CPU, memory, disk, or load alert rules before launch so threshold breaches are surfaced.');
       }
@@ -349,6 +364,9 @@ async function buildReadiness() {
         launchBlockers.push(manualLaunchBlocker('backup_evidence_missing', 'No HostPanel backup archive evidence was found. Create and verify an on-server backup archive before launch, then confirm off-server replication.'));
       } else if (archive.latest.ageDays > archive.maxAgeDays) {
         launchBlockers.push(manualLaunchBlocker('backup_evidence_stale', `Latest backup archive evidence is older than ${archive.maxAgeDays} day${archive.maxAgeDays === 1 ? '' : 's'}. Create a fresh backup and verify off-server replication before launch.`));
+      }
+      if (!settingEnabled('off_server_backup_replication_verified')) {
+        launchBlockers.push(manualLaunchBlocker('off_server_backup_replication_missing', 'No off-server backup replication evidence is recorded. Confirm the latest HostPanel backup archive exists in S3, B2, or equivalent storage before launch.'));
       }
       checks.backups = { ok: true, latestArchive: archive.latest, backupDir: archive.dir, maxAgeDays: archive.maxAgeDays };
     } catch (err: any) {
