@@ -1,11 +1,10 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs/promises';
+import path from 'path';
+import { runFile } from './process-runner';
 
-const execAsync = promisify(exec);
-
-const KEY_TABLE     = '/etc/opendkim/KeyTable';
-const SIGNING_TABLE = '/etc/opendkim/SigningTable';
+const KEY_TABLE     = process.env.OPENDKIM_KEY_TABLE || '/etc/opendkim/KeyTable';
+const SIGNING_TABLE = process.env.OPENDKIM_SIGNING_TABLE || '/etc/opendkim/SigningTable';
+const KEY_DIR       = process.env.OPENDKIM_KEY_DIR || '/etc/opendkim/keys';
 
 // Register a freshly-generated key with OpenDKIM so it actually gets used to
 // sign mail. opendkim-genkey only writes the key files; until KeyTable and
@@ -16,20 +15,24 @@ const SIGNING_TABLE = '/etc/opendkim/SigningTable';
 // Where <handle> is conventionally "<selector>._domainkey.<domain>".
 export async function registerDkimKey(domain: string, selector = 'default'): Promise<void> {
   const handle  = `${selector}._domainkey.${domain}`;
-  const privKey = `/etc/opendkim/keys/${domain}/${selector}.private`;
+  const privKey = path.join(KEY_DIR, domain, `${selector}.private`);
   const keyLine     = `${handle} ${domain}:${selector}:${privKey}`;
   const signingLine = `*@${domain} ${handle}`;
 
-  await execAsync(`chown opendkim:opendkim ${privKey} 2>/dev/null || true`);
-  await execAsync(`chmod 600 ${privKey} 2>/dev/null || true`);
+  await runFile('chown', ['opendkim:opendkim', privKey]);
+  await runFile('chmod', ['600', privKey]);
 
   await removeDkimLines(KEY_TABLE,     new RegExp(`^${escapeRe(handle)}\\b`, 'm'));
   await removeDkimLines(SIGNING_TABLE, new RegExp(`^\\*@${escapeRe(domain)}\\b`, 'm'));
+  await fs.mkdir(path.dirname(KEY_TABLE), { recursive: true });
+  await fs.mkdir(path.dirname(SIGNING_TABLE), { recursive: true });
   await fs.appendFile(KEY_TABLE,     keyLine     + '\n');
   await fs.appendFile(SIGNING_TABLE, signingLine + '\n');
 
   // SIGUSR1 reloads the tables without dropping in-flight connections.
-  await execAsync('systemctl reload opendkim 2>/dev/null || systemctl restart opendkim 2>/dev/null || true');
+  await runFile('systemctl', ['reload', 'opendkim'], { timeout: 120000 })
+    .catch(() => runFile('systemctl', ['restart', 'opendkim'], { timeout: 120000 }))
+    .catch(() => ({ stdout: '', stderr: '' }));
 }
 
 async function removeDkimLines(path: string, match: RegExp): Promise<void> {
