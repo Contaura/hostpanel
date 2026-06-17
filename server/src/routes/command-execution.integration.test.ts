@@ -60,6 +60,7 @@ describe('high-risk route command execution integration', () => {
     delete process.env.PHPMYADMIN_CONF_FILE;
     delete process.env.PHPMYADMIN_DISTRO_CONF_FILE;
     delete process.env.PHPMYADMIN_CONFIG_FILE;
+    delete process.env.PHPMYADMIN_SSO_TOKEN_DIR;
     delete process.env.PHPMYADMIN_ALIAS;
     vi.resetModules();
   });
@@ -543,6 +544,25 @@ describe('high-risk route command execution integration', () => {
     expect(runFileMock).toHaveBeenCalledWith('php', ['-l', path.join(pmaDir, 'hostpanel-signon.php')], expect.objectContaining({ timeout: 60000 }));
     expect(runFileMock).toHaveBeenCalledWith('apachectl', ['configtest'], expect.objectContaining({ timeout: 60000 }));
     expect(runFileMock).toHaveBeenCalledWith('systemctl', ['is-active', 'httpd'], expect.objectContaining({ timeout: 60000 }));
+  });
+
+  it('keeps phpMyAdmin Signon token artifacts readable by Apache without world-readable secrets', async () => {
+    const pmaDir = path.join(tmp, 'phpMyAdmin');
+    process.env.PHPMYADMIN_PATHS = pmaDir;
+    process.env.PHPMYADMIN_CONF_FILE = path.join(tmp, 'httpd', 'hostpanel-phpmyadmin.conf');
+    process.env.PHPMYADMIN_CONFIG_FILE = path.join(tmp, 'phpMyAdmin', 'config.inc.php');
+    process.env.PHPMYADMIN_SSO_TOKEN_DIR = path.join(tmp, 'tokens');
+    process.env.PHPMYADMIN_ALIAS = '/phpMyAdmin';
+    await fs.mkdir(pmaDir, { recursive: true });
+    const server = await appFor('/api/databases', './databases');
+    closeServer = server.close;
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    await fetch(`${server.url}/api/databases/phpmyadmin/install`, { method: 'POST' });
+
+    const tokenDirMode = (await fs.stat(process.env.PHPMYADMIN_SSO_TOKEN_DIR)).mode & 0o777;
+    expect(tokenDirMode).toBe(0o750);
+    expect(runFileMock).toHaveBeenCalledWith('chgrp', ['apache', process.env.PHPMYADMIN_SSO_TOKEN_DIR], expect.objectContaining({ timeout: 60000 }));
   });
 
   it('treats real runFile string stdout as phpMyAdmin validation command output', async () => {

@@ -264,9 +264,15 @@ header('Location: '.$target);
 exit;
 ?>`;
 }
-function writePmaApacheConfig(foundPath: string) {
+async function securePmaSsoPath(target: string, mode: number) {
+  await fs.chmod(target, mode);
+  await runFile('chgrp', ['apache', target], { timeout: 60000 }).catch(() => undefined);
+}
+
+async function writePmaApacheConfig(foundPath: string) {
   mkdirSync(path.dirname(PMA_CONF_FILE), { recursive: true });
   mkdirSync(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });
+  await securePmaSsoPath(PMA_SSO_TOKEN_DIR, 0o750);
   writeFileSync(path.join(foundPath, 'hostpanel-signon.php'), pmaBridgePhp(), { mode: 0o640 });
   disableDistroPmaAliases();
   writeFileSync(PMA_CONF_FILE, `# Managed by HostPanel. Exposes phpMyAdmin through Apache.\nSetEnv HOSTPANEL_PMA_SSO_TOKEN_DIR ${PMA_SSO_TOKEN_DIR}\nAlias ${PMA_ALIAS} ${foundPath}\n<Directory ${foundPath}>\n  Options FollowSymLinks\n  DirectoryIndex index.php\n  AllowOverride None\n  Require all granted\n</Directory>\n`, { mode: 0o644 });
@@ -280,9 +286,12 @@ function disableDistroPmaAliases() {
 }
 async function createPmaSsoToken(username: string, password: string, database?: string) {
   await fs.mkdir(PMA_SSO_TOKEN_DIR, { recursive: true, mode: 0o750 });
+  await securePmaSsoPath(PMA_SSO_TOKEN_DIR, 0o750);
   const token = crypto.randomBytes(24).toString('hex');
   const payload = { username, password, database: database || '', host: DB_HOST, port: DB_PORT, expires: Math.floor((Date.now() + PMA_SSO_TTL_MS) / 1000) };
-  await fs.writeFile(path.join(PMA_SSO_TOKEN_DIR, `${token}.json`), JSON.stringify(payload), { mode: 0o640 });
+  const tokenFile = path.join(PMA_SSO_TOKEN_DIR, `${token}.json`);
+  await fs.writeFile(tokenFile, JSON.stringify(payload), { mode: 0o640 });
+  await securePmaSsoPath(tokenFile, 0o640);
   return token;
 }
 
@@ -326,7 +335,7 @@ router.post('/phpmyadmin/install', enforceResellerPrivilege('phpmyadmin'), async
       found = pmaPath();
     }
     if (!found) return res.status(500).json({ error: 'phpMyAdmin package installed but no known install directory was found' });
-    writePmaApacheConfig(found);
+    await writePmaApacheConfig(found);
     await writePmaConfig();
     await runFile('apachectl', ['graceful'], { timeout: 120000 }).catch(async () => { await runFile('systemctl', ['reload', 'httpd'], { timeout: 120000 }); });
     res.json({ installed: true, path: found, url: pmaUrl(), config: PMA_CONF_FILE, phpMyAdminConfig: PMA_CONFIG_FILE });
@@ -392,7 +401,7 @@ router.post('/phpmyadmin/sso', enforceResellerPrivilege('phpmyadmin'), async (re
   const found = pmaPath();
   if (!found) return res.status(404).json({ error: 'phpMyAdmin is not installed' });
   try {
-    writePmaApacheConfig(found);
+    await writePmaApacheConfig(found);
     await writePmaConfig();
     const userConn = await mysql.createConnection({ host: DB_HOST, port: DB_PORT, user: username, password, database: database || undefined });
     await userConn.ping();
