@@ -226,11 +226,11 @@ app.use('/api/portal', clientPortalRoutes);
 // Stripe — POST /webhook is public (Stripe-signature authenticated); all other routes require JWT
 app.use('/api/stripe', (req, res, next) => {
   if (req.path === '/webhook' && req.method === 'POST') return next();
-  return (authenticateToken as any)(req, res, (err?: any) => err ? next(err) : (blockPortalRoles as any)(req, res, next));
+  return (authenticateToken as any)(req, res, (err?: any) => err ? next(err) : (blockPortalRoles as any)(req, res, (err2?: any) => err2 ? next(err2) : enforceResellerPrivilege('billing')(req, res, next)));
 }, stripeRoutes);
 
 // PayPal
-app.use('/api/paypal', ...adminAuth, paypalRoutes);
+app.use('/api/paypal', ...adminAuth, enforceResellerPrivilege('billing'), paypalRoutes);
 
 // Email extras
 app.use('/api/dkim',         ...adminAuth, enforceResellerPrivilege('dkim'), dkimRoutes);

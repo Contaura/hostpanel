@@ -12,6 +12,7 @@ import express from 'express';
 import os from 'os';
 import path from 'path';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,6 +177,15 @@ describe('admin API portal-role isolation', () => {
 
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/superadmin/i);
+  });
+});
+
+describe('payment integration privilege wiring', () => {
+  it('keeps protected Stripe and PayPal routes behind the billing reseller privilege', () => {
+    const indexSource = fsSync.readFileSync(path.join(__dirname, '../index.ts'), 'utf8');
+
+    expect(indexSource).toMatch(/app\.use\('\/api\/stripe',[\s\S]*enforceResellerPrivilege\('billing'\)[\s\S]*stripeRoutes\)/);
+    expect(indexSource).toContain("app.use('/api/paypal', ...adminAuth, enforceResellerPrivilege('billing'), paypalRoutes);");
   });
 });
 

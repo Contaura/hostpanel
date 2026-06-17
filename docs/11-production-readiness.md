@@ -819,3 +819,31 @@ npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -
 npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues a ClamAV definition update"
 # → passed
 ```
+
+---
+
+## 2026-06-17 6-hour slice — payment integration reseller-privilege hardening
+
+Priority: continue closing production security/authorization coverage gaps for sensitive routes.
+
+### Risk addressed
+
+Stripe and PayPal payment integration endpoints are sensitive billing-adjacent controls. The generic admin/portal-role guard protected them from unauthenticated and portal-role access, but reseller feature-list enforcement was not wired on those two route mounts. A reseller account without Billing privileges could still query payment config or initiate payment operations if it had a valid reseller JWT.
+
+### Changes made
+
+- **`server/src/index.ts`** — protected non-webhook Stripe routes with `enforceResellerPrivilege('billing')` after JWT/portal-role validation while preserving the public signed Stripe webhook path.
+- **`server/src/index.ts`** — protected all PayPal routes with `enforceResellerPrivilege('billing')`.
+- **`server/src/routes/security-authorization.integration.test.ts`** — added a regression that keeps Stripe/PayPal route wiring tied to the Billing reseller privilege.
+
+### TDD evidence
+
+```bash
+# RED — failed because Stripe/PayPal route mounts lacked enforceResellerPrivilege('billing')
+npm run test --workspace=server -- src/routes/security-authorization.integration.test.ts -t "keeps protected Stripe and PayPal routes behind the billing reseller privilege"
+# → failed as expected
+
+# GREEN
+npm run test --workspace=server -- src/routes/security-authorization.integration.test.ts -t "keeps protected Stripe and PayPal routes behind the billing reseller privilege"
+# → passed
+```
