@@ -210,7 +210,7 @@ const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: s
   admin_2fa_missing: { owner: 'Marcos', requiredEvidence: 'Enable TOTP for the production admin account in /admin-users; readiness security warning clears.' },
   notification_webhook_missing: { owner: 'Marcos', requiredEvidence: 'Configure an enabled notification webhook and send a successful test notification; readiness monitoring warning clears.' },
   external_uptime_monitor_missing: { owner: 'Marcos', requiredEvidence: 'Configure an external uptime monitor for the public /healthz endpoint and record the monitor URL or dashboard evidence before launch.' },
-  payment_webhook_secrets_unverified: { owner: 'Marcos', requiredEvidence: 'Configure the Stripe webhook signing secret in Settings and verify a signed Stripe webhook test event before launch.' },
+  payment_webhook_secrets_unverified: { owner: 'Marcos', requiredEvidence: 'Configure the Stripe webhook signing secret and PayPal webhook verification evidence for any live payment gateway before launch.' },
   critical_alerts_active: { owner: 'Ron', requiredEvidence: 'Resolve active critical CPU, memory, or disk alerts and rerun /api/health/readiness.' },
   dr_drill_evidence_missing: { owner: 'Ron', requiredEvidence: 'Run POST /api/backup/drill/:name and verify the persisted report before launch.' },
   dr_drill_evidence_stale: { owner: 'Ron', requiredEvidence: 'Rerun POST /api/backup/drill/:name against a current backup and verify the persisted report age.' },
@@ -344,14 +344,20 @@ async function buildReadiness() {
 
   if (process.env.NODE_ENV === 'production') {
     try {
-      const settings = db.prepare("SELECT key, value FROM settings WHERE key IN ('stripe_secret_key', 'stripe_publishable_key', 'stripe_price_id', 'stripe_webhook_secret')").all() as Array<{ key: string; value: string }>;
+      const settings = db.prepare("SELECT key, value FROM settings WHERE key IN ('stripe_secret_key', 'stripe_publishable_key', 'stripe_price_id', 'stripe_webhook_secret', 'paypal_client_id', 'paypal_secret', 'paypal_mode', 'paypal_webhook_verified')").all() as Array<{ key: string; value: string }>;
       const byKey = Object.fromEntries(settings.map(row => [row.key, String(row.value || '').trim()]));
       const stripeConfigured = Boolean(byKey.stripe_secret_key || byKey.stripe_publishable_key || byKey.stripe_price_id);
       const stripeWebhookSecretConfigured = Boolean(byKey.stripe_webhook_secret);
+      const paypalConfigured = Boolean(byKey.paypal_client_id || byKey.paypal_secret);
+      const paypalLiveMode = String(byKey.paypal_mode || '').toLowerCase() === 'live';
+      const paypalWebhookVerified = settingEnabled('paypal_webhook_verified');
       if (stripeConfigured && !stripeWebhookSecretConfigured) {
         launchBlockers.push(manualLaunchBlocker('payment_webhook_secrets_unverified', 'Stripe is configured without a webhook signing secret. Configure and verify the signed Stripe webhook before accepting live payments.'));
       }
-      checks.payments = { ok: true, stripeConfigured, stripeWebhookSecretConfigured };
+      if (paypalConfigured && paypalLiveMode && !paypalWebhookVerified) {
+        launchBlockers.push(manualLaunchBlocker('payment_webhook_secrets_unverified', 'PayPal live payments are configured without webhook verification evidence. Verify PayPal webhook delivery/signature handling before accepting live payments.'));
+      }
+      checks.payments = { ok: true, stripeConfigured, stripeWebhookSecretConfigured, paypalConfigured, paypalLiveMode, paypalWebhookVerified };
     } catch (err: any) {
       checks.payments = { ok: true, stripeConfigured: null, stripeWebhookSecretConfigured: null, warnings: [`Unable to inspect payment webhook configuration: ${err.message}`] };
     }
