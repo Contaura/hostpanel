@@ -230,7 +230,7 @@ describe('production health and readiness checks', () => {
     }
   });
 
-  it('adds a manual launch blocker when latest disaster-recovery drill evidence is invalid', async () => {
+  it('adds a manual launch blocker when latest disaster-recovery drill evidence lacks archive integrity evidence', async () => {
     const prevNodeEnv = process.env.NODE_ENV;
     const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
     const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
@@ -245,7 +245,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const invalidReport = path.join(process.env.DRILL_REPORT_DIR, 'failed-drill.json');
-    await fs.writeFile(invalidReport, JSON.stringify({ success: false, drill: true, backup: 'files_all.tar.gz', restorePlan: { dryRun: true, actions: [] } }));
+    await fs.writeFile(invalidReport, JSON.stringify({ success: true, drill: true, backup: 'files_all.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, actions: [] } }));
     const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(freshBackup, 'backup');
     vi.doMock('child_process', () => ({
@@ -329,7 +329,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), archive: { size: 6, sha256: 'f0355b03869c88f43e2f0d1049013088a8fdd522ff572c871be7bdac22545477' }, restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(freshBackup, 'backup');
     vi.doMock('child_process', () => ({
@@ -416,7 +416,7 @@ describe('production health and readiness checks', () => {
     process.env.BACKUP_ARCHIVE_MAX_AGE_DAYS = '1';
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), archive: { size: 6, sha256: 'f0355b03869c88f43e2f0d1049013088a8fdd522ff572c871be7bdac22545477' }, restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const staleBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(staleBackup, 'backup');
     const staleDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
@@ -563,7 +563,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), archive: { size: 6, sha256: 'f0355b03869c88f43e2f0d1049013088a8fdd522ff572c871be7bdac22545477' }, restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(freshBackup, 'backup');
     vi.doMock('child_process', () => ({
@@ -650,7 +650,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(process.env.BACKUP_DIR, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), archive: { size: 6, sha256: 'f0355b03869c88f43e2f0d1049013088a8fdd522ff572c871be7bdac22545477' }, restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     const freshBackup = path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz');
     await fs.writeFile(freshBackup, 'backup');
     vi.doMock('child_process', () => ({
@@ -785,7 +785,7 @@ describe('production health and readiness checks', () => {
     process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
     await fs.mkdir(process.env.DRILL_REPORT_DIR);
     const freshReport = path.join(process.env.DRILL_REPORT_DIR, 'fresh-drill.json');
-    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
+    await fs.writeFile(freshReport, JSON.stringify({ success: true, drill: true, backup: 'files_all_2026-06-01T00-00-00.tar.gz', verifiedAt: new Date().toISOString(), archive: { size: 6, sha256: 'f0355b03869c88f43e2f0d1049013088a8fdd522ff572c871be7bdac22545477' }, restorePlan: { dryRun: true, type: 'files', actions: ['Would restore ./index.html'] } }));
     vi.doMock('child_process', () => ({
       spawnSync: vi.fn((cmd: string, args: string[]) => {
         if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };

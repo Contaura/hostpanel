@@ -90,6 +90,12 @@ function validateDrillReport(file: string) {
     if (!parsed.backup || typeof parsed.backup !== 'string') errors.push('backup is missing');
     if (!parsed.verifiedAt || Number.isNaN(Date.parse(parsed.verifiedAt))) errors.push('verifiedAt is missing or invalid');
     if (!parsed.restorePlan || parsed.restorePlan.dryRun !== true) errors.push('restorePlan dry-run evidence is missing');
+    if (!parsed.archive || typeof parsed.archive !== 'object') {
+      errors.push('archive integrity evidence is missing');
+    } else {
+      if (typeof parsed.archive.size !== 'number' || parsed.archive.size <= 0) errors.push('archive size evidence is missing or invalid');
+      if (typeof parsed.archive.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(parsed.archive.sha256)) errors.push('archive sha256 evidence is missing or invalid');
+    }
   } catch (err: any) {
     errors.push(`report is not valid JSON: ${err.message}`);
   }
