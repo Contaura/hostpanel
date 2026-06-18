@@ -847,3 +847,32 @@ npm run test --workspace=server -- src/routes/security-authorization.integration
 npm run test --workspace=server -- src/routes/security-authorization.integration.test.ts -t "keeps protected Stripe and PayPal routes behind the billing reseller privilege"
 # → passed
 ```
+
+---
+
+## 2026-06-18 6-hour slice — app staging cleanup background-job hardening
+
+Priority: continue closing production-depth gaps for remaining app lifecycle operations after the launch deadline, while preserving synchronous compatibility for existing callers.
+
+### Risk addressed
+
+Deleting a staging environment (`DELETE /api/apps/:name/staging`) still ran synchronously even though it shells out to `pm2 delete` and mutates staging state. Operators had no durable `/api/jobs` record if pm2 cleanup stalled during production maintenance.
+
+### Changes made
+
+- **`server/src/routes/apps.ts`** — `DELETE /api/apps/:name/staging` now accepts `{ "async": true }` and enqueues an `app.staging_delete` background job with progress, `jobId`, and `statusUrl`.
+- The legacy synchronous response remains available when `async` is omitted.
+- **`server/src/routes/scanner-jobs.integration.test.ts`** — added a regression proving staging cleanup completes through `/api/jobs`, returns `{ success, appName, stagingName }`, and removes the `app_staging` record.
+- **`docs/13-launch-checklist.md`** — updated long-running-operation evidence to include staging environment deletion.
+
+### TDD evidence
+
+```bash
+# RED — failed because async:true returned 200 synchronously instead of 202/jobId
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues staging environment deletion"
+# → failed as expected: expected 202, received 200
+
+# GREEN
+npm run test --workspace=server -- src/routes/scanner-jobs.integration.test.ts -t "enqueues staging environment deletion"
+# → passed
+```

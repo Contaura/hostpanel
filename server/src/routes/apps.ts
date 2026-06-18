@@ -354,10 +354,26 @@ router.post('/:name/promote', adminOnly, async (req: Request, res: Response) => 
 router.delete('/:name/staging', adminOnly, async (req: Request, res: Response) => {
   const staging = db.prepare('SELECT * FROM app_staging WHERE app_name = ?').get(req.params.name) as any;
   if (!staging) return res.status(404).json({ error: 'No staging environment' });
-  try {
+  const { async: isAsync } = req.body || {};
+
+  const doDeleteStaging = async () => {
     await execFileAsync('pm2', ['delete', staging.staging_name]).catch(() => {});
     db.prepare('DELETE FROM app_staging WHERE app_name = ?').run(req.params.name);
-    res.json({ success: true });
+    return { success: true, appName: req.params.name, stagingName: staging.staging_name };
+  };
+
+  if (asyncRequested(isAsync)) {
+    const jobId = createBackgroundJob({ type: 'app.staging_delete', resource: req.params.name }, async (ctx) => {
+      ctx.progress(10, `Deleting staging environment ${staging.staging_name}`);
+      const result = await doDeleteStaging();
+      ctx.progress(90, `Staging environment ${staging.staging_name} deleted`);
+      return result;
+    });
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    res.json(await doDeleteStaging());
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 

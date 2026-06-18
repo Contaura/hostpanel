@@ -71,7 +71,7 @@ Manual launch blockers are tracked explicitly so the final report can separate a
 
 - [x] Frontend shipped as lazy-loaded per-route chunks (no single massive initial bundle — **verified 2026-05-28**: Vite splits per page)
 - [x] API response times acceptable under normal load (< 200ms for common endpoints — **verified** by integration test timings)
-- [x] Long-running operations (backups, scans, ClamAV definition updates, app installs, app start/stop/restart/stage/promote/delete, WordPress install/maintenance/update-all, uploaded WordPress plugin/theme ZIP installs) run as background jobs with `/api/jobs` polling (**verified 2026-06-15** — scanner definition updates now return `scanner.update_definitions`; app stop/restart return `app.stop` / `app.restart`; synchronous compatibility preserved)
+- [x] Long-running operations (backups, scans, ClamAV definition updates, app installs, app start/stop/restart/stage/promote/delete/staging-delete, WordPress install/maintenance/update-all, uploaded WordPress plugin/theme ZIP installs) run as background jobs with `/api/jobs` polling (**verified 2026-06-18** — staging cleanup now returns `app.staging_delete`; scanner definition updates return `scanner.update_definitions`; app stop/restart return `app.stop` / `app.restart`; synchronous compatibility preserved)
 - [x] Background job table does not have a runaway accumulation of failed rows (0 failed rows — **verified 2026-05-28**)
 - [x] No memory leak observed after 24h uptime (53.3 MB RSS at 5h uptime — **verified 2026-05-28**)
 
