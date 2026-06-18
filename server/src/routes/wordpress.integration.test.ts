@@ -219,6 +219,35 @@ describe('WordPress install background job', () => {
     expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining(['--path=/var/www/maint.example.com/public_html', '--allow-root', 'theme', 'update', 'twentytwentyfive']), expect.any(Object));
   });
 
+  it('enqueues search-replace as a wordpress.search_replace background job when async:true', async () => {
+    const runFileMock = vi.mocked(runFile);
+    runFileMock.mockClear();
+    const server = await appForRoutes(); closeServer = server.close;
+
+    const r = await fetch(`${server.url}/api/wordpress/maint.example.com/search-replace`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search: 'http://old.example.com', replace: 'https://new.example.com', async: true }),
+    });
+    expect(r.status).toBe(202);
+    const { jobId, statusUrl } = await r.json();
+    expect(typeof jobId).toBe('number');
+    expect(statusUrl).toBe(`/api/jobs/${jobId}`);
+
+    const job = await waitForJob(server.url, jobId);
+    expect(job.status).toBe('completed');
+    expect(job.type).toBe('wordpress.search_replace');
+    expect(job.resource).toBe('maint.example.com');
+    expect(job.result).toEqual(expect.objectContaining({ domain: 'maint.example.com', output: expect.any(String) }));
+    expect(runFileMock).toHaveBeenCalledWith('wp', expect.arrayContaining([
+      '--path=/var/www/maint.example.com/public_html',
+      '--allow-root',
+      'search-replace',
+      'http://old.example.com',
+      'https://new.example.com',
+      '--all-tables',
+    ]), expect.any(Object));
+  });
+
   it('enqueues uploaded plugin zip installs as a wordpress.plugin_upload background job when async:true', async () => {
     const runFileMock = vi.mocked(runFile);
     runFileMock.mockClear();

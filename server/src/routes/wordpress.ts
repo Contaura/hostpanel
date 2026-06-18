@@ -281,12 +281,14 @@ router.post('/:domain/update-all', async (req: Request, res: Response) => {
 router.post('/:domain/search-replace', async (req: Request, res: Response) => {
   const { domain } = req.params;
   if (!validateDomain(domain)) return res.status(400).json({ error: 'Invalid domain' });
-  const { search, replace } = req.body;
+  const { search, replace, async: runAsync } = req.body;
   if (!search || !replace) return res.status(400).json({ error: 'search and replace required' });
   if (typeof search !== 'string' || typeof replace !== 'string') {
     return res.status(400).json({ error: 'search and replace must be strings' });
   }
-  try {
+
+  const doSearchReplace = async (ctx?: import('../background-jobs').JobContext) => {
+    ctx?.progress(20, 'Running WordPress database search-replace…');
     // argv form — the previous shell-string interpolation let a search value
     // like `"; rm -rf / #` break out of the double quotes.
     const { stdout } = await runFile('wp', [
@@ -297,7 +299,20 @@ router.post('/:domain/search-replace', async (req: Request, res: Response) => {
       replace,
       '--all-tables',
     ], { timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
-    res.json({ output: stdout });
+    return { domain, output: stdout };
+  };
+
+  if (runAsync === true) {
+    const jobId = createBackgroundJob(
+      { type: 'wordpress.search_replace', resource: domain, metadata: { domain }, createdBy: (req as any).user?.username || 'admin' },
+      (ctx) => doSearchReplace(ctx),
+    );
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}` });
+  }
+
+  try {
+    const result = await doSearchReplace();
+    res.json({ output: result.output });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
