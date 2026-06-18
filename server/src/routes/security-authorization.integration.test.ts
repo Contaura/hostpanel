@@ -178,6 +178,30 @@ describe('admin API portal-role isolation', () => {
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/superadmin/i);
   });
+
+  it('requires superadmin role to read or clear audit logs', async () => {
+    const { authenticateToken, blockPortalRoles } = await import('../middleware/auth');
+    const auditLogRoute = (await import('./audit-log')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/audit-log', authenticateToken, blockPortalRoles, auditLogRoute);
+    const server = await listen(app); closeServer = server.close;
+
+    const adminToken = makeToken({ username: 'admin', role: 'admin' });
+
+    const readRes = await fetch(`${server.url}/api/audit-log`, {
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(readRes.status).toBe(403);
+    expect((await readRes.json()).error).toMatch(/superadmin|permission/i);
+
+    const clearRes = await fetch(`${server.url}/api/audit-log/clear`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+    expect(clearRes.status).toBe(403);
+    expect((await clearRes.json()).error).toMatch(/superadmin|permission/i);
+  });
 });
 
 describe('payment integration privilege wiring', () => {

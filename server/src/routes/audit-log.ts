@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import db from '../db';
+import { requireRole } from '../middleware/auth';
 
 const router = Router();
 
@@ -42,6 +43,8 @@ export function auditMiddleware(req: Request, res: Response, next: NextFunction)
 }
 
 /* ── List audit logs ─────────────────────────────────────── */
+
+router.use(requireRole('superadmin'));
 
 router.get('/', (req: Request, res: Response) => {
   const limit  = Math.min(parseInt(req.query.limit as string) || 100, 500);
