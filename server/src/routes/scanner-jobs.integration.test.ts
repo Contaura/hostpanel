@@ -348,6 +348,58 @@ describe('app staging/promote background jobs', () => {
     delete process.env.WEBROOT;
   });
 
+  it('records the authenticated admin on app create background jobs', async () => {
+    runFileMock.mockReset();
+    runFileMock.mockResolvedValue({ stdout: '', stderr: '' });
+
+    const tmp = await import('fs/promises').then(fs => fs.mkdtemp('/tmp/hostpanel-app-create-job-'));
+    process.env.VHOST_DIR = tmp;
+    vi.resetModules();
+
+    const apps = (await import('./apps')).default;
+    const jobs = (await import('./jobs')).default;
+    const db = (await import('../db')).default;
+    db.prepare('DELETE FROM managed_apps WHERE name=?').run('auditcreate');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/apps', withAdminAuth(apps));
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const res = await fetch(`${server.url}/api/apps`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'auditcreate',
+        type: 'nodejs',
+        domain: 'auditcreate.example.com',
+        port: 5012,
+        start_script: '/apps/auditcreate/app.js',
+        working_dir: '/apps/auditcreate',
+        async: true,
+      }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.jobId).toEqual(expect.any(Number));
+    expect(body.statusUrl).toBe(`/api/jobs/${body.jobId}`);
+
+    const done = await waitFor(
+      async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(),
+      j => j.status === 'completed' || j.status === 'failed',
+    );
+    expect(done.status).toBe('completed');
+    expect(done.type).toBe('app.create');
+    expect(done.created_by).toBe('testadmin');
+    expect(done.metadata).toMatchObject({ appName: 'auditcreate', domain: 'auditcreate.example.com' });
+    expect(done.result).toMatchObject({ name: 'auditcreate', domain: 'auditcreate.example.com' });
+
+    db.prepare('DELETE FROM managed_apps WHERE name=?').run('auditcreate');
+    await import('fs/promises').then(fs => fs.rm(tmp, { recursive: true, force: true }));
+    delete process.env.VHOST_DIR;
+  });
+
   it('enqueues app stop as a background job and reports completion', async () => {
     ensurePm2PresentForMockedExecFile();
     runFileMock.mockReset();

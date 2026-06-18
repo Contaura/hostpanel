@@ -120,7 +120,12 @@ router.post('/', adminOnly, async (req: Request, res: Response) => {
   };
 
   if (asyncRequested(isAsync)) {
-    const jobId = createBackgroundJob({ type: 'app.create', resource: name }, async (ctx) => {
+    const jobId = createBackgroundJob({
+      type: 'app.create',
+      resource: name,
+      metadata: { appName: name, domain },
+      createdBy: (req as any).user?.username || 'admin',
+    }, async (ctx) => {
       ctx.progress(10, `Creating app ${name}`);
       const created = await doCreate();
       ctx.progress(90, `App ${name} created`);
