@@ -69,6 +69,7 @@ describe('alerts route — webhook dispatch on threshold breach', () => {
     vi.clearAllMocks();
     await fs.rm(tmp, { recursive: true, force: true });
     delete process.env.DATA_DIR;
+    delete process.env.BACKUP_DIR;
     vi.resetModules();
   });
 
@@ -217,5 +218,37 @@ describe('alerts route — webhook dispatch on threshold breach', () => {
     expect((await first.json()).alerts).toHaveLength(1);
     expect((await second.json()).alerts).toHaveLength(1);
     expect(dispatchNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('dispatches system.backup_stale when the newest backup archive is older than the backup_age threshold', async () => {
+    const si = (await import('systeminformation')).default as any;
+    si.currentLoad.mockResolvedValue({ currentLoad: 10 });
+    si.mem.mockResolvedValue({ used: 1e9, total: 8e9 });
+    si.fsSize.mockResolvedValue([{ mount: '/', use: 30, size: 100e9, used: 30e9 }]);
+
+    const backupDir = path.join(tmp, 'backups');
+    await fs.mkdir(backupDir, { recursive: true });
+    const archive = path.join(backupDir, 'db_hostpanel_old.sql.gz');
+    await fs.writeFile(archive, 'backup');
+    const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    await fs.utimes(archive, old, old);
+    process.env.BACKUP_DIR = backupDir;
+
+    const { dispatchNotification } = await import('./notifications');
+    const db = (await import('../db')).default;
+    db.prepare('INSERT INTO alert_rules (metric, threshold, notify_email, enabled) VALUES (?, ?, ?, 1)').run('backup_age', 1, '');
+
+    const server = await buildApp(); closeServer = server.close;
+    const res = await fetch(`${server.url}/api/alerts/current`);
+
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    const backupAlert = body.alerts.find((a: any) => a.metric === 'BackupAge');
+    expect(backupAlert).toMatchObject({ severity: 'critical', threshold: 1, file: archive });
+    expect(backupAlert.value).toBeGreaterThanOrEqual(3);
+    expect(dispatchNotification).toHaveBeenCalledWith(
+      'system.backup_stale',
+      expect.objectContaining({ file: archive, threshold: 1, severity: 'critical' }),
+    );
   });
 });

@@ -4,6 +4,8 @@ import nodemailer from 'nodemailer';
 import si from 'systeminformation';
 import db from '../db';
 import { dispatchNotification } from './notifications';
+import path from 'path';
+import { existsSync, readdirSync, statSync } from 'fs';
 
 const router = Router();
 
@@ -26,6 +28,22 @@ const NOTIFICATION_COOLDOWN_MS = 3600000;
 const lastNotified: Record<number, number> = {};
 const lastWebhookNotified: Record<string, number> = {};
 
+function latestBackupArchive() {
+  const dir = process.env.BACKUP_DIR || '/var/backups/hostpanel';
+  if (!existsSync(dir)) return null;
+  const files = readdirSync(dir)
+    .filter(name => name.endsWith('.tar.gz') || name.endsWith('.sql.gz'))
+    .map(name => {
+      const file = path.join(dir, name);
+      const stat = statSync(file);
+      return { file, mtimeMs: stat.mtimeMs };
+    })
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (!files.length) return null;
+  const latest = files[0];
+  return { file: latest.file, ageDays: Math.floor((Date.now() - latest.mtimeMs) / 86400000) };
+}
+
 function dispatchAlertNotification(event: string, payload: Record<string, any>, dedupeKey: string, now = Date.now()) {
   const lastTime = lastWebhookNotified[dedupeKey] || 0;
   if (now - lastTime <= NOTIFICATION_COOLDOWN_MS) return;
@@ -41,7 +59,7 @@ router.get('/rules', (_req: Request, res: Response) => {
 
 router.post('/rules', (req: Request, res: Response) => {
   const { metric, threshold, notify_email } = req.body;
-  const valid = ['cpu', 'memory', 'disk', 'load'];
+  const valid = ['cpu', 'memory', 'disk', 'load', 'backup_age'];
   if (!metric || !valid.includes(metric)) return res.status(400).json({ error: `metric must be one of: ${valid.join(', ')}` });
   try {
     const r = db.prepare('INSERT INTO alert_rules (metric, threshold, notify_email) VALUES (?, ?, ?)').run(metric, threshold ?? 80, notify_email || '');
@@ -105,6 +123,15 @@ router.get('/current', async (_req: Request, res: Response) => {
             alerts.push(alertObj);
             dispatchAlertNotification('system.disk_alert', { mount: disk.mount, value: pct, threshold: rule.threshold, severity, message: alertObj.message }, `disk:${rule.id}:${disk.mount}`);
           }
+        }
+      }
+      if (rule.metric === 'backup_age') {
+        const latest = latestBackupArchive();
+        if (latest && latest.ageDays >= rule.threshold) {
+          const severity = latest.ageDays >= Math.max(rule.threshold * 2, rule.threshold + 1) ? 'critical' : 'warning';
+          const alertObj = { id: rule.id, severity, metric: 'BackupAge', value: latest.ageDays, threshold: rule.threshold, file: latest.file, message: `Newest backup archive is ${latest.ageDays} day${latest.ageDays === 1 ? '' : 's'} old` };
+          alerts.push(alertObj);
+          dispatchAlertNotification('system.backup_stale', { file: latest.file, value: latest.ageDays, threshold: rule.threshold, severity, message: alertObj.message }, `backup_age:${rule.id}:${latest.file}`);
         }
       }
     }
