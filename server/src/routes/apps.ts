@@ -231,7 +231,7 @@ router.post('/:name/restart', adminOnly, async (req: Request, res: Response) => 
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/:name/logs', async (req: Request, res: Response) => {
+router.post('/:name/logs', adminOnly, async (req: Request, res: Response) => {
   if (!/^[a-zA-Z0-9_-]+$/.test(req.params.name)) return res.status(400).json({ error: 'Invalid app name' });
   if (pm2NotInstalled(res)) return;
   try {

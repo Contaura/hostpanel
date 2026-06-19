@@ -88,4 +88,19 @@ describe('app control background jobs', () => {
     expect(db.prepare('SELECT status FROM managed_apps WHERE name=?').get('api')).toMatchObject({ status: 'running' });
     expect(execFileMock).toHaveBeenCalledWith('pm2', ['start', '/srv/api/server.js', '--name', 'api', '--env-var', 'NODE_ENV=production', '--cwd', '/srv/api'], expect.any(Function));
   });
+
+
+  it('blocks reseller tokens from reading app process logs', async () => {
+    const appsRoute = (await import('./apps')).default;
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { (req as any).user = { username: 'reseller', role: 'reseller' }; next(); });
+    app.use('/api/apps', appsRoute);
+    const server = await listen(app); closeServer = server.close;
+
+    const res = await fetch(`${server.url}/api/apps/api/logs`, { method: 'POST' });
+
+    expect(res.status).toBe(403);
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
 });
