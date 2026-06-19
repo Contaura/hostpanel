@@ -150,6 +150,43 @@ describe('central background jobs API', () => {
     expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', archive], expect.objectContaining({ timeout: 120000 }));
   });
 
+  it('enqueues a disaster-recovery drill for the newest backup archive automatically', async () => {
+    const backup = (await import('./backup')).default;
+    const jobs = (await import('./jobs')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/backup', backup);
+    app.use('/api/jobs', jobs);
+    const server = await listen(app);
+    closeServer = server.close;
+
+    const backupDir = process.env.BACKUP_DIR!;
+    await fs.mkdir(backupDir, { recursive: true });
+    const olderArchive = path.join(backupDir, 'files_all_2024-01-01T00-00-00.tar.gz');
+    const newestArchive = path.join(backupDir, 'files_all_2024-01-02T00-00-00.tar.gz');
+    await fs.writeFile(olderArchive, 'old');
+    await fs.writeFile(newestArchive, 'newest');
+    await fs.utimes(olderArchive, new Date('2024-01-01T00:00:00Z'), new Date('2024-01-01T00:00:00Z'));
+    await fs.utimes(newestArchive, new Date('2024-01-02T00:00:00Z'), new Date('2024-01-02T00:00:00Z'));
+    runFileMock.mockImplementation(async (cmd: string, args: string[]) => {
+      if (cmd === 'tar' && args[0] === '-tzf' && args[1] === newestArchive) return { stdout: 'example.com/index.html\n', stderr: '' };
+      throw new Error(`unexpected command: ${cmd} ${args.join(' ')}`);
+    });
+
+    const started = await fetch(`${server.url}/api/backup/drill-latest`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ async: true }),
+    });
+
+    expect(started.status).toBe(202);
+    const body = await started.json();
+    expect(body.backup).toBe(path.basename(newestArchive));
+    const done = await waitFor(async () => (await fetch(`${server.url}/api/jobs/${body.jobId}`)).json(), j => j.status === 'completed');
+    expect(done.type).toBe('backup.drill');
+    expect(done.result.backup).toBe(path.basename(newestArchive));
+    expect(done.result.restorePlan.actions).toEqual(['Would restore example.com/index.html']);
+    expect(runFileMock).toHaveBeenCalledWith('tar', ['-tzf', newestArchive], expect.objectContaining({ timeout: 120000 }));
+  });
+
   it('lists disaster-recovery drill evidence without exposing restore internals beyond the verification summary', async () => {
     const backup = (await import('./backup')).default;
     const app = express();

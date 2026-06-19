@@ -78,6 +78,15 @@ function archiveIntegrity(file: string) {
   };
 }
 
+function latestBackupArchive(): string | null {
+  const dir = getBackupDir();
+  const files = readdirSync(dir)
+    .filter(f => f.endsWith('.tar.gz') || f.endsWith('.sql.gz'))
+    .map(f => ({ name: f, mtime: statSync(path.join(dir, f)).mtime.getTime() }))
+    .sort((a, b) => b.mtime - a.mtime);
+  return files[0]?.name || null;
+}
+
 async function tarEntries(file: string): Promise<string[]> {
   const { stdout } = await runFile('tar', ['-tzf', file], { timeout: 120000 });
   return stdout.split('\n').map(s => s.trim()).filter(safeArchiveEntry);
@@ -235,6 +244,17 @@ async function runRestoreDrill(name: string, body: any, ctx?: JobContext) {
   ctx?.log('Disaster-recovery restore drill completed', { backup: name, reportPath });
   return { ...report, reportPath };
 }
+
+router.post('/drill-latest', async (req: AuthRequest, res: Response) => {
+  const name = latestBackupArchive();
+  if (!name) return res.status(404).json({ error: 'No backup archives found' });
+  if (req.body?.async === true) {
+    const jobId = createBackgroundJob({ type: 'backup.drill', resource: name, metadata: { name, latest: true, ...req.body }, createdBy: req.user?.username || 'system' }, (ctx) => runRestoreDrill(name, req.body || {}, ctx));
+    return res.status(202).json({ jobId, statusUrl: `/api/jobs/${jobId}`, backup: name });
+  }
+  try { res.json(await runRestoreDrill(name, req.body || {})); }
+  catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
 
 router.post('/drill/:name', async (req: AuthRequest, res: Response) => {
   const name = safeFileName(req.params.name);
