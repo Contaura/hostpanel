@@ -60,8 +60,14 @@ router.put('/:id', superadminOnly, async (req: AuthRequest, res: Response) => {
 /* ── Delete admin ────────────────────────────────────────── */
 
 router.delete('/:id', superadminOnly, (req: AuthRequest, res: Response) => {
+  const current: any = db.prepare('SELECT id, role FROM admin_users WHERE id = ?').get(req.params.id);
+  if (!current) return res.status(404).json({ error: 'Admin user not found' });
   const count = (db.prepare('SELECT COUNT(*) as n FROM admin_users').get() as any).n;
   if (count <= 1) return res.status(400).json({ error: 'Cannot delete the last admin user' });
+  if (current.role === 'superadmin') {
+    const superadminCount = (db.prepare("SELECT COUNT(*) as n FROM admin_users WHERE role = 'superadmin'").get() as any).n;
+    if (superadminCount <= 1) return res.status(400).json({ error: 'Cannot delete the last superadmin user' });
+  }
   db.prepare('DELETE FROM admin_users WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });

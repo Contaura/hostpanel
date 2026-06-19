@@ -315,4 +315,28 @@ describe('superadmin-only route enforcement', () => {
     expect(body.username).toBe('newadmin');
     expect(body.role).toBe('admin');
   });
+
+  it('blocks deleting the final superadmin even when other admin users exist', async () => {
+    const { authenticateToken, blockPortalRoles } = await import('../middleware/auth');
+    const adminUsersRoute = (await import('./admin-users')).default;
+    const app = express();
+    app.use(express.json());
+    app.use('/api/admin-users', authenticateToken, blockPortalRoles, adminUsersRoute);
+    const server = await listen(app); closeServer = server.close;
+    const db = (await import('../db')).default;
+    const hash = await bcrypt.hash('password', 4);
+    const superadmin = db.prepare("INSERT INTO admin_users (username,email,password_hash,role) VALUES ('sup','sup@x.com',?,'superadmin')").run(hash);
+    db.prepare("INSERT INTO admin_users (username,email,password_hash,role) VALUES ('admin','admin@x.com',?,'admin')").run(hash);
+
+    const superToken = makeToken({ username: 'superadmin', role: 'superadmin' });
+    const res = await fetch(`${server.url}/api/admin-users/${superadmin.lastInsertRowid}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${superToken}` },
+    });
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/last superadmin/i);
+    const remaining = db.prepare("SELECT COUNT(*) as n FROM admin_users WHERE role = 'superadmin'").get() as any;
+    expect(remaining.n).toBe(1);
+  });
 });
