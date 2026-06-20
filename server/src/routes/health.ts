@@ -437,7 +437,9 @@ async function buildReadiness() {
   }
 
   const ok = Object.values(checks).every((c: any) => c.ok !== false);
-  return { ok, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), launchDeadline: launchDeadlineSummary(launchBlockers.length), launchBlockers, checks };
+  const launchBlockerCount = launchBlockers.length;
+  const launchReady = ok && launchBlockerCount === 0;
+  return { ok, launchReady, launchBlockerCount, service: SERVICE, version: version(), hostname: os.hostname(), uptime: Math.round(process.uptime()), startedAt: STARTED_AT, checkedAt: new Date().toISOString(), launchDeadline: launchDeadlineSummary(launchBlockerCount), launchBlockers, checks };
 }
 
 router.get('/readiness', async (_req: Request, res: Response) => {

@@ -609,6 +609,8 @@ describe('production health and readiness checks', () => {
         status: 'overdue_blocked',
         blockerCount: 7,
       });
+      expect(body.launchReady).toBe(false);
+      expect(body.launchBlockerCount).toBe(7);
       expect(body.launchBlockers).toEqual([
         expect.objectContaining({ code: 'admin_2fa_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/Enable TOTP/i), message: expect.stringMatching(/2FA/i) }),
         expect.objectContaining({ code: 'notification_webhook_missing', severity: 'manual', owner: 'Marcos', requiredEvidence: expect.stringMatching(/test notification/i), message: expect.stringMatching(/notification webhook/i) }),
