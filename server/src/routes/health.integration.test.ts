@@ -74,6 +74,90 @@ describe('production health and readiness checks', () => {
     }
   });
 
+  it('adds a production launch blocker when recent background jobs failed', async () => {
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevSshdConfig = process.env.SSHD_CONFIG_FILE;
+    const prevRequiredServices = process.env.READINESS_REQUIRED_SERVICES;
+    const prevBackupDir = process.env.BACKUP_DIR;
+    const prevDrillReportDir = process.env.DRILL_REPORT_DIR;
+    process.env.NODE_ENV = 'production';
+    process.env.READINESS_REQUIRED_SERVICES = '';
+    process.env.BACKUP_DIR = path.join(tmp, 'backups');
+    process.env.DRILL_REPORT_DIR = path.join(tmp, 'drills');
+    await fs.mkdir(process.env.BACKUP_DIR, { recursive: true });
+    await fs.mkdir(process.env.DRILL_REPORT_DIR, { recursive: true });
+    await fs.writeFile(path.join(process.env.BACKUP_DIR, 'files_all_2026-06-01T00-00-00.tar.gz'), 'backup');
+    await fs.writeFile(path.join(process.env.DRILL_REPORT_DIR, 'drill.json'), JSON.stringify({
+      success: true,
+      drill: true,
+      backup: 'files_all_2026-06-01T00-00-00.tar.gz',
+      verifiedAt: new Date().toISOString(),
+      archive: { exists: true, size: 6, sha256: 'a'.repeat(64) },
+      restorePlan: { dryRun: true, actions: [] },
+    }));
+    const sshdConfig = path.join(tmp, 'sshd_config');
+    await fs.writeFile(sshdConfig, 'PasswordAuthentication no\n');
+    process.env.SSHD_CONFIG_FILE = sshdConfig;
+    vi.doMock('child_process', () => ({
+      spawnSync: vi.fn((cmd: string, args: string[]) => {
+        if (cmd === 'systemctl' && args[0] === 'is-active') return { status: 0, stdout: 'active\n' };
+        if (cmd === 'sshd') return { status: 0, stdout: 'passwordauthentication no\n' };
+        return { status: 1, stdout: '', stderr: '' };
+      })
+    }));
+    vi.doMock('systeminformation', () => ({
+      default: {
+        fsSize: vi.fn().mockResolvedValue([{ mount: '/', use: 10, size: 1000, used: 100 }]),
+        mem: vi.fn().mockResolvedValue({ total: 1000, used: 400 }),
+        currentLoad: vi.fn().mockResolvedValue({ currentLoad: 20 }),
+      },
+    }));
+
+    await import('../background-jobs');
+    const db = (await import('../db')).default;
+    markBusinessLaunchEvidenceVerified(db);
+    db.prepare('DELETE FROM admin_users').run();
+    db.prepare("INSERT INTO admin_users (username, email, password_hash, role, totp_enabled) VALUES (?,?,?,?,?)")
+      .run('admin', 'admin@test.local', '$2b$12$xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'admin', 1);
+    db.prepare("INSERT INTO notification_webhooks (name, url, type, events, enabled) VALUES (?, ?, ?, ?, ?)")
+      .run('ops', 'https://alerts.example.test/webhook', 'webhook', JSON.stringify(['system.job_failed']), 1);
+    db.prepare("INSERT INTO alert_rules (metric, threshold, enabled) VALUES (?, ?, ?)").run('disk', 90, 1);
+    db.prepare("CREATE TABLE IF NOT EXISTS backup_schedules (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, target TEXT, cron TEXT, enabled INTEGER, created_at TEXT)").run();
+    db.prepare("INSERT INTO backup_schedules (type, target, cron, enabled, created_at) VALUES (?, ?, ?, 1, datetime('now'))")
+      .run('database', 'hostpanel', '0 3 * * *');
+    db.prepare("INSERT INTO background_jobs (type,status,resource,error,created_at,updated_at,completed_at) VALUES (?,?,?,?,datetime('now'),datetime('now'),datetime('now'))")
+      .run('app.install', 'failed', 'example-app', 'install failed');
+
+    const health = (await import('./health')).default;
+    const app = express();
+    app.use('/api/health', health);
+    const server = await listen(app);
+    try {
+      const res = await fetch(`${server.url}/api/health/readiness`);
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.launchBlockers).toEqual([
+        expect.objectContaining({
+          code: 'recent_background_job_failures',
+          severity: 'manual',
+          owner: 'Ron',
+          message: expect.stringMatching(/1 recent background job failure/i),
+        }),
+      ]);
+    } finally {
+      await server.close();
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevSshdConfig === undefined) delete process.env.SSHD_CONFIG_FILE;
+      else process.env.SSHD_CONFIG_FILE = prevSshdConfig;
+      if (prevRequiredServices === undefined) delete process.env.READINESS_REQUIRED_SERVICES;
+      else process.env.READINESS_REQUIRED_SERVICES = prevRequiredServices;
+      if (prevBackupDir === undefined) delete process.env.BACKUP_DIR;
+      else process.env.BACKUP_DIR = prevBackupDir;
+      if (prevDrillReportDir === undefined) delete process.env.DRILL_REPORT_DIR;
+      else process.env.DRILL_REPORT_DIR = prevDrillReportDir;
+    }
+  });
+
   it('includes a security advisory when no admin has 2FA enabled in production', async () => {
     const prev = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';

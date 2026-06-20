@@ -210,6 +210,7 @@ type ManualLaunchBlockerCode =
   | 'backup_evidence_stale'
   | 'off_server_backup_replication_missing'
   | 'nightly_database_backup_schedule_missing'
+  | 'recent_background_job_failures'
   | 'tls_cert_expiring';
 
 const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: string; requiredEvidence: string }> = {
@@ -225,6 +226,7 @@ const MANUAL_LAUNCH_BLOCKER_EVIDENCE: Record<ManualLaunchBlockerCode, { owner: s
   backup_evidence_stale: { owner: 'Ron + Marcos', requiredEvidence: 'Create a fresh backup archive and verify off-server replication before launch.' },
   off_server_backup_replication_missing: { owner: 'Marcos', requiredEvidence: 'Provide off-server backup replication evidence from S3, B2, or equivalent storage for the latest HostPanel backup archive.' },
   nightly_database_backup_schedule_missing: { owner: 'Ron + Marcos', requiredEvidence: 'Configure an enabled database backup schedule and verify the first archive before launch.' },
+  recent_background_job_failures: { owner: 'Ron', requiredEvidence: 'Inspect and resolve recent failed background jobs, then rerun /api/health/readiness.' },
   tls_cert_expiring: { owner: 'Ron', requiredEvidence: 'Renew expiring TLS certificates and verify HTTPS handshakes before launch.' },
 };
 
@@ -282,6 +284,12 @@ async function buildReadiness() {
 
   try {
     const failures = recentFailedJobs();
+    if (process.env.NODE_ENV === 'production' && failures.length > 0) {
+      launchBlockers.push(manualLaunchBlocker(
+        'recent_background_job_failures',
+        `${failures.length} recent background job failure${failures.length === 1 ? '' : 's'} must be investigated before launch.`
+      ));
+    }
     checks.recentFailedJobs = { ok: failures.length === 0, failures };
   } catch (err: any) {
     checks.recentFailedJobs = { ok: false, error: err.message, failures: [] };
