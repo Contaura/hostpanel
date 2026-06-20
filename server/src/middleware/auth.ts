@@ -51,6 +51,10 @@ export function blockPortalRoles(req: AuthRequest, res: Response, next: NextFunc
     res.status(403).json({ error: 'Portal role tokens are not permitted on admin API routes' });
     return;
   }
+  if (!role || !['superadmin', 'admin', 'reseller', 'readonly'].includes(role)) {
+    res.status(403).json({ error: 'Unknown role tokens are not permitted on admin API routes' });
+    return;
+  }
   next();
 }
 

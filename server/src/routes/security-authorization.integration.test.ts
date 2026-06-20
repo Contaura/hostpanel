@@ -144,6 +144,18 @@ describe('admin API portal-role isolation', () => {
     expect((await res.json()).error).toMatch(/portal/i);
   });
 
+  it('rejects validly signed JWTs with unknown roles before admin handlers run', async () => {
+    const server = await buildAdminApp(); closeServer = server.close;
+    const unknownRoleToken = makeToken({ username: 'mystery', role: 'support_agent' });
+
+    const res = await fetch(`${server.url}/api/settings`, {
+      headers: { authorization: `Bearer ${unknownRoleToken}` },
+    });
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/unknown|role|admin/i);
+  });
+
   it('rejects a client portal JWT from billing write routes (data exfiltration path)', async () => {
     const { authenticateToken, blockPortalRoles } = await import('../middleware/auth');
     const billingRoute = (await import('./billing')).default;
