@@ -82,6 +82,7 @@ describe('production launch checklist', () => {
     expect(report).toContain('# HostPanel Production Launch Report');
     expect(report).toMatch(/\*\*Commit:\*\* `[0-9a-f]{7,40}`/);
     expect(report).toContain('Latest verified production deployment');
+    expect(report).toMatch(/Latest revalidation: 2026-06-20T\d{2}:\d{2}:\d{2}Z/);
     expect(report).toContain('Final delivery report supersedes this document if this document changes in the same deployment commit.');
     expect(report).toContain('/healthz: 200 OK');
     expect(report).toContain('/api/health/readiness: 200 OK');

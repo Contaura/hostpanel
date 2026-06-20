@@ -9,6 +9,8 @@ Deadline status: Automated platform verification completed before 2026-06-09 23:
 
 ## Latest verified production deployment
 
+Latest revalidation: 2026-06-20T10:49:30Z.
+
 Live production verification was run against `root@45.79.189.4:/root/hostpanel` using key-only SSH. Final delivery report supersedes this document if this document changes in the same deployment commit.
 
 ## Verification Results
