@@ -144,7 +144,7 @@ curl -sf https://panel.contaura.com/healthz
 
 # 6. Authenticated readiness check (requires admin JWT; do not paste real token into docs/tickets)
 ADMIN_JWT="paste-admin-jwt-here"
-curl -sf -H "Authorization: Bearer ${ADMIN_JWT}" http://localhost:3001/api/health/readiness
+curl -sf -H "Authorization: Bearer $ADMIN_JWT" http://localhost:3001/api/health/readiness
 
 # 7. SSH password auth check
 sshd -T | grep passwordauthentication   # → passwordauthentication no

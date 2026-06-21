@@ -8,10 +8,14 @@ const comparisonPath = resolve(process.cwd(), '..', 'docs/cpanel-comparison.md')
 const launchReportPath = resolve(process.cwd(), '..', 'docs/14-production-launch-report.md');
 const installScriptPath = resolve(process.cwd(), '..', 'install.sh');
 const dq = String.fromCharCode(34);
-const authHeader = 'Authorization: Bearer ${ADMIN_JWT}';
+const bearerPrefix = 'Authorization: ' + 'Bearer ';
+const redactedAuthHeader = bearerPrefix + '*'.repeat(3);
+const launchChecklistAuthHeader = bearerPrefix + '$' + 'ADMIN_JWT';
 const healthCurl = (endpoint: 'readiness' | 'live') =>
-  ['curl -sf -H ', dq, authHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
-const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN|\$\{AUTH_TOKEN\})\s+http:\/\/localhost:3001\/api\/health\//;
+  ['curl -sf -H ', dq, launchChecklistAuthHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
+const launchChecklistHealthCurl = (endpoint: 'readiness' | 'live') =>
+  ['curl -sf -H ', dq, launchChecklistAuthHeader, dq, ' http://localhost:3001/api/health/', endpoint].join('');
+const malformedLocalHealthHeader = /Bearer (?:\*\*\*|TOKEN|AUTH_TOKEN|\$\{AUTH_TOKEN\}|\$ADMIN_JWT)\s+http:\/\/localhost:3001\/api\/health\//;
 
 describe('operations runbook command examples', () => {
   it('documents authenticated health curls with closed Authorization headers', () => {
@@ -37,7 +41,7 @@ describe('production launch checklist', () => {
   it('requires readiness verification and names owners for every manual launch blocker', () => {
     const checklist = readFileSync(launchChecklistPath, 'utf8');
 
-    expect(checklist).toContain(healthCurl('readiness'));
+    expect(checklist).toContain(launchChecklistHealthCurl('readiness'));
     expect(checklist).toMatch(/\| Manual blocker \| Owner \| Launch-day evidence required \|/);
     expect(checklist).toMatch(/\| External uptime monitor \| Marcos \|/);
     expect(checklist).toMatch(/\| Automated nightly database backup \| Ron \+ Marcos \|/);
@@ -54,9 +58,11 @@ describe('production launch checklist', () => {
     const launchDaySequence = checklist.split('## 8. Launch Day Verification Sequence')[1] || '';
     const readinessCurl = launchDaySequence.split('\n').find(line => line.trim().startsWith('curl ') && line.includes('/api/health/readiness')) || '';
 
-    expect(checklist).toContain(healthCurl('readiness'));
-    expect(readinessCurl).toBe(healthCurl('readiness'));
+    expect(checklist).toContain(launchChecklistHealthCurl('readiness'));
+    expect(readinessCurl).toBe(launchChecklistHealthCurl('readiness'));
     expect(readinessCurl.split(dq).length - 1).toBe(2);
+    expect(readinessCurl).toContain('$' + 'ADMIN_JWT');
+    expect(readinessCurl).not.toContain(redactedAuthHeader);
     expect(checklist).not.toMatch(malformedLocalHealthHeader);
   });
 
